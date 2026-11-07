@@ -1,0 +1,8 @@
+[package]
+name = "sango-item"
+version.workspace = true
+edition.workspace = true
+description = "The item editor of Sango Studio."
+
+[dependencies]
+sango-ui.workspace = true

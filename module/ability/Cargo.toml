@@ -1,0 +1,8 @@
+[package]
+name = "sango-ability"
+version.workspace = true
+edition.workspace = true
+description = "The ability editor of Sango Studio."
+
+[dependencies]
+sango-ui.workspace = true

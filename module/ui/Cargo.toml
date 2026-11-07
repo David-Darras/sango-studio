@@ -1,0 +1,9 @@
+[package]
+name = "sango-ui"
+version.workspace = true
+edition.workspace = true
+description = "White theme, widgets and the trait of a module of Sango Studio."
+
+[dependencies]
+eframe.workspace = true
+sango-core.workspace = true

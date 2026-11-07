@@ -1,0 +1,8 @@
+[package]
+name = "sango-pokemon"
+version.workspace = true
+edition.workspace = true
+description = "The pokemon editor of Sango Studio."
+
+[dependencies]
+sango-ui.workspace = true

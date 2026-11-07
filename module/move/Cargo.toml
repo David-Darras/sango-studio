@@ -1,0 +1,8 @@
+[package]
+name = "sango-move"
+version.workspace = true
+edition.workspace = true
+description = "The move editor of Sango Studio."
+
+[dependencies]
+sango-ui.workspace = true

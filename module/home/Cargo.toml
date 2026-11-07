@@ -1,0 +1,10 @@
+[package]
+name = "sango-home"
+version.workspace = true
+edition.workspace = true
+description = "The start page of Sango Studio: the dump of the game."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true

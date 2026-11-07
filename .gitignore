@@ -1,0 +1,41 @@
+# Rust build output
+/target
+**/*.rs.bk
+
+# IDEs
+/.idea
+/.vscode
+*.iml
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Game data: never in the repository
+/private
+/dump
+/romfs
+/exefs
+*.garc
+*.cro
+*.cia
+*.3ds
+*.cxi
+*.cfa
+*.3dsx
+*.bch
+*.bclim
+*.bcfnt
+*.bcres
+*.bcwav
+*.bcstm
+*.bfstm
+
+# What the editor writes for the game
+/sdmc
+/export

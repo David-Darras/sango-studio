@@ -1,0 +1,8 @@
+[package]
+name = "sango-type"
+version.workspace = true
+edition.workspace = true
+description = "The type editor of Sango Studio."
+
+[dependencies]
+sango-ui.workspace = true

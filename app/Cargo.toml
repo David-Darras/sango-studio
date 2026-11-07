@@ -1,0 +1,16 @@
+[package]
+name = "sango-studio"
+version.workspace = true
+edition.workspace = true
+description = "Studio for Pokemon Alpha Sapphire, version 1.4 only."
+
+[dependencies]
+eframe.workspace = true
+sango-core.workspace = true
+sango-ui.workspace = true
+sango-home.workspace = true
+sango-pokemon.workspace = true
+sango-item.workspace = true
+sango-move.workspace = true
+sango-ability.workspace = true
+sango-type.workspace = true
