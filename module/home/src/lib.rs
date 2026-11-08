@@ -38,39 +38,40 @@ pub struct Home {
 /// Returns true when the user asks to use the folder.
 fn folder_card(ui: &mut egui::Ui, title: &str, text: &str, hint: &str, picker: &str, field: &mut Field, state: State) -> bool {
     let mut apply = false;
-    widget::card(ui, |ui| {
-        ui.set_width(680.0_f32.min(ui.available_width()));
-        ui.label(widget::title(title));
-        ui.label(widget::hint(text));
-        ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            let edit = ui.add(egui::TextEdit::singleline(&mut field.text).desired_width(ui.available_width() - 120.0).hint_text(hint));
-            if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                apply = true;
-            }
-            if ui.button("Browse...").clicked() {
-                if let Some(folder) = rfd::FileDialog::new().set_title(picker).pick_folder() {
-                    field.text = folder.to_string_lossy().to_string();
+    ui.push_id(title, |ui| {
+        widget::card(ui, |ui| {
+            ui.set_width(680.0_f32.min(ui.available_width()));
+            ui.label(widget::title(title));
+            ui.label(widget::hint(text));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let edit = ui.add(egui::TextEdit::singleline(&mut field.text).desired_width(ui.available_width() - 120.0).hint_text(hint));
+                if edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     apply = true;
                 }
+                if widget::button(ui, "Browse...") {
+                    if let Some(folder) = rfd::FileDialog::new().set_title(picker).pick_folder() {
+                        field.text = folder.to_string_lossy().to_string();
+                        apply = true;
+                    }
+                }
+            });
+            if widget::button_styled(ui, egui::RichText::new("Use this folder").color(color::WHITE), Some(color::ACCENT)) {
+                apply = true;
+            }
+            ui.add_space(6.0);
+            match state {
+                State::Refused(message) => {
+                    widget::badge(ui, "Not usable", color::ROSE);
+                    ui.label(widget::hint(message));
+                }
+                State::Found(path) => {
+                    widget::badge(ui, "Ready", color::GREEN);
+                    ui.label(widget::hint(path));
+                }
+                State::Empty => widget::badge(ui, "Missing", color::AMBER),
             }
         });
-        let open = egui::Button::new(egui::RichText::new("Use this folder").color(color::WHITE)).fill(color::ACCENT);
-        if ui.add(open).clicked() {
-            apply = true;
-        }
-        ui.add_space(6.0);
-        match state {
-            State::Refused(message) => {
-                widget::badge(ui, "Not usable", color::ROSE);
-                ui.label(widget::hint(message));
-            }
-            State::Found(path) => {
-                widget::badge(ui, "Ready", color::GREEN);
-                ui.label(widget::hint(path));
-            }
-            State::Empty => widget::badge(ui, "Missing", color::AMBER),
-        }
     });
     apply
 }
@@ -138,5 +139,34 @@ impl Module for Home {
         if apply {
             self.sd.error = session.set_sd(&self.sd.text).err();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn home_renders_and_registers_buttons() {
+        let mut home = Home::default();
+        let mut session = Session::default();
+        session.focus_page = true;
+        let ctx = egui::Context::default();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                home.ui(ui, &mut session);
+            });
+        });
+
+        // Next frame: update_navigation will have the Browse and Use buttons
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                widget::set_page_focus(ctx, true);
+                widget::update_navigation(ui);
+                home.ui(ui, &mut session);
+                assert!(widget::active_id(ui).is_some());
+            });
+        });
     }
 }

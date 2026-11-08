@@ -206,7 +206,7 @@ impl Species {
                     widget::set_active_id(ui, species_id);
                 }
 
-                widget::register_focusable(ui, species_id);
+                widget::register_focusable(ui, species_id, button_response.rect);
                 let popup_res = egui::popup::popup_below_widget(
                     ui,
                     popup_id,
@@ -311,6 +311,14 @@ impl Species {
                     if open_key {
                         ui.memory_mut(|m| m.open_popup(popup_id));
                     }
+                    ui.input_mut(|i| {
+                        let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
+                            - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
+                        if step != 0 {
+                            let total = names::SPECIES.len() as isize;
+                            self.species = (self.species as isize + step).clamp(1, total) as usize;
+                        }
+                    });
                 }
                 let forms = self.form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
@@ -328,7 +336,7 @@ impl Species {
                     }
                 });
                 let form_id = form_combo.response.id;
-                widget::register_focusable(ui, form_id);
+                widget::register_focusable(ui, form_id, form_combo.response.rect);
                 if form_combo.response.clicked() {
                     widget::set_active_id(ui, form_id);
                 }
@@ -456,7 +464,7 @@ fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f32) 
         }
     });
     let menu_id = combo.response.id;
-    widget::register_focusable(ui, menu_id);
+    widget::register_focusable(ui, menu_id, combo.response.rect);
     if combo.response.clicked() {
         widget::set_active_id(ui, menu_id);
     }
@@ -496,16 +504,50 @@ fn group(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(10.0);
 }
 
+fn stat_line(ui: &mut egui::Ui, label: &str, value: &mut u8) {
+    ui.label(widget::hint(label));
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        widget::stat_bar(ui, value, 255.0);
+        number(ui, value, 255.0);
+    });
+    ui.end_row();
+}
+
 fn group_statistics(ui: &mut egui::Ui, d: &mut SpeciesData) {
-    group(ui, &format!("Base statistics (total {})", d.base_total()), |ui| {
+    group(ui, "Base stats", |ui| {
         grid("stats").show(ui, |ui| {
-            line(ui, "HP", |ui| number(ui, &mut d.base_hp, 255.0));
-            line(ui, "Attack", |ui| number(ui, &mut d.base_attack, 255.0));
-            line(ui, "Defense", |ui| number(ui, &mut d.base_defense, 255.0));
-            line(ui, "Special Attack", |ui| number(ui, &mut d.base_special_attack, 255.0));
-            line(ui, "Special Defense", |ui| number(ui, &mut d.base_special_defense, 255.0));
-            line(ui, "Speed", |ui| number(ui, &mut d.base_speed, 255.0));
+            stat_line(ui, "HP", &mut d.base_hp);
+            stat_line(ui, "Attack", &mut d.base_attack);
+            stat_line(ui, "Defense", &mut d.base_defense);
+            stat_line(ui, "Special Attack", &mut d.base_special_attack);
+            stat_line(ui, "Special Defense", &mut d.base_special_defense);
+            stat_line(ui, "Speed", &mut d.base_speed);
         });
+
+        ui.add_space(10.0);
+        egui::Frame::none()
+            .fill(color::SURFACE)
+            .stroke(egui::Stroke::new(1.0_f32, color::BORDER))
+            .rounding(egui::Rounding::same(8.0))
+            .inner_margin(egui::Margin::symmetric(10.0, 8.0))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.columns(3, |columns| {
+                    columns[0].vertical_centered(|ui| {
+                        ui.label(widget::hint("Total"));
+                        ui.label(egui::RichText::new(format!("{}", d.base_total())).strong().size(15.0));
+                    });
+                    columns[1].vertical_centered(|ui| {
+                        ui.label(widget::hint("Average"));
+                        ui.label(egui::RichText::new(format!("{:.1}", d.base_average())).strong().size(15.0));
+                    });
+                    columns[2].vertical_centered(|ui| {
+                        ui.label(widget::hint("Std Dev"));
+                        ui.label(egui::RichText::new(format!("{:.1}", d.base_standard_deviation())).strong().size(15.0));
+                    });
+                });
+            });
     });
 }
 
@@ -571,7 +613,7 @@ fn group_machines(ui: &mut egui::Ui, d: &mut SpeciesData) {
             for (i, word) in d.technical_moves.iter_mut().enumerate() {
                 line(ui, &format!("Bits {} to {}", i * 32, i * 32 + 31), |ui| {
                     let r = ui.add(egui::DragValue::new(word).hexadecimal(8, false, true).speed(1.0));
-                    widget::register_focusable(ui, r.id);
+                    widget::register_focusable(ui, r.id, r.rect);
                     if r.clicked() || r.dragged() || r.has_focus() {
                         widget::set_active_id(ui, r.id);
                     }
@@ -675,38 +717,52 @@ impl Module for Species {
         }
         self.top_bar(ui, session);
         ui.add_space(8.0);
-        let tabs_id = ui.make_persistent_id("species_tabs");
-        widget::register_focusable(ui, tabs_id);
+        let mut clicked_tab = None;
         ui.horizontal_wrapped(|ui| {
             for (i, name) in TABS.iter().enumerate() {
+                let tab_id = egui::Id::new(format!("species_tab_{i}"));
+                let is_active_tab = widget::is_active(ui, tab_id);
+                if is_active_tab && self.tab != i {
+                    self.tab = i;
+                }
                 let chosen = self.tab == i;
                 let r = ui.selectable_label(chosen, *name);
+                widget::register_focusable(ui, tab_id, r.rect);
+                ui.ctx().data_mut(|d| d.insert_temp(tab_id.with("is_button"), true));
                 if r.clicked() {
-                    self.tab = i;
-                    widget::set_active_id(ui, tabs_id);
+                    clicked_tab = Some((i, tab_id));
                 }
-                if chosen && widget::is_active(ui, tabs_id) && widget::page_has_focus(ui) {
+                if is_active_tab && widget::page_has_focus(ui) {
                     widget::glow(ui, r.rect, 6.0);
                 }
             }
         });
-        if widget::is_active(ui, tabs_id) && widget::page_has_focus(ui) {
-            ui.input_mut(|i| {
-                let mut step: isize = 0;
-                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
-                    || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-                {
-                    step += 1;
-                }
-                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
-                    || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
-                {
-                    step -= 1;
-                }
-                if step != 0 {
-                    self.tab = (self.tab as isize + step).clamp(0, TABS.len() as isize - 1) as usize;
-                }
-            });
+        if let Some((i, tab_id)) = clicked_tab {
+            self.tab = i;
+            widget::set_active_id(ui, tab_id);
+            ui.ctx().request_repaint();
+        }
+
+        // Global tab-cycle shortcuts: Ctrl+PageDown / Ctrl+PageUp
+        let (next_tab, prev_tab) = ui.input_mut(|i| {
+            let next = (i.modifiers.ctrl || i.modifiers.command)
+                && (i.consume_key(egui::Modifiers::CTRL, egui::Key::PageDown)
+                    || i.consume_key(egui::Modifiers::COMMAND, egui::Key::PageDown));
+            let prev = (i.modifiers.ctrl || i.modifiers.command)
+                && (i.consume_key(egui::Modifiers::CTRL, egui::Key::PageUp)
+                    || i.consume_key(egui::Modifiers::COMMAND, egui::Key::PageUp));
+            (next, prev)
+        });
+        if next_tab && self.tab + 1 < TABS.len() {
+            self.tab += 1;
+            let tab_id = egui::Id::new(format!("species_tab_{}", self.tab));
+            widget::set_active_id(ui, tab_id);
+            ui.ctx().request_repaint();
+        } else if prev_tab && self.tab > 0 {
+            self.tab -= 1;
+            let tab_id = egui::Id::new(format!("species_tab_{}", self.tab));
+            widget::set_active_id(ui, tab_id);
+            ui.ctx().request_repaint();
         }
         ui.add_space(6.0);
         match (self.tab, self.data.as_mut()) {

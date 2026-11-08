@@ -58,6 +58,10 @@ pub fn missing_card(ui: &mut egui::Ui, message: &str) {
         badge(ui, "Folders needed", color::ROSE);
         ui.add_space(4.0);
         ui.label(hint(message));
+        ui.add_space(8.0);
+        if button_styled(ui, egui::RichText::new("Go to Home").color(color::WHITE), Some(color::ACCENT)) {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sango_switch_module"), 0usize));
+        }
     });
 }
 
@@ -76,6 +80,10 @@ pub fn placeholder(ui: &mut egui::Ui, name: &str, text: &str, session: &sango_co
         badge(ui, "Not started", color::AMBER);
         ui.add_space(4.0);
         ui.label(hint("..."));
+        ui.add_space(8.0);
+        if button_styled(ui, egui::RichText::new("Go to Home").color(color::WHITE), Some(color::ACCENT)) {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sango_switch_module"), 0usize));
+        }
     });
 }
 
@@ -84,9 +92,23 @@ const ACTIVE_WIDGET_KEY: &str = "sango_active_widget";
 const PAGE_FOCUS_KEY: &str = "sango_page_focus";
 const FOCUSABLE_WIDGETS_KEY: &str = "sango_focusable_widgets";
 const FOCUSABLE_WIDGETS_NEXT_KEY: &str = "sango_focusable_widgets_next";
-const EDITING_KEY: &str = "sango_is_editing";
-const EDIT_BACKUP_KEY: &str = "sango_edit_backup";
 const SCROLL_TO_ACTIVE_KEY: &str = "sango_scroll_to_active";
+
+/// A focusable widget representation with its ID and screen-space bounding rectangle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FocusableWidget {
+    pub id: egui::Id,
+    pub rect: egui::Rect,
+}
+
+/// Navigation direction for 2D spatial movement across the layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Direction {
+    Up,
+    Down,
+    Left,
+    Right,
+}
 
 /// Requests that the active widget be scrolled into view.
 pub fn request_scroll_to_active(ui: &egui::Ui) {
@@ -112,6 +134,25 @@ pub fn scroll_active_into_view(ui: &egui::Ui, response: &egui::Response) {
     }
 }
 
+const REQUEST_SIDEBAR_FOCUS_KEY: &str = "sango_request_sidebar_focus";
+
+/// Requests that keyboard focus be returned to the sidebar.
+pub fn request_sidebar_focus(ctx: &egui::Context) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(REQUEST_SIDEBAR_FOCUS_KEY), true));
+}
+
+/// Checks and consumes the request to return focus to the sidebar.
+pub fn take_sidebar_focus_request(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| {
+        let key = egui::Id::new(REQUEST_SIDEBAR_FOCUS_KEY);
+        let req = d.get_temp::<bool>(key).unwrap_or(false);
+        if req {
+            d.remove::<bool>(key);
+        }
+        req
+    })
+}
+
 /// Sets whether the page currently has focus (false when side bar has focus).
 pub fn set_page_focus(ctx: &egui::Context, focus: bool) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::new(PAGE_FOCUS_KEY), focus));
@@ -122,40 +163,38 @@ pub fn page_has_focus(ui: &egui::Ui) -> bool {
     ui.data(|d| d.get_temp(egui::Id::new(PAGE_FOCUS_KEY)).unwrap_or(true))
 }
 
-/// Returns true if any field on the page is currently in Edit Mode.
-pub fn is_editing(ui: &egui::Ui) -> bool {
-    is_editing_ctx(ui.ctx())
+/// Returns false (Edit Mode is no longer required; values are adjusted directly).
+#[inline]
+pub fn is_editing(_ui: &egui::Ui) -> bool {
+    false
 }
 
-/// Returns true if any field is in Edit Mode, from Context directly.
-pub fn is_editing_ctx(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp(egui::Id::new(EDITING_KEY)).unwrap_or(false))
+/// Returns false (Edit Mode is no longer required; values are adjusted directly).
+#[inline]
+pub fn is_editing_ctx(_ctx: &egui::Context) -> bool {
+    false
 }
 
-/// Sets whether the active field is in Edit Mode.
-pub fn set_editing(ui: &egui::Ui, editing: bool) {
-    set_editing_ctx(ui.ctx(), editing);
-}
+/// No-op stub maintained for compatibility.
+#[inline]
+pub fn set_editing(_ui: &egui::Ui, _editing: bool) {}
 
-/// Sets whether the active field is in Edit Mode, from Context directly.
-pub fn set_editing_ctx(ctx: &egui::Context, editing: bool) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(EDITING_KEY), editing));
-}
+/// No-op stub maintained for compatibility.
+#[inline]
+pub fn set_editing_ctx(_ctx: &egui::Context, _editing: bool) {}
 
-/// Cancels Edit Mode and clears the backup value.
-pub fn cancel_editing(ui: &egui::Ui) {
-    set_editing(ui, false);
-    ui.data_mut(|d| d.remove::<f64>(egui::Id::new(EDIT_BACKUP_KEY)));
-}
+/// No-op stub maintained for compatibility.
+#[inline]
+pub fn cancel_editing(_ui: &egui::Ui) {}
 
-/// Stores the value before editing so it can be restored on Escape.
-pub fn set_edit_backup(ui: &egui::Ui, value: f64) {
-    ui.data_mut(|d| d.insert_temp(egui::Id::new(EDIT_BACKUP_KEY), value));
-}
+/// No-op stub maintained for compatibility.
+#[inline]
+pub fn set_edit_backup(_ui: &egui::Ui, _value: f64) {}
 
-/// Returns the backup value stored when Edit Mode began.
-pub fn edit_backup(ui: &egui::Ui) -> Option<f64> {
-    ui.data(|d| d.get_temp(egui::Id::new(EDIT_BACKUP_KEY)))
+/// No-op stub maintained for compatibility.
+#[inline]
+pub fn edit_backup(_ui: &egui::Ui) -> Option<f64> {
+    None
 }
 
 /// Returns the ID of the widget that currently has focus on the page.
@@ -173,31 +212,124 @@ pub fn is_active(ui: &egui::Ui, id: egui::Id) -> bool {
     active_id(ui) == Some(id)
 }
 
-/// Registers a widget as focusable in the current frame.
-pub fn register_focusable(ui: &egui::Ui, id: egui::Id) {
+/// Registers a widget as focusable with its bounding rectangle for 2D spatial navigation.
+pub fn register_focusable(ui: &egui::Ui, id: egui::Id, rect: egui::Rect) {
     ui.ctx().data_mut(|d| {
         let key = egui::Id::new(FOCUSABLE_WIDGETS_NEXT_KEY);
-        let list = d.get_temp_mut_or_default::<Vec<egui::Id>>(key);
-        if !list.contains(&id) {
-            list.push(id);
+        let list = d.get_temp_mut_or_default::<Vec<FocusableWidget>>(key);
+        if let Some(item) = list.iter_mut().find(|w| w.id == id) {
+            item.rect = rect;
+        } else {
+            list.push(FocusableWidget { id, rect });
         }
     });
 }
 
-/// Transfers the focusable widgets collected in the previous frame and handles
-/// Tab, Shift+Tab, ArrowUp, and ArrowDown navigation between widgets when not in Edit Mode.
-pub fn update_navigation(ui: &mut egui::Ui) {
-    if !page_has_focus(ui) {
-        return;
+/// Registers a focusable widget by ID only (falls back to zero rect).
+pub fn register_focusable_id(ui: &egui::Ui, id: egui::Id) {
+    register_focusable(ui, id, egui::Rect::ZERO);
+}
+
+/// Finds the best spatial neighbor in the given direction from the current widget.
+pub fn find_spatial_neighbor(
+    widgets: &[FocusableWidget],
+    current: &FocusableWidget,
+    dir: Direction,
+) -> Option<FocusableWidget> {
+    let cur = current.rect;
+    let c_cur = cur.center();
+
+    let mut best: Option<(f32, FocusableWidget)> = None;
+
+    for &cand in widgets {
+        if cand.id == current.id {
+            continue;
+        }
+        let r = cand.rect;
+        let c_cand = r.center();
+        let dx = c_cand.x - c_cur.x;
+        let dy = c_cand.y - c_cur.y;
+
+        let overlap_y = (cur.bottom().min(r.bottom()) - cur.top().max(r.top())).max(0.0);
+        let overlap_x = (cur.right().min(r.right()) - cur.left().max(r.left())).max(0.0);
+
+        let eligible = match dir {
+            Direction::Right => dx > 4.0 && (overlap_y > 0.0 || (r.left() >= cur.right() && dx > dy.abs() * 2.0)),
+            Direction::Left => dx < -4.0 && (overlap_y > 0.0 || (r.right() <= cur.left() && (-dx) > dy.abs() * 2.0)),
+            Direction::Down => dy > 4.0 && (overlap_x > 0.0 || dy > dx.abs() * 0.3),
+            Direction::Up => dy < -4.0 && (overlap_x > 0.0 || (-dy) > dx.abs() * 0.3),
+        };
+
+        if !eligible {
+            continue;
+        }
+
+        let score = match dir {
+            Direction::Right => {
+                let overlap_y = (cur.bottom().min(r.bottom()) - cur.top().max(r.top())).max(0.0);
+                let dy_effective = if overlap_y > 0.0 {
+                    (c_cand.y - c_cur.y).abs() * 0.2
+                } else {
+                    (r.top() - cur.bottom()).max(cur.top() - r.bottom()).max(0.0)
+                        + (c_cand.y - c_cur.y).abs() * 0.5
+                };
+                (r.left() - cur.right()).max(0.0) + dx * 0.1 + 3.0 * dy_effective
+            }
+            Direction::Left => {
+                let overlap_y = (cur.bottom().min(r.bottom()) - cur.top().max(r.top())).max(0.0);
+                let dy_effective = if overlap_y > 0.0 {
+                    (c_cand.y - c_cur.y).abs() * 0.2
+                } else {
+                    (r.top() - cur.bottom()).max(cur.top() - r.bottom()).max(0.0)
+                        + (c_cand.y - c_cur.y).abs() * 0.5
+                };
+                (cur.left() - r.right()).max(0.0) + (-dx) * 0.1 + 3.0 * dy_effective
+            }
+            Direction::Down => {
+                let overlap_x = (cur.right().min(r.right()) - cur.left().max(r.left())).max(0.0);
+                let dx_effective = if overlap_x > 0.0 {
+                    (c_cand.x - c_cur.x).abs() * 0.2
+                } else {
+                    (r.left() - cur.right()).max(cur.left() - r.right()).max(0.0)
+                        + (c_cand.x - c_cur.x).abs() * 0.5
+                };
+                (r.top() - cur.bottom()).max(0.0) + dy * 0.1 + 3.0 * dx_effective
+            }
+            Direction::Up => {
+                let overlap_x = (cur.right().min(r.right()) - cur.left().max(r.left())).max(0.0);
+                let dx_effective = if overlap_x > 0.0 {
+                    (c_cand.x - c_cur.x).abs() * 0.2
+                } else {
+                    (r.left() - cur.right()).max(cur.left() - r.right()).max(0.0)
+                        + (c_cand.x - c_cur.x).abs() * 0.5
+                };
+                (cur.top() - r.bottom()).max(0.0) + (-dy) * 0.1 + 3.0 * dx_effective
+            }
+        };
+
+        if best.as_ref().map_or(true, |(best_score, _)| score < *best_score) {
+            best = Some((score, cand));
+        }
     }
 
-    let widgets: Vec<egui::Id> = ui.ctx().data_mut(|d| {
+    best.map(|(_, cand)| cand)
+}
+
+/// Transfers the focusable widgets collected in the previous frame and handles
+/// Ctrl+Arrow (2D spatial navigation) and Tab / Shift+Tab (linear navigation).
+/// Plain arrow keys are preserved for directly adjusting values on the active widget.
+pub fn update_navigation(ui: &mut egui::Ui) {
+    let widgets: Vec<FocusableWidget> = ui.ctx().data_mut(|d| {
         let next_key = egui::Id::new(FOCUSABLE_WIDGETS_NEXT_KEY);
         let cur_key = egui::Id::new(FOCUSABLE_WIDGETS_KEY);
-        let next = d.get_temp::<Vec<egui::Id>>(next_key).unwrap_or_default();
-        d.insert_temp(cur_key, next.clone());
-        d.remove::<Vec<egui::Id>>(next_key);
-        next
+        let next = d.get_temp::<Vec<FocusableWidget>>(next_key).unwrap_or_default();
+        if !next.is_empty() {
+            d.insert_temp(cur_key, next.clone());
+            d.remove::<Vec<FocusableWidget>>(next_key);
+            next
+        } else {
+            d.get_temp::<Vec<FocusableWidget>>(cur_key).unwrap_or_default()
+        }
     });
 
     if widgets.is_empty() {
@@ -205,55 +337,133 @@ pub fn update_navigation(ui: &mut egui::Ui) {
     }
 
     let mut current_id = active_id(ui);
-    if current_id.is_none() || !widgets.contains(&current_id.unwrap()) {
-        set_active_id(ui, widgets[0]);
-        current_id = Some(widgets[0]);
+    if current_id.is_none() || !widgets.iter().any(|w| Some(w.id) == current_id) {
+        set_active_id(ui, widgets[0].id);
+        current_id = Some(widgets[0].id);
+        ui.ctx().request_repaint();
     }
 
-    // Only navigate between fields when NOT in Edit Mode:
-    if !is_editing(ui) {
-        let mut step: isize = 0;
+    if !page_has_focus(ui) {
+        return;
+    }
+
+    let is_button = current_id.map_or(false, |id| {
+        ui.ctx().data(|d| d.get_temp::<bool>(id.with("is_button")).unwrap_or(false))
+    });
+
+    let handles_arrows = current_id.map_or(false, |id| {
+        ui.ctx().data(|d| d.get_temp::<bool>(id.with("handles_arrows")).unwrap_or(false))
+    });
+
+    // 1. Check for 2D spatial navigation via Ctrl+Arrow (or Cmd+Arrow on macOS):
+    let mut nav_dir = None;
+    if !handles_arrows {
         ui.input_mut(|i| {
-            if i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
-                || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
-            {
-                step += 1;
+            for mods in [egui::Modifiers::CTRL, egui::Modifiers::COMMAND] {
+                if nav_dir.is_none() && i.consume_key(mods, egui::Key::ArrowRight) {
+                    nav_dir = Some(Direction::Right);
+                }
+                if nav_dir.is_none() && i.consume_key(mods, egui::Key::ArrowLeft) {
+                    nav_dir = Some(Direction::Left);
+                }
+                if nav_dir.is_none() && i.consume_key(mods, egui::Key::ArrowDown) {
+                    nav_dir = Some(Direction::Down);
+                }
+                if nav_dir.is_none() && i.consume_key(mods, egui::Key::ArrowUp) {
+                    nav_dir = Some(Direction::Up);
+                }
             }
-            if i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab)
-                || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
-            {
-                step -= 1;
+            // If the active widget is a button (does not adjust values directly), plain arrows also navigate:
+            if is_button && !i.modifiers.shift && !i.modifiers.alt && !i.modifiers.ctrl && !i.modifiers.command {
+                if nav_dir.is_none() && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                    nav_dir = Some(Direction::Down);
+                }
+                if nav_dir.is_none() && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                    nav_dir = Some(Direction::Up);
+                }
+                if nav_dir.is_none() && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
+                    nav_dir = Some(Direction::Right);
+                }
             }
         });
+    }
 
-        if step != 0 {
-            if let Some(pos) = widgets.iter().position(|&id| Some(id) == current_id) {
-                let count = widgets.len() as isize;
-                let next = ((pos as isize + step).rem_euclid(count)) as usize;
-                set_active_id(ui, widgets[next]);
+    if let Some(dir) = nav_dir {
+        if let Some(cur) = widgets.iter().find(|w| Some(w.id) == current_id) {
+            if let Some(neighbor) = find_spatial_neighbor(&widgets, cur, dir) {
+                set_active_id(ui, neighbor.id);
                 request_scroll_to_active(ui);
+                ui.ctx().request_repaint();
+                return;
+            } else if dir == Direction::Left && cur.rect.is_positive() {
+                // Moving left from the leftmost element on the page returns to the sidebar
+                request_sidebar_focus(ui.ctx());
+                return;
+            } else if !cur.rect.is_positive() {
+                // Fallback for widgets without valid bounding rects:
+                let step: isize = match dir {
+                    Direction::Down | Direction::Right => 1,
+                    Direction::Up | Direction::Left => -1,
+                };
+                if let Some(pos) = widgets.iter().position(|w| Some(w.id) == current_id) {
+                    let count = widgets.len() as isize;
+                    let next = ((pos as isize + step).rem_euclid(count)) as usize;
+                    set_active_id(ui, widgets[next].id);
+                    request_scroll_to_active(ui);
+                    ui.ctx().request_repaint();
+                    return;
+                }
             }
+        }
+    }
+
+    // 2. When on the leftmost element of the page, pressing plain ArrowLeft also returns to the sidebar
+    // (unless typing in a text field, or if the active widget handles horizontal navigation like tabs):
+    if !ui.ctx().wants_keyboard_input() {
+        if let Some(cur) = widgets.iter().find(|w| Some(w.id) == current_id) {
+            if cur.rect.is_positive() && find_spatial_neighbor(&widgets, cur, Direction::Left).is_none() {
+                let handles_left = ui.ctx().data(|d| d.get_temp::<bool>(cur.id.with("handles_left")).unwrap_or(false));
+                if !handles_left {
+                    let pressed_left = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft));
+                    if pressed_left {
+                        request_sidebar_focus(ui.ctx());
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Sequential navigation via Tab / Shift+Tab:
+    let mut step: isize = 0;
+    ui.input_mut(|i| {
+        if i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) {
+            step += 1;
+        }
+        if i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab) {
+            step -= 1;
+        }
+    });
+
+    if step != 0 {
+        if let Some(pos) = widgets.iter().position(|w| Some(w.id) == current_id) {
+            let count = widgets.len() as isize;
+            let next = ((pos as isize + step).rem_euclid(count)) as usize;
+            set_active_id(ui, widgets[next].id);
+            request_scroll_to_active(ui);
         }
     }
 }
 
-/// A glow around a rectangle.
-/// In Navigate Mode: soft pulsing accent indigo.
-/// In Edit Mode: faster pulsing emerald green.
+/// A glow around a rectangle to highlight the currently active widget.
 pub fn glow(ui: &egui::Ui, rect: egui::Rect, rounding: f32) {
-    let editing = is_editing(ui);
     let time = ui.input(|i| i.time) as f32;
-    let speed = if editing { 4.5 } else { 2.6 };
-    let pulse = 0.5 + 0.5 * (time * speed).sin();
+    let pulse = 0.5 + 0.5 * (time * 2.8).sin();
     let strength = 0.2 + 0.8 * pulse;
     for layer in 0..4 {
         let grow = 1.0 + layer as f32 * 1.6;
         let alpha = (strength * (170.0 - 38.0 * layer as f32)) as u8;
-        let colour = if editing {
-            egui::Color32::from_rgba_unmultiplied(16, 185, 129, alpha)
-        } else {
-            egui::Color32::from_rgba_unmultiplied(79, 70, 229, alpha)
-        };
+        let colour = egui::Color32::from_rgba_unmultiplied(79, 70, 229, alpha);
         ui.painter().rect_stroke(rect.expand(grow), Rounding::same(rounding + grow), Stroke::new(1.6_f32, colour));
     }
     ui.ctx().request_repaint();
@@ -308,21 +518,21 @@ pub fn button(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> bool {
 
 /// A styled button that can be focused with keyboard navigation. Pressing Enter or Space clicks it.
 pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill: Option<egui::Color32>) -> bool {
-    let id = ui.next_auto_id();
-    register_focusable(ui, id);
-
     let mut b = egui::Button::new(text);
     if let Some(c) = fill {
         b = b.fill(c);
     }
     let response = ui.add(b);
+    let id = response.id;
+    register_focusable(ui, id, response.rect);
+    ui.ctx().data_mut(|d| d.insert_temp(id.with("is_button"), true));
 
     if response.clicked() {
         set_active_id(ui, id);
     }
 
     let mut clicked = response.clicked();
-    if is_active(ui, id) && page_has_focus(ui) && !is_editing(ui) {
+    if is_active(ui, id) && page_has_focus(ui) {
         glow(ui, response.rect, 6.0);
         scroll_active_into_view(ui, &response);
         let press = ui.input_mut(|i| {
@@ -336,14 +546,13 @@ pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill:
     clicked
 }
 
-/// A number field with two arrow buttons. In Navigate Mode, Enter enters Edit Mode.
-/// In Edit Mode, arrow keys increment/decrement, direct typing changes the value, Enter confirms,
-/// and Escape cancels and restores the previous value.
+/// A number field with two arrow buttons. When active, plain ArrowUp and ArrowDown
+/// directly increment and decrement the value without requiring an edit mode.
+/// Holding Shift steps by 10. PageUp and PageDown step by 10.
 pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64, max: f64) -> bool {
     let before = value.to_f64();
     let mut delta = 0.0;
     let id = ui.next_auto_id();
-    register_focusable(ui, id);
 
     let res = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -359,6 +568,7 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
 
     let (drag_response, up_steps, down_steps) = res.inner;
     let total_rect = res.response.rect;
+    register_focusable(ui, id, total_rect);
 
     let clicked = drag_response.clicked()
         || drag_response.dragged()
@@ -369,61 +579,29 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
 
     if clicked {
         set_active_id(ui, id);
-        if !is_editing(ui) {
-            set_editing(ui, true);
-            set_edit_backup(ui, value.to_f64());
-        }
     }
 
     if is_active(ui, id) && page_has_focus(ui) {
         glow(ui, total_rect, 4.0);
         scroll_active_into_view(ui, &res.response);
 
-        if !is_editing(ui) {
-            // Navigate Mode: Enter enters Edit Mode
-            let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-            if enter {
-                set_editing(ui, true);
-                set_edit_backup(ui, value.to_f64());
-                drag_response.request_focus();
-                request_scroll_to_active(ui);
+        // Arrow keys directly increment/decrement values without any edit mode
+        ui.input_mut(|i| {
+            for (modifiers, unit) in [(egui::Modifiers::SHIFT, 10.0), (egui::Modifiers::NONE, 1.0)] {
+                if i.consume_key(modifiers, egui::Key::ArrowUp) {
+                    delta += unit;
+                }
+                if i.consume_key(modifiers, egui::Key::ArrowDown) {
+                    delta -= unit;
+                }
             }
-        } else {
-            // Edit Mode:
-            // 1. Esc cancels and restores backup
-            let esc = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            if esc {
-                if let Some(backup) = edit_backup(ui) {
-                    *value = T::from_f64(backup);
-                }
-                ui.data_mut(|d| d.remove::<String>(drag_response.id));
-                cancel_editing(ui);
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                delta += 10.0;
             }
-
-            // 2. Enter confirms and leaves Edit Mode
-            let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-            if enter {
-                set_editing(ui, false);
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                delta -= 10.0;
             }
-
-            // 3. Arrow keys increment/decrement
-            ui.input_mut(|i| {
-                for (modifiers, unit) in [(egui::Modifiers::SHIFT, 10.0), (egui::Modifiers::NONE, 1.0)] {
-                    if i.consume_key(modifiers, egui::Key::ArrowUp) {
-                        delta += unit;
-                    }
-                    if i.consume_key(modifiers, egui::Key::ArrowDown) {
-                        delta -= unit;
-                    }
-                }
-                if i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
-                    delta += 10.0;
-                }
-                if i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
-                    delta -= 10.0;
-                }
-            });
-        }
+        });
     }
 
     let unit = if ui.input(|i| i.modifiers.shift) { 10.0 } else { 1.0 };
@@ -435,6 +613,111 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
         ui.data_mut(|d| d.remove::<String>(drag_response.id));
     }
     value.to_f64() != before
+}
+
+/// Returns the stat tier color based on the exact Coup Critique / Smogon thresholds:
+/// - < 50: Red (#db2828) - Very Low
+/// - 50..=74: Orange (#ef6e33) - Low
+/// - 75..=99: Yellow (#fbbd08) - Average
+/// - 100..=124: Olive (#b5cc18) - Good
+/// - 125..=149: Green (#21ba45) - Very Good
+/// - 150..=179: Teal / Cyan (#00b5ad) - Exceptional
+/// - 180..=255: Blue (#4571e6) - Legendary / Maximum
+pub fn stat_color(val: f32) -> egui::Color32 {
+    let v = val.round() as i32;
+    match v {
+        ..=49 => egui::Color32::from_rgb(219, 40, 40),      // Red (#db2828)
+        50..=74 => egui::Color32::from_rgb(239, 110, 51),   // Orange (#ef6e33)
+        75..=99 => egui::Color32::from_rgb(251, 189, 8),    // Yellow (#fbbd08)
+        100..=124 => egui::Color32::from_rgb(181, 204, 24), // Olive (#b5cc18)
+        125..=149 => egui::Color32::from_rgb(33, 186, 69),  // Green (#21ba45)
+        150..=179 => egui::Color32::from_rgb(0, 181, 173),  // Teal (#00b5ad)
+        _ => egui::Color32::from_rgb(69, 113, 230),         // Blue (#4571e6)
+    }
+}
+
+/// A Pokemon Showdown-like horizontal stat bar.
+///
+/// Draws a smooth horizontal bar whose fill and color reflect the stat value:
+/// from red at 0, through orange, yellow, green, and cyan/blue at the maximum (255).
+/// Features a circular grab handle and click/drag interaction.
+pub fn stat_bar<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, max: f64) -> egui::Response {
+    let width = 150.0;
+    let bar_height = 10.0;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 32.0), egui::Sense::click_and_drag());
+
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    let track_margin = 6.0_f32;
+    let track_rect = egui::Rect::from_center_size(rect.center(), egui::vec2(width - 2.0 * track_margin, bar_height));
+
+    if response.clicked() || response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let ratio = ((pos.x - track_rect.left()) / track_rect.width()).clamp(0.0, 1.0);
+            *value = T::from_f64((ratio as f64 * max).round());
+        }
+    }
+
+    let rounding = Rounding::same(bar_height / 2.0);
+
+    // Track background and border
+    ui.painter().rect_filled(track_rect, rounding, color::SURFACE_STRONG);
+    ui.painter().rect_stroke(track_rect, rounding, Stroke::new(1.0_f32, color::BORDER));
+
+    // Filled portion
+    let val_f64 = value.to_f64();
+    let ratio = (val_f64 / max).clamp(0.0, 1.0) as f32;
+    let color = stat_color(val_f64 as f32);
+
+    if ratio > 0.0 {
+        let fill_w = (ratio * track_rect.width()).round().max(bar_height / 2.0).min(track_rect.width());
+        let filled_rect = egui::Rect::from_min_size(track_rect.min, egui::vec2(fill_w, track_rect.height()));
+        let fill_rounding = Rounding::same((bar_height / 2.0).min(fill_w / 2.0));
+        ui.painter().rect_filled(filled_rect, fill_rounding, color);
+    }
+
+    // Draggable circular handle (thumb)
+    let handle_x = (track_rect.left() + ratio * track_rect.width()).clamp(track_rect.left(), track_rect.right());
+    let handle_center = egui::pos2(handle_x, track_rect.center().y);
+    let radius = if response.dragged() {
+        7.5
+    } else if response.hovered() {
+        7.0
+    } else {
+        6.0
+    };
+
+    // Subtle glow on hover or drag
+    if response.hovered() || response.dragged() {
+        ui.painter().circle_filled(
+            handle_center,
+            radius + 3.0,
+            egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 40),
+        );
+    }
+
+    // Shadow
+    ui.painter().circle_filled(
+        handle_center + egui::vec2(0.0, 1.0),
+        radius + 0.5,
+        egui::Color32::from_black_alpha(25),
+    );
+    // White knob
+    ui.painter().circle_filled(handle_center, radius, color::WHITE);
+    // Colored border
+    ui.painter().circle_stroke(handle_center, radius, Stroke::new(2.0_f32, color));
+
+    response.on_hover_ui(|ui| {
+        ui.label(format!("{} / {}", val_f64.round() as i64, max as i64));
+    })
+}
+
+/// A view-only Pokemon Showdown-like horizontal stat bar.
+pub fn stat_bar_view(ui: &mut egui::Ui, value: f32, max: f32) -> egui::Response {
+    let mut temp = value;
+    stat_bar(ui, &mut temp, max as f64)
 }
 
 #[cfg(test)]
@@ -504,7 +787,6 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
-                set_editing(ui, true);
                 spin(ui, &mut hp, 0.0, 255.0);
             });
         });
@@ -529,7 +811,6 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
-                set_editing(ui, true);
                 spin(ui, &mut catch_rate, 0.0, 255.0);
             });
         });
@@ -538,15 +819,15 @@ mod test {
     }
 
     #[test]
-    fn spin_enters_edit_mode_on_enter() {
+    fn spin_steps_by_ten_with_shift_arrow() {
         let ctx = egui::Context::default();
         let mut raw_input = egui::RawInput::default();
         raw_input.events.push(egui::Event::Key {
-            key: egui::Key::Enter,
+            key: egui::Key::ArrowUp,
             physical_key: None,
             pressed: true,
             repeat: false,
-            modifiers: egui::Modifiers::NONE,
+            modifiers: egui::Modifiers::SHIFT,
         });
 
         let mut hp: u8 = 45;
@@ -554,38 +835,80 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
-                assert!(!is_editing(ui));
                 spin(ui, &mut hp, 0.0, 255.0);
-                assert!(is_editing(ui));
             });
         });
+
+        assert_eq!(hp, 55);
     }
 
     #[test]
-    fn spin_cancels_edit_and_restores_backup_on_escape() {
-        let ctx = egui::Context::default();
-        let mut raw_input = egui::RawInput::default();
-        raw_input.events.push(egui::Event::Key {
-            key: egui::Key::Escape,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        });
+    fn spatial_navigation_picks_closest_neighbor() {
+        let top_left = FocusableWidget {
+            id: egui::Id::new("w_top_left"),
+            rect: egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(80.0, 30.0)),
+        };
+        let top_right = FocusableWidget {
+            id: egui::Id::new("w_top_right"),
+            rect: egui::Rect::from_min_size(egui::pos2(300.0, 100.0), egui::vec2(80.0, 30.0)),
+        };
+        let bottom_left = FocusableWidget {
+            id: egui::Id::new("w_bottom_left"),
+            rect: egui::Rect::from_min_size(egui::pos2(100.0, 200.0), egui::vec2(80.0, 30.0)),
+        };
+        let bottom_right = FocusableWidget {
+            id: egui::Id::new("w_bottom_right"),
+            rect: egui::Rect::from_min_size(egui::pos2(300.0, 200.0), egui::vec2(80.0, 30.0)),
+        };
 
-        let mut hp: u8 = 99;
-        let _ = ctx.run(raw_input, |ctx| {
+        let list = vec![top_left, top_right, bottom_left, bottom_right];
+
+        // Moving right from top_left goes to top_right
+        assert_eq!(find_spatial_neighbor(&list, &top_left, Direction::Right), Some(top_right));
+        // Moving down from top_left goes to bottom_left
+        assert_eq!(find_spatial_neighbor(&list, &top_left, Direction::Down), Some(bottom_left));
+        // Moving left from top_right goes to top_left
+        assert_eq!(find_spatial_neighbor(&list, &top_right, Direction::Left), Some(top_left));
+        // Moving up from bottom_left goes to top_left
+        assert_eq!(find_spatial_neighbor(&list, &bottom_left, Direction::Up), Some(top_left));
+        // Moving down from top_right goes to bottom_right
+        assert_eq!(find_spatial_neighbor(&list, &top_right, Direction::Down), Some(bottom_right));
+        // Moving left from bottom_right goes to bottom_left
+        assert_eq!(find_spatial_neighbor(&list, &bottom_right, Direction::Left), Some(bottom_left));
+    }
+
+    #[test]
+    fn ctrl_arrow_navigates_spatially() {
+        let ctx = egui::Context::default();
+        let id_left = egui::Id::new("elem_left");
+        let id_right = egui::Id::new("elem_right");
+
+        // Frame 1: register widgets
+        let _ = ctx.run(Default::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let id = ui.next_auto_id();
-                set_active_id(ui, id);
-                set_editing(ui, true);
-                set_edit_backup(ui, 45.0);
-                spin(ui, &mut hp, 0.0, 255.0);
-                assert!(!is_editing(ui));
+                register_focusable(ui, id_left, egui::Rect::from_min_size(egui::pos2(50.0, 100.0), egui::vec2(60.0, 30.0)));
+                register_focusable(ui, id_right, egui::Rect::from_min_size(egui::pos2(250.0, 100.0), egui::vec2(60.0, 30.0)));
+                set_active_id(ui, id_left);
             });
         });
 
-        assert_eq!(hp, 45);
+        // Frame 2: press Ctrl + ArrowRight
+        let mut raw_input = egui::RawInput::default();
+        raw_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+
+        let _ = ctx.run(raw_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                set_page_focus(ctx, true);
+                update_navigation(ui);
+                assert_eq!(active_id(ui), Some(id_right));
+            });
+        });
     }
 
     #[test]
@@ -606,11 +929,48 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
-                set_editing(ui, true);
                 spin(ui, &mut hp, 0.0, 255.0);
             });
         });
 
         assert_eq!(hp, 45);
     }
+
+    #[test]
+    fn stat_color_follows_spectrum() {
+        let red = stat_color(45.0);
+        assert_eq!(red, egui::Color32::from_rgb(219, 40, 40));
+
+        let orange = stat_color(65.0);
+        assert_eq!(orange, egui::Color32::from_rgb(239, 110, 51));
+
+        let yellow = stat_color(80.0);
+        assert_eq!(yellow, egui::Color32::from_rgb(251, 189, 8));
+
+        let olive = stat_color(100.0);
+        assert_eq!(olive, egui::Color32::from_rgb(181, 204, 24));
+
+        let green = stat_color(130.0);
+        assert_eq!(green, egui::Color32::from_rgb(33, 186, 69));
+
+        let teal = stat_color(159.0);
+        assert_eq!(teal, egui::Color32::from_rgb(0, 181, 173));
+
+        let blue = stat_color(200.0);
+        assert_eq!(blue, egui::Color32::from_rgb(69, 113, 230));
+    }
+
+    #[test]
+    fn stat_bar_renders_and_responds_to_click() {
+        let ctx = egui::Context::default();
+        let mut hp: u8 = 50;
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                stat_bar(ui, &mut hp, 255.0);
+            });
+        });
+        assert_eq!(hp, 50);
+    }
 }
+

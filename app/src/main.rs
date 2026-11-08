@@ -42,8 +42,16 @@ impl App {
             ui.label(widget::hint("Created By ZettaD"));
             ui.add_space(14.0);
             for (i, module) in self.modules.iter().enumerate() {
-                if widget::side_button(ui, module.icon(), module.title(), i == self.current).clicked() {
+                let selected = i == self.current;
+                let response = widget::side_button(ui, module.icon(), module.title(), selected);
+                if response.clicked() {
                     self.current = i;
+                    self.side_bar_focus = true;
+                    ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+                    ctx.request_repaint();
+                }
+                if selected && self.side_bar_focus {
+                    widget::glow(ui, response.rect, 10.0);
                 }
             }
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
@@ -71,27 +79,51 @@ impl App {
 
         if self.side_bar_focus {
             if !ctx.wants_keyboard_input() {
-                let step: isize = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown) as isize - i.key_pressed(egui::Key::ArrowUp) as isize);
+                let step: isize = ctx.input_mut(|i| {
+                    let mut s = 0isize;
+                    for mods in [egui::Modifiers::NONE, egui::Modifiers::CTRL, egui::Modifiers::COMMAND] {
+                        if i.consume_key(mods, egui::Key::ArrowDown) {
+                            s += 1;
+                        }
+                        if i.consume_key(mods, egui::Key::ArrowUp) {
+                            s -= 1;
+                        }
+                    }
+                    s
+                });
                 if step != 0 {
-                    self.current = (self.current as isize + step).clamp(0, self.modules.len() as isize - 1) as usize;
+                    self.current = ((self.current as isize + step).rem_euclid(self.modules.len() as isize)) as usize;
+                    ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+                    ctx.request_repaint();
                 }
                 let enter_page = ctx.input_mut(|i| {
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                         || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+                        || i.consume_key(egui::Modifiers::CTRL, egui::Key::ArrowRight)
+                        || i.consume_key(egui::Modifiers::COMMAND, egui::Key::ArrowRight)
                 });
                 if enter_page {
                     self.side_bar_focus = false;
+                    ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+                    ctx.request_repaint();
                 }
             }
         } else {
-            let is_editing = widget::is_editing_ctx(ctx);
-            let return_sidebar = ctx.input_mut(|i| {
-                (!is_editing && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+            let key_return = ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                     || i.consume_key(egui::Modifiers::NONE, egui::Key::F6)
             });
-            if return_sidebar {
+            if key_return || widget::take_sidebar_focus_request(ctx) {
                 self.side_bar_focus = true;
+                ctx.request_repaint();
             }
+        }
+
+        if let Some(target) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new("sango_switch_module"))) {
+            self.current = target;
+            self.side_bar_focus = false;
+            ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+            ctx.request_repaint();
         }
 
         self.session.focus_page = !self.side_bar_focus;
@@ -99,10 +131,25 @@ impl App {
         self.side_bar(ctx);
         let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(18.0));
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+            widget::update_navigation(ui);
             if let Some(module) = self.modules.get_mut(self.current) {
                 module.ui(ui, &mut self.session);
             }
         });
+
+        if widget::take_sidebar_focus_request(ctx) {
+            self.side_bar_focus = true;
+            self.session.focus_page = false;
+            widget::set_page_focus(ctx, false);
+            ctx.request_repaint();
+        }
+
+        if let Some(target) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new("sango_switch_module"))) {
+            self.current = target;
+            self.side_bar_focus = false;
+            ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+            ctx.request_repaint();
+        }
     }
 }
 
@@ -162,5 +209,389 @@ mod test {
                 });
             }
         }
+    }
+
+    #[test]
+    fn sidebar_wraps_around_up_and_down() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 0,
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: true,
+        };
+
+        let ctx = egui::Context::default();
+
+        // 1. ArrowUp on Home (0) wraps to Type (6)
+        let mut up_input = egui::RawInput::default();
+        up_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(up_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert_eq!(app.current, 6);
+
+        // 2. ArrowDown on Type (6) wraps to Home (0)
+        let mut down_input = egui::RawInput::default();
+        down_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(down_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert_eq!(app.current, 0);
+    }
+
+    #[test]
+    fn entering_home_page_with_arrow_right_focuses_browse_button() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 0,
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: true,
+        };
+
+        let ctx = egui::Context::default();
+
+        // Frame 1: render Home so buttons register
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert!(app.side_bar_focus);
+
+        // Frame 2: press ArrowRight to enter page
+        let mut right_input = egui::RawInput::default();
+        right_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(right_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+
+        assert!(!app.side_bar_focus);
+        assert!(app.session.focus_page);
+        let active = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert!(active.is_some());
+
+        // Frame 3: normal idle frame
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert!(!app.side_bar_focus);
+        assert!(app.session.focus_page);
+        let active3 = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert_eq!(active, active3);
+    }
+
+    #[test]
+    fn arrow_down_navigates_between_home_buttons() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 0,
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: false,
+        };
+        let ctx = egui::Context::default();
+
+        // Frame 1: register widgets into next
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+        // Frame 2: transfer widgets to cur and set initial active widget
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+        let first_active = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert!(first_active.is_some());
+
+        // Frame 3: press ArrowDown to navigate to the "Use this folder" button
+        let mut down_input = egui::RawInput::default();
+        down_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(down_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        let second_active = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert!(second_active.is_some());
+        assert_ne!(first_active, second_active);
+    }
+
+    #[test]
+    fn archive_missing_card_has_focusable_go_to_home_button() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 1, // Archive module
+            session: Session::default(), // No dump loaded -> missing
+            frames: 10,
+            side_bar_focus: false,
+        };
+        let ctx = egui::Context::default();
+
+        // Frame 1: render archive page with missing_card
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+
+        // Frame 2: verify active widget is set on the "Go to Home" button
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+        let active = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert!(active.is_some());
+
+        // Pressing Enter activates "Go to Home" and switches module to Home (0)
+        let mut enter_input = egui::RawInput::default();
+        enter_input.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(enter_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert_eq!(app.current, 0);
+    }
+
+    #[test]
+    fn exiting_species_page_with_arrow_left_returns_to_sidebar() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 2,
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: false,
+        };
+
+        let ctx = egui::Context::default();
+
+        // Frame 1: render species page so widgets are registered
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert!(!app.side_bar_focus);
+
+        // Frame 2: press ArrowLeft
+        let mut left_input = egui::RawInput::default();
+        left_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(left_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+
+        assert!(app.side_bar_focus);
+        assert!(!app.session.focus_page);
+    }
+
+    #[test]
+    fn sidebar_navigates_with_ctrl_arrows_and_enters_page() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 0,
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: true,
+        };
+
+        let ctx = egui::Context::default();
+
+        // 1. Ctrl + ArrowDown moves from 0 (Home) to 1 (Archive)
+        let mut down_input = egui::RawInput::default();
+        down_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let _ = ctx.run(down_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert_eq!(app.current, 1);
+        assert!(app.side_bar_focus);
+
+        // 2. Ctrl + ArrowUp moves from 1 (Archive) to 0 (Home)
+        let mut up_input = egui::RawInput::default();
+        up_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let _ = ctx.run(up_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert_eq!(app.current, 0);
+        assert!(app.side_bar_focus);
+
+        // 3. Ctrl + ArrowRight enters the page
+        let mut enter_input = egui::RawInput::default();
+        enter_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let _ = ctx.run(enter_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert!(!app.side_bar_focus);
+        assert!(app.session.focus_page);
+    }
+
+    #[test]
+    fn ctrl_arrow_navigates_between_species_tabs() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 2, // Species module
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: false,
+        };
+
+        let ctx = egui::Context::default();
+
+        // Frame 1: initial render to register tab widgets
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+
+        // Frame 2: transfer widgets and set active to tab 0 ("General")
+        let tab0_id = egui::Id::new("species_tab_0");
+        let tab1_id = egui::Id::new("species_tab_1");
+        let _ = ctx.run(Default::default(), |ctx| {
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_active_widget"), tab0_id));
+            app.update_ctx(ctx);
+        });
+
+        // Frame 3: press Ctrl + ArrowRight to move to tab 1 ("Movepool")
+        let mut right_input = egui::RawInput::default();
+        right_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowRight,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let _ = ctx.run(right_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        let active = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert_eq!(active, Some(tab1_id));
+
+        // Frame 4: press Ctrl + ArrowLeft to move back to tab 0 ("General")
+        let mut left_input = egui::RawInput::default();
+        left_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let _ = ctx.run(left_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        let active_back = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        assert_eq!(active_back, Some(tab0_id));
+
+        // Frame 5: press Ctrl + ArrowLeft from leftmost tab 0 returns to sidebar
+        let mut left_sidebar_input = egui::RawInput::default();
+        left_sidebar_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowLeft,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::CTRL,
+        });
+        let _ = ctx.run(left_sidebar_input, |ctx| {
+            app.update_ctx(ctx);
+        });
+        assert!(app.side_bar_focus);
+        assert!(!app.session.focus_page);
     }
 }

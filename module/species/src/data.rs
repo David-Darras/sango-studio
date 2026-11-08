@@ -155,9 +155,29 @@ impl SpeciesData {
         out
     }
 
-    /// The sum of the six base statistics.
+    /// An array of the six base stats.
+    pub fn base_stats(&self) -> [u8; 6] {
+        [self.base_hp, self.base_attack, self.base_defense, self.base_speed, self.base_special_attack, self.base_special_defense]
+    }
+
+    /// The sum of the six base stats.
     pub fn base_total(&self) -> u32 {
-        [self.base_hp, self.base_attack, self.base_defense, self.base_speed, self.base_special_attack, self.base_special_defense].iter().map(|&v| v as u32).sum()
+        self.base_stats().iter().map(|&v| v as u32).sum()
+    }
+
+    /// The arithmetic mean of the six base stats.
+    pub fn base_average(&self) -> f32 {
+        self.base_total() as f32 / 6.0
+    }
+
+    /// The standard deviation of the six base stats (population standard deviation).
+    pub fn base_standard_deviation(&self) -> f32 {
+        let mean = self.base_average();
+        let variance = self.base_stats().iter().map(|&v| {
+            let diff = v as f32 - mean;
+            diff * diff
+        }).sum::<f32>() / 6.0;
+        variance.sqrt()
     }
 }
 
@@ -179,6 +199,8 @@ mod test {
         let d = SpeciesData::from_bytes(&IVYSAUR).unwrap();
         assert_eq!((d.base_hp, d.base_attack, d.base_defense, d.base_speed, d.base_special_attack, d.base_special_defense), (60, 62, 63, 60, 80, 80));
         assert_eq!(d.base_total(), 405);
+        assert!((d.base_average() - 67.5).abs() < 1e-4);
+        assert!((d.base_standard_deviation() - 8.9022).abs() < 1e-3);
         assert_eq!(d.types, [11, 3]); // Grass and Poison
         assert_eq!(d.capture_rate, 45);
         assert_eq!(d.gender, 31);
