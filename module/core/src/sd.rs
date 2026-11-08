@@ -3,6 +3,14 @@ use std::path::{Component, Path, PathBuf};
 /// The name of the folder that Sango Studio uses inside the folder `sdmc` of the emulator.
 pub const SD_FOLDER_NAME: &str = "sango-studio";
 
+/// The file that tells the plugin that something changed.
+pub const RELOAD_FILE: &str = "reload.bin";
+const RELOAD_SIGNATURE: &[u8; 4] = b"SREL";
+/// The size of one path in the file `reload.bin`.
+const RELOAD_PATH_SIZE: usize = 64;
+/// The most paths in the file `reload.bin`. The oldest one goes first.
+const RELOAD_MAX_PATHS: usize = 256;
+
 /// The folder of the SD card where Sango Studio puts the files that it changed.
 ///
 /// The romfs dump is read only. A file that the user changes goes here, and the plugin loads it
@@ -68,6 +76,61 @@ impl SdCard {
         Ok(path)
     }
 
+    /// Tells the plugin that a file changed, so that it loads the file again while the game runs.
+    ///
+    /// The plugin looks at the file `reload.bin` of the folder a few times each second. The file has:
+    ///
+    /// | Size | Meaning |
+    /// | --- | --- |
+    /// | 4 | The signature `SREL`. |
+    /// | 4 | The counter. It grows by one each time that a file changes. |
+    /// | 4 | The number of paths. |
+    /// | 64 each | A path in the folder, like `pokemon/data/2_0.bin`, filled with zeros. |
+    ///
+    /// The plugin loads all the listed files again when the counter changes. Write the data file
+    /// first, then call this function: the counter is the last thing that changes.
+    pub fn mark_changed(&self, relative: &str) -> Result<(), String> {
+        if relative.len() >= RELOAD_PATH_SIZE {
+            return Err(format!("The path {relative} is too long."));
+        }
+        let (mut counter, mut paths) = self.reload_state();
+        if !paths.iter().any(|p| p == relative) {
+            if paths.len() >= RELOAD_MAX_PATHS {
+                paths.remove(0);
+            }
+            paths.push(relative.to_string());
+        }
+        counter = counter.wrapping_add(1);
+        let mut bytes = Vec::with_capacity(12 + paths.len() * RELOAD_PATH_SIZE);
+        bytes.extend_from_slice(RELOAD_SIGNATURE);
+        bytes.extend_from_slice(&counter.to_le_bytes());
+        bytes.extend_from_slice(&(paths.len() as u32).to_le_bytes());
+        for path in &paths {
+            let mut field = [0u8; RELOAD_PATH_SIZE];
+            field[..path.len()].copy_from_slice(path.as_bytes());
+            bytes.extend_from_slice(&field);
+        }
+        self.write(RELOAD_FILE, &bytes).map(|_| ())
+    }
+
+    /// Reads `reload.bin`: the counter and the paths. A missing or bad file is an empty state.
+    pub fn reload_state(&self) -> (u32, Vec<String>) {
+        let Some(bytes) = self.read(RELOAD_FILE) else { return (0, Vec::new()) };
+        let word = |at: usize| bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        if bytes.get(..4) != Some(RELOAD_SIGNATURE.as_slice()) {
+            return (0, Vec::new());
+        }
+        let (Some(counter), Some(count)) = (word(4), word(8)) else { return (0, Vec::new()) };
+        let mut paths = Vec::new();
+        for i in 0..count as usize {
+            let from = 12 + i * RELOAD_PATH_SIZE;
+            let Some(field) = bytes.get(from..from + RELOAD_PATH_SIZE) else { break };
+            let end = field.iter().position(|&b| b == 0).unwrap_or(RELOAD_PATH_SIZE);
+            paths.push(String::from_utf8_lossy(&field[..end]).to_string());
+        }
+        (counter, paths)
+    }
+
     /// Reads a file. The result is `None` when the file is not there.
     pub fn read(&self, relative: &str) -> Option<Vec<u8>> {
         std::fs::read(self.path(relative).ok()?).ok()
@@ -120,6 +183,20 @@ mod test {
         assert!(path.ends_with("42.bin"));
         assert_eq!(sd.read("land/42.bin"), Some(b"abc".to_vec()));
         assert_eq!(sd.read("land/43.bin"), None);
+    }
+
+    #[test]
+    fn a_change_is_announced_with_a_counter_and_the_paths() {
+        let sd = SdCard::open(&folder("reload").to_string_lossy()).unwrap();
+        assert_eq!(sd.reload_state(), (0, Vec::new()));
+        sd.mark_changed("pokemon/data/2_0.bin").unwrap();
+        sd.mark_changed("pokemon/data/3_1.bin").unwrap();
+        sd.mark_changed("pokemon/data/2_0.bin").unwrap();
+        let (counter, paths) = sd.reload_state();
+        assert_eq!(counter, 3);
+        assert_eq!(paths, vec!["pokemon/data/2_0.bin", "pokemon/data/3_1.bin"]);
+        assert_eq!(sd.read("reload.bin").unwrap().len(), 12 + 2 * 64);
+        assert!(sd.mark_changed(&"x".repeat(70)).is_err());
     }
 
     #[test]

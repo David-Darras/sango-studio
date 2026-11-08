@@ -23,7 +23,7 @@ impl App {
         let modules: Vec<Box<dyn Module>> = vec![
             Box::new(sango_home::Home::default()),
             Box::new(sango_archive::Archive::default()),
-            Box::new(sango_species::Species),
+            Box::new(sango_species::Species::default()),
             Box::new(sango_item::Item),
             Box::new(sango_move::Move),
             Box::new(sango_ability::Ability),
