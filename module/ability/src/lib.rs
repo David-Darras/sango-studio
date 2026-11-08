@@ -11,7 +11,7 @@ impl Module for Ability {
     }
 
     fn icon(&self) -> &str {
-        "A"
+        "Ab"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

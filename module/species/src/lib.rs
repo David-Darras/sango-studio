@@ -1,20 +1,20 @@
-//! The pokémon editor.
+//! The species editor.
 
 use sango_ui::{egui, widget, Module, Session};
 
 #[derive(Default)]
-pub struct Pokemon;
+pub struct Species;
 
-impl Module for Pokemon {
+impl Module for Species {
     fn title(&self) -> &str {
-        "Pokémon"
+        "Species"
     }
 
     fn icon(&self) -> &str {
-        "P"
+        "S"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
-        widget::placeholder(ui, "Pokémon", "...", session);
+        widget::placeholder(ui, "Species", "...", session);
     }
 }

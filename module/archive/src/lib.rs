@@ -1,0 +1,459 @@
+//! The archive page: choose an archive of the game, see its tree, click a file to see its bytes.
+
+mod hex;
+
+use sango_core::{Dump, Garc};
+use sango_ui::theme::color;
+use sango_ui::{egui, widget, Module, Session};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+/// An archive that is open.
+struct Loaded {
+    number: usize,
+    path: PathBuf,
+    garc: Garc,
+    /// The file id and the language that show their bytes.
+    selected: Option<(usize, usize)>,
+    /// The files that have several languages and show them.
+    expanded: HashSet<usize>,
+    /// The lines of the list that were on the screen at the last frame.
+    view: std::ops::Range<usize>,
+    /// The line to bring on the screen at the next frame (after a key).
+    scroll_to: Option<usize>,
+}
+
+/// One line of the list of files.
+#[derive(Clone, Copy)]
+enum Row {
+    File(usize),
+    Language(usize, usize),
+}
+
+#[derive(Default)]
+pub struct Archive {
+    /// The dump that the list of numbers comes from.
+    dump_root: Option<PathBuf>,
+    numbers: Vec<usize>,
+    /// The number in the field.
+    input: String,
+    loaded: Option<Loaded>,
+    error: Option<String>,
+}
+
+/// The height of a line of the list of files, in points.
+const ROW_HEIGHT: f32 = 26.0;
+
+/// A line of the list: the whole line can be clicked, and it shows when it is chosen.
+fn row_button(ui: &mut egui::Ui, text: &str, selected: bool, muted: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), egui::Sense::click());
+    if selected {
+        ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::ACCENT_SOFT);
+        ui.painter().rect_stroke(rect, egui::Rounding::same(6.0), egui::Stroke::new(1.0_f32, color::ACCENT));
+    } else if response.hovered() {
+        ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::SURFACE_STRONG);
+    }
+    let text_color = if muted { color::MUTED } else { color::TEXT };
+    ui.painter().text(egui::pos2(rect.left() + 8.0, rect.center().y), egui::Align2::LEFT_CENTER, text, egui::FontId::monospace(14.0), text_color);
+    response
+}
+
+/// All the files that can be chosen, in the order of the list: one for each language of each file id.
+fn leaves(garc: &Garc) -> Vec<(usize, usize)> {
+    (0..garc.file_count()).flat_map(|id| garc.languages(id).into_iter().map(move |language| (id, language))).collect()
+}
+
+/// The place in the list of the line of a file and a language.
+fn row_of(loaded: &Loaded, id: usize, language: usize) -> usize {
+    let mut row = 0;
+    for file in 0..id {
+        row += 1;
+        if loaded.expanded.contains(&file) {
+            row += loaded.garc.languages(file).len();
+        }
+    }
+    if loaded.garc.languages(id).len() > 1 {
+        row + 1 + loaded.garc.languages(id).iter().position(|&l| l == language).unwrap_or(0)
+    } else {
+        row
+    }
+}
+
+/// A size with its unit.
+fn size_text(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.2} MB", bytes as f64 / (1024.0 * 1024.0))
+    }
+}
+
+/// The path of an archive as the game writes it: `a/2/7/7`.
+fn short_path(number: usize) -> String {
+    format!("a/{}/{}/{}", number / 100, number / 10 % 10, number % 10)
+}
+
+impl Archive {
+    fn open(&mut self, dump: &Dump, number: usize) {
+        let path = dump.archive(number);
+        match Garc::open(&path) {
+            Ok(garc) => {
+                self.loaded = Some(Loaded { number, path, garc, selected: None, expanded: HashSet::new(), view: 0..0, scroll_to: None });
+                self.error = None;
+                self.input = number.to_string();
+            }
+            Err(message) => {
+                self.loaded = None;
+                self.error = Some(message);
+            }
+        }
+    }
+
+    /// The number field, the list of the archives and the buttons before and after.
+    fn chooser(&mut self, ui: &mut egui::Ui, dump: &Dump) {
+        let mut go: Option<usize> = None;
+        widget::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(widget::title("Archive"));
+                let field = ui.add(egui::TextEdit::singleline(&mut self.input).desired_width(70.0).hint_text("277"));
+                if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    match self.input.trim().parse::<usize>() {
+                        Ok(n) => go = Some(n),
+                        Err(_) => self.error = Some("Type the number of an archive.".into()),
+                    }
+                }
+                let current = self.loaded.as_ref().map(|l| l.number);
+                let position = current.and_then(|n| self.numbers.iter().position(|&x| x == n));
+                if ui.add_enabled(position.is_some_and(|p| p > 0), egui::Button::new("<")).clicked() {
+                    go = position.map(|p| self.numbers[p - 1]);
+                }
+                if ui.add_enabled(position.is_some_and(|p| p + 1 < self.numbers.len()), egui::Button::new(">")).clicked() {
+                    go = position.map(|p| self.numbers[p + 1]);
+                }
+                let label = current.map_or("choose".to_string(), |n| format!("{n}   {}", short_path(n)));
+                egui::ComboBox::from_id_salt("archive_list").selected_text(label).width(190.0).height(360.0).show_ui(ui, |ui| {
+                    for &n in &self.numbers {
+                        if ui.selectable_label(current == Some(n), format!("{n:>3}   {}", short_path(n))).clicked() {
+                            go = Some(n);
+                        }
+                    }
+                });
+                ui.label(widget::hint(&format!("{} archives in the dump", self.numbers.len())));
+            });
+        });
+        if let Some(n) = go {
+            if self.numbers.contains(&n) {
+                self.open(dump, n);
+            } else {
+                self.error = Some(format!("The dump has no archive {n}."));
+            }
+        }
+    }
+
+    /// The details of the header and of the blocks, as small folding sections.
+    fn blocks(ui: &mut egui::Ui, loaded: &Loaded) {
+        let garc = &loaded.garc;
+        let line = |ui: &mut egui::Ui, key: &str, value: String| {
+            ui.label(widget::hint(key));
+            ui.label(egui::RichText::new(value).monospace());
+            ui.end_row();
+        };
+        egui::CollapsingHeader::new(widget::title("Header")).id_salt("garc_header").show(ui, |ui| {
+            egui::Grid::new("garc_header_grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+                line(ui, "Signature", "GARC (stored as CRAG)".into());
+                line(ui, "Version", format!("{:#06x}", garc.version()));
+                line(ui, "Byte order", format!("{:#06x} (little-endian)", garc.byte_order()));
+                line(ui, "Header size", format!("{:#x}", garc.header_size()));
+                line(ui, "Blocks after the header", garc.block_count().to_string());
+                line(ui, "Data offset", format!("{:#x}", garc.data_offset()));
+                line(ui, "Archive size", format!("{:#x} ({})", garc.archive_size(), size_text(garc.archive_size() as usize)));
+                line(ui, "Largest file (real size)", format!("{:#x} ({})", garc.largest_file_size(), size_text(garc.largest_file_size() as usize)));
+                line(ui, "Size on disk", size_text(garc.bytes_len()));
+            });
+        });
+        egui::CollapsingHeader::new(widget::title("Offset table (FATO)")).id_salt("garc_fato").show(ui, |ui| {
+            egui::Grid::new("garc_fato_grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+                line(ui, "Block size", format!("{:#x}", garc.offset_table_size()));
+                line(ui, "File ids", garc.file_count().to_string());
+            });
+        });
+        egui::CollapsingHeader::new(widget::title("Range table (FATB)")).id_salt("garc_fatb").show(ui, |ui| {
+            egui::Grid::new("garc_fatb_grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+                line(ui, "Block size", format!("{:#x}", garc.range_table_size()));
+                line(ui, "Ranges (one per language of a file)", garc.range_count().to_string());
+            });
+        });
+        egui::CollapsingHeader::new(widget::title("Data block (FIMB)")).id_salt("garc_fimb").show(ui, |ui| {
+            egui::Grid::new("garc_fimb_grid").num_columns(2).spacing([16.0, 4.0]).show(ui, |ui| {
+                line(ui, "Starts at", format!("{:#x}", garc.data_offset()));
+                line(ui, "Data size", size_text((garc.archive_size() as usize).saturating_sub(garc.data_offset())));
+            });
+        });
+    }
+
+    /// The list of the files: one line for each id, and one for each language of an id that has several.
+    fn files(ui: &mut egui::Ui, loaded: &mut Loaded) {
+        let count = loaded.garc.file_count();
+        ui.horizontal(|ui| {
+            ui.label(widget::title(&format!("Files ({count})")));
+            ui.label(widget::hint("Up and down: choose a file. Right and left: show the languages."));
+        });
+        let mut rows: Vec<Row> = Vec::with_capacity(count);
+        for id in 0..count {
+            rows.push(Row::File(id));
+            if loaded.expanded.contains(&id) {
+                for language in loaded.garc.languages(id) {
+                    rows.push(Row::Language(id, language));
+                }
+            }
+        }
+        // The lines touch each other, and all have the same height: the scroll bar needs it.
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let mut area = egui::ScrollArea::vertical().id_salt("garc_files").auto_shrink([false, false]);
+        // After a key, the selected line must be on the screen.
+        if let Some(target) = loaded.scroll_to.take() {
+            // The last line of the view can be cut: it does not count.
+            let visible = loaded.view.end.saturating_sub(loaded.view.start).saturating_sub(1).max(2);
+            // The first line can never be after the last place where the list still fills the view.
+            let last_first = rows.len().saturating_sub(visible);
+            if target < loaded.view.start {
+                area = area.vertical_scroll_offset(target.min(last_first) as f32 * ROW_HEIGHT);
+            } else if target + 1 >= loaded.view.end {
+                area = area.vertical_scroll_offset((target + 2).saturating_sub(visible).min(last_first) as f32 * ROW_HEIGHT);
+            }
+        }
+        area.show_rows(ui, ROW_HEIGHT, rows.len(), |ui, range| {
+            loaded.view = range.clone();
+            for i in range {
+                match rows[i] {
+                    Row::File(id) => {
+                        let languages = loaded.garc.languages(id);
+                        if languages.len() > 1 {
+                            let open = loaded.expanded.contains(&id);
+                            let text = format!("{}  {id:>5}   {} languages", if open { "-" } else { "+" }, languages.len());
+                            if row_button(ui, &text, false, false).clicked() {
+                                if open {
+                                    loaded.expanded.remove(&id);
+                                } else {
+                                    loaded.expanded.insert(id);
+                                }
+                            }
+                        } else if let Some(&language) = languages.first() {
+                            let size = loaded.garc.file_size(id, language).unwrap_or(0);
+                            let text = format!("   {id:>5}   {}", size_text(size));
+                            if row_button(ui, &text, loaded.selected == Some((id, language)), false).clicked() {
+                                loaded.selected = Some((id, language));
+                            }
+                        } else {
+                            row_button(ui, &format!("   {id:>5}   empty"), false, true);
+                        }
+                    }
+                    Row::Language(id, language) => {
+                        let size = loaded.garc.file_size(id, language).unwrap_or(0);
+                        let text = format!("        language {language}   {}", size_text(size));
+                        if row_button(ui, &text, loaded.selected == Some((id, language)), false).clicked() {
+                            loaded.selected = Some((id, language));
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// The keys: up and down choose the file before and after, page up and page down go ten files
+    /// away, home and end go to the first and the last, right and left show and hide the languages.
+    fn keys(ui: &egui::Ui, loaded: &mut Loaded) {
+        let (up, down, page_up, page_down, home, end, left, right) = ui.input(|i| {
+            (
+                i.key_pressed(egui::Key::ArrowUp),
+                i.key_pressed(egui::Key::ArrowDown),
+                i.key_pressed(egui::Key::PageUp),
+                i.key_pressed(egui::Key::PageDown),
+                i.key_pressed(egui::Key::Home),
+                i.key_pressed(egui::Key::End),
+                i.key_pressed(egui::Key::ArrowLeft),
+                i.key_pressed(egui::Key::ArrowRight),
+            )
+        });
+        if let Some((id, _)) = loaded.selected {
+            if loaded.garc.languages(id).len() > 1 {
+                if right {
+                    loaded.expanded.insert(id);
+                } else if left {
+                    loaded.expanded.remove(&id);
+                }
+            }
+        }
+        let step: isize = match (up, down, page_up, page_down) {
+            (true, ..) => -1,
+            (_, true, ..) => 1,
+            (_, _, true, _) => -10,
+            (_, _, _, true) => 10,
+            _ => 0,
+        };
+        if step == 0 && !home && !end {
+            return;
+        }
+        let leaves = leaves(&loaded.garc);
+        if leaves.is_empty() {
+            return;
+        }
+        let current = loaded.selected.and_then(|s| leaves.iter().position(|&l| l == s));
+        let target = if home {
+            0
+        } else if end {
+            leaves.len() - 1
+        } else {
+            match current {
+                Some(p) => (p as isize + step).clamp(0, leaves.len() as isize - 1) as usize,
+                None => 0,
+            }
+        };
+        let (id, language) = leaves[target];
+        // At the end of the list, a key that changes nothing must not scroll again.
+        if loaded.selected == Some((id, language)) {
+            return;
+        }
+        loaded.selected = Some((id, language));
+        // A file with several languages opens to show the language that is chosen.
+        if loaded.garc.languages(id).len() > 1 {
+            loaded.expanded.insert(id);
+        }
+        loaded.scroll_to = Some(row_of(loaded, id, language));
+    }
+
+    /// The bytes of the file that is chosen.
+    fn bytes(ui: &mut egui::Ui, loaded: &Loaded) {
+        let Some((id, language)) = loaded.selected else {
+            ui.add_space(6.0);
+            ui.label(widget::hint("Click a file to see its bytes."));
+            return;
+        };
+        let (Some(bytes), Some(range)) = (loaded.garc.file(id, language), loaded.garc.range(id, language)) else {
+            ui.label(widget::hint("This file has no bytes."));
+            return;
+        };
+        ui.label(widget::title(&format!("File {id}, language {language}")));
+        ui.label(widget::hint(&format!(
+            "Real size {} bytes ({}). Padding {} bytes. At {:#x} in the archive. Starts with: {}",
+            range.real_size,
+            size_text(range.real_size as usize),
+            range.padding(),
+            loaded.garc.data_offset() + range.start as usize,
+            first_bytes(bytes)
+        )));
+        ui.add_space(4.0);
+        hex::show(ui, bytes);
+    }
+}
+
+/// The first four bytes as text when they can be read, else as numbers.
+fn first_bytes(bytes: &[u8]) -> String {
+    let head = &bytes[..bytes.len().min(4)];
+    if head.is_empty() {
+        return "nothing".into();
+    }
+    if head.iter().all(|b| (0x20..0x7f).contains(b)) {
+        format!("\"{}\"", String::from_utf8_lossy(head))
+    } else {
+        head.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+    }
+}
+
+impl Module for Archive {
+    fn title(&self) -> &str {
+        "Archive"
+    }
+
+    fn icon(&self) -> &str {
+        "Ar"
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
+        ui.add_space(8.0);
+        ui.heading("Archive");
+        ui.label(widget::hint("The files of the romfs, with the tree of each GARC archive."));
+        ui.add_space(10.0);
+        let Some(dump) = session.dump.clone() else {
+            widget::placeholder(ui, "Archive", "...", session);
+            return;
+        };
+        if self.dump_root.as_deref() != Some(dump.root()) {
+            self.dump_root = Some(dump.root().to_path_buf());
+            self.numbers = dump.archive_numbers();
+            self.loaded = None;
+            self.error = None;
+        }
+        // SANGO_ARCHIVE=277 (and SANGO_FILE=0) open an archive and a file at once, to test without clicking.
+        if self.loaded.is_none() && self.error.is_none() {
+            if let Some(n) = std::env::var("SANGO_ARCHIVE").ok().and_then(|v| v.parse::<usize>().ok()) {
+                self.open(&dump, n);
+                let file = std::env::var("SANGO_FILE").ok().and_then(|v| v.parse::<usize>().ok());
+                if let (Some(loaded), Some(id)) = (self.loaded.as_mut(), file) {
+                    loaded.selected = loaded.garc.languages(id).first().map(|&language| (id, language));
+                }
+            }
+        }
+        self.chooser(ui, &dump);
+        if let Some(message) = &self.error {
+            ui.add_space(6.0);
+            widget::badge(ui, "Cannot open", color::ROSE);
+            ui.label(widget::hint(message));
+        }
+        let Some(loaded) = self.loaded.as_mut() else {
+            if self.error.is_none() {
+                ui.add_space(8.0);
+                ui.label(widget::hint("Choose an archive."));
+            }
+            return;
+        };
+        ui.add_space(10.0);
+        ui.label(widget::hint(&format!("{}   {}", loaded.path.display(), Path::new(&short_path(loaded.number)).display())));
+        ui.add_space(4.0);
+        if session.focus_page && !ui.ctx().wants_keyboard_input() {
+            Self::keys(ui, loaded);
+        }
+        let size = ui.available_size();
+        let left = (size.x * 0.40).clamp(300.0, 520.0);
+        ui.horizontal_top(|ui| {
+            ui.allocate_ui_with_layout(egui::vec2(left, size.y), egui::Layout::top_down(egui::Align::Min), |ui| {
+                Self::blocks(ui, loaded);
+                ui.add_space(6.0);
+                Self::files(ui, loaded);
+            });
+            ui.separator();
+            let rest = ui.available_width();
+            ui.allocate_ui_with_layout(egui::vec2(rest, size.y), egui::Layout::top_down(egui::Align::Min), |ui| {
+                Self::bytes(ui, loaded);
+            });
+        });
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn sizes_have_a_unit() {
+        assert_eq!(size_text(12), "12 B");
+        assert_eq!(size_text(2048), "2.0 KB");
+        assert_eq!(size_text(3 * 1024 * 1024), "3.00 MB");
+    }
+
+    #[test]
+    fn the_path_of_an_archive_is_the_one_of_the_game() {
+        assert_eq!(short_path(277), "a/2/7/7");
+        assert_eq!(short_path(13), "a/0/1/3");
+        assert_eq!(short_path(0), "a/0/0/0");
+    }
+
+    #[test]
+    fn the_first_bytes_are_text_when_they_can_be_read() {
+        assert_eq!(first_bytes(b"GARCxx"), "\"GARC\"");
+        assert_eq!(first_bytes(&[0x11, 0x80, 0x00]), "11 80 00");
+        assert_eq!(first_bytes(&[]), "nothing");
+    }
+}

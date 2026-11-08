@@ -45,6 +45,35 @@ impl Dump {
         &self.root
     }
 
+    /// The numbers of the archives that the dump has: the files `a/x/y/z` give the number `xyz`.
+    pub fn archive_numbers(&self) -> Vec<usize> {
+        fn digits(folder: &Path) -> Vec<(usize, PathBuf)> {
+            let mut list: Vec<(usize, PathBuf)> = std::fs::read_dir(folder)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .filter_map(|entry| {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    (name.len() == 1).then(|| name.parse::<usize>().ok()).flatten().map(|d| (d, entry.path()))
+                })
+                .collect();
+            list.sort();
+            list
+        }
+        let mut numbers = Vec::new();
+        for (a, a_path) in digits(&self.root.join("a")) {
+            for (b, b_path) in digits(&a_path) {
+                for (c, c_path) in digits(&b_path) {
+                    if c_path.is_file() {
+                        numbers.push(a * 100 + b * 10 + c);
+                    }
+                }
+            }
+        }
+        numbers.sort_unstable();
+        numbers
+    }
+
     /// The path of an archive: `archive(277)` is `a/2/7/7`.
     pub fn archive(&self, number: usize) -> PathBuf {
         self.root.join("a").join((number / 100).to_string()).join((number / 10 % 10).to_string()).join((number % 10).to_string())

@@ -5,7 +5,10 @@
 mod dump;
 mod setting;
 
+pub mod garc;
+
 pub use dump::Dump;
+pub use garc::Garc;
 
 /// The name of the application.
 pub const NAME: &str = "Sango Studio";
@@ -24,13 +27,15 @@ pub const GAME_VERSION: &str = "1.4";
 pub struct Session {
     /// The dump of the romfs of the game. Sango Studio does nothing without it.
     pub dump: Option<Dump>,
+    /// True when the arrow keys belong to the page. False when they change the page of the side bar.
+    pub focus_page: bool,
 }
 
 impl Session {
     /// A session that opens the dump of the last run, when it is still there.
     pub fn restore() -> Session {
         let dump = setting::read_dump_path().and_then(|path| Dump::open(&path).ok());
-        Session { dump }
+        Session { dump, focus_page: false }
     }
 
     /// Takes a folder as the dump, and keeps it for the next run.

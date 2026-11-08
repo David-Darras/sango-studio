@@ -1,8 +1,8 @@
 [package]
-name = "sango-pokemon"
+name = "sango-species"
 version.workspace = true
 edition.workspace = true
-description = "The pokemon editor of Sango Studio."
+description = "The species editor of Sango Studio."
 
 [dependencies]
 sango-ui.workspace = true

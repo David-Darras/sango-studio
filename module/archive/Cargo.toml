@@ -1,0 +1,9 @@
+[package]
+name = "sango-archive"
+version.workspace = true
+edition.workspace = true
+description = "The archive page of Sango Studio: the tree of a GARC file and the bytes of its files."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
