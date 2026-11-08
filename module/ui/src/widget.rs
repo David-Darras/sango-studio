@@ -82,6 +82,35 @@ pub fn placeholder(ui: &mut egui::Ui, name: &str, text: &str, session: &sango_co
 /// The keys used in egui temp data to remember which widget has focus on the page.
 const ACTIVE_WIDGET_KEY: &str = "sango_active_widget";
 const PAGE_FOCUS_KEY: &str = "sango_page_focus";
+const FOCUSABLE_WIDGETS_KEY: &str = "sango_focusable_widgets";
+const FOCUSABLE_WIDGETS_NEXT_KEY: &str = "sango_focusable_widgets_next";
+const EDITING_KEY: &str = "sango_is_editing";
+const EDIT_BACKUP_KEY: &str = "sango_edit_backup";
+const SCROLL_TO_ACTIVE_KEY: &str = "sango_scroll_to_active";
+
+/// Requests that the active widget be scrolled into view.
+pub fn request_scroll_to_active(ui: &egui::Ui) {
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(SCROLL_TO_ACTIVE_KEY), true));
+}
+
+/// Checks and consumes the request to scroll the active widget into view.
+pub fn take_scroll_to_active(ui: &egui::Ui) -> bool {
+    ui.ctx().data_mut(|d| {
+        let key = egui::Id::new(SCROLL_TO_ACTIVE_KEY);
+        let val = d.get_temp::<bool>(key).unwrap_or(false);
+        if val {
+            d.remove::<bool>(key);
+        }
+        val
+    })
+}
+
+/// Scrolls the widget into view if a scroll was requested.
+pub fn scroll_active_into_view(ui: &egui::Ui, response: &egui::Response) {
+    if take_scroll_to_active(ui) {
+        response.scroll_to_me(Some(egui::Align::Center));
+    }
+}
 
 /// Sets whether the page currently has focus (false when side bar has focus).
 pub fn set_page_focus(ctx: &egui::Context, focus: bool) {
@@ -91,6 +120,42 @@ pub fn set_page_focus(ctx: &egui::Context, focus: bool) {
 /// Returns true if the page currently has focus.
 pub fn page_has_focus(ui: &egui::Ui) -> bool {
     ui.data(|d| d.get_temp(egui::Id::new(PAGE_FOCUS_KEY)).unwrap_or(true))
+}
+
+/// Returns true if any field on the page is currently in Edit Mode.
+pub fn is_editing(ui: &egui::Ui) -> bool {
+    is_editing_ctx(ui.ctx())
+}
+
+/// Returns true if any field is in Edit Mode, from Context directly.
+pub fn is_editing_ctx(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp(egui::Id::new(EDITING_KEY)).unwrap_or(false))
+}
+
+/// Sets whether the active field is in Edit Mode.
+pub fn set_editing(ui: &egui::Ui, editing: bool) {
+    set_editing_ctx(ui.ctx(), editing);
+}
+
+/// Sets whether the active field is in Edit Mode, from Context directly.
+pub fn set_editing_ctx(ctx: &egui::Context, editing: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(EDITING_KEY), editing));
+}
+
+/// Cancels Edit Mode and clears the backup value.
+pub fn cancel_editing(ui: &egui::Ui) {
+    set_editing(ui, false);
+    ui.data_mut(|d| d.remove::<f64>(egui::Id::new(EDIT_BACKUP_KEY)));
+}
+
+/// Stores the value before editing so it can be restored on Escape.
+pub fn set_edit_backup(ui: &egui::Ui, value: f64) {
+    ui.data_mut(|d| d.insert_temp(egui::Id::new(EDIT_BACKUP_KEY), value));
+}
+
+/// Returns the backup value stored when Edit Mode began.
+pub fn edit_backup(ui: &egui::Ui) -> Option<f64> {
+    ui.data(|d| d.get_temp(egui::Id::new(EDIT_BACKUP_KEY)))
 }
 
 /// Returns the ID of the widget that currently has focus on the page.
@@ -108,17 +173,87 @@ pub fn is_active(ui: &egui::Ui, id: egui::Id) -> bool {
     active_id(ui) == Some(id)
 }
 
-/// A glow around a rectangle that gets brighter and darker again and again (about every 2.4 seconds).
-///
-/// It shows which element the keyboard is for. The window is drawn again while the glow is visible.
+/// Registers a widget as focusable in the current frame.
+pub fn register_focusable(ui: &egui::Ui, id: egui::Id) {
+    ui.ctx().data_mut(|d| {
+        let key = egui::Id::new(FOCUSABLE_WIDGETS_NEXT_KEY);
+        let list = d.get_temp_mut_or_default::<Vec<egui::Id>>(key);
+        if !list.contains(&id) {
+            list.push(id);
+        }
+    });
+}
+
+/// Transfers the focusable widgets collected in the previous frame and handles
+/// Tab, Shift+Tab, ArrowUp, and ArrowDown navigation between widgets when not in Edit Mode.
+pub fn update_navigation(ui: &mut egui::Ui) {
+    if !page_has_focus(ui) {
+        return;
+    }
+
+    let widgets: Vec<egui::Id> = ui.ctx().data_mut(|d| {
+        let next_key = egui::Id::new(FOCUSABLE_WIDGETS_NEXT_KEY);
+        let cur_key = egui::Id::new(FOCUSABLE_WIDGETS_KEY);
+        let next = d.get_temp::<Vec<egui::Id>>(next_key).unwrap_or_default();
+        d.insert_temp(cur_key, next.clone());
+        d.remove::<Vec<egui::Id>>(next_key);
+        next
+    });
+
+    if widgets.is_empty() {
+        return;
+    }
+
+    let mut current_id = active_id(ui);
+    if current_id.is_none() || !widgets.contains(&current_id.unwrap()) {
+        set_active_id(ui, widgets[0]);
+        current_id = Some(widgets[0]);
+    }
+
+    // Only navigate between fields when NOT in Edit Mode:
+    if !is_editing(ui) {
+        let mut step: isize = 0;
+        ui.input_mut(|i| {
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::Tab)
+                || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+            {
+                step += 1;
+            }
+            if i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab)
+                || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+            {
+                step -= 1;
+            }
+        });
+
+        if step != 0 {
+            if let Some(pos) = widgets.iter().position(|&id| Some(id) == current_id) {
+                let count = widgets.len() as isize;
+                let next = ((pos as isize + step).rem_euclid(count)) as usize;
+                set_active_id(ui, widgets[next]);
+                request_scroll_to_active(ui);
+            }
+        }
+    }
+}
+
+/// A glow around a rectangle.
+/// In Navigate Mode: soft pulsing accent indigo.
+/// In Edit Mode: faster pulsing emerald green.
 pub fn glow(ui: &egui::Ui, rect: egui::Rect, rounding: f32) {
+    let editing = is_editing(ui);
     let time = ui.input(|i| i.time) as f32;
-    let pulse = 0.5 + 0.5 * (time * 2.6).sin();
+    let speed = if editing { 4.5 } else { 2.6 };
+    let pulse = 0.5 + 0.5 * (time * speed).sin();
     let strength = 0.2 + 0.8 * pulse;
     for layer in 0..4 {
         let grow = 1.0 + layer as f32 * 1.6;
         let alpha = (strength * (170.0 - 38.0 * layer as f32)) as u8;
-        let colour = egui::Color32::from_rgba_unmultiplied(79, 70, 229, alpha);
+        let colour = if editing {
+            egui::Color32::from_rgba_unmultiplied(16, 185, 129, alpha)
+        } else {
+            egui::Color32::from_rgba_unmultiplied(79, 70, 229, alpha)
+        };
         ui.painter().rect_stroke(rect.expand(grow), Rounding::same(rounding + grow), Stroke::new(1.6_f32, colour));
     }
     ui.ctx().request_repaint();
@@ -166,12 +301,49 @@ fn arrow_button(ui: &mut egui::Ui, up: bool) -> u32 {
     }
 }
 
-/// A number field with two arrow buttons. The up and down keys also change it while it has the focus,
-/// and shift makes the step ten times bigger. Returns true when the value changed.
+/// A button that can be focused with keyboard navigation. Pressing Enter or Space clicks it.
+pub fn button(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> bool {
+    button_styled(ui, text, None)
+}
+
+/// A styled button that can be focused with keyboard navigation. Pressing Enter or Space clicks it.
+pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill: Option<egui::Color32>) -> bool {
+    let id = ui.next_auto_id();
+    register_focusable(ui, id);
+
+    let mut b = egui::Button::new(text);
+    if let Some(c) = fill {
+        b = b.fill(c);
+    }
+    let response = ui.add(b);
+
+    if response.clicked() {
+        set_active_id(ui, id);
+    }
+
+    let mut clicked = response.clicked();
+    if is_active(ui, id) && page_has_focus(ui) && !is_editing(ui) {
+        glow(ui, response.rect, 6.0);
+        scroll_active_into_view(ui, &response);
+        let press = ui.input_mut(|i| {
+            i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                || i.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+        });
+        if press {
+            clicked = true;
+        }
+    }
+    clicked
+}
+
+/// A number field with two arrow buttons. In Navigate Mode, Enter enters Edit Mode.
+/// In Edit Mode, arrow keys increment/decrement, direct typing changes the value, Enter confirms,
+/// and Escape cancels and restores the previous value.
 pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64, max: f64) -> bool {
     let before = value.to_f64();
     let mut delta = 0.0;
     let id = ui.next_auto_id();
+    register_focusable(ui, id);
 
     let res = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
@@ -193,30 +365,65 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
         || drag_response.has_focus()
         || up_steps > 0
         || down_steps > 0
-        || (ui.rect_contains_pointer(total_rect) && ui.input(|i| i.pointer.any_pressed()));
+        || res.response.interact(egui::Sense::click()).clicked();
 
     if clicked {
         set_active_id(ui, id);
+        if !is_editing(ui) {
+            set_editing(ui, true);
+            set_edit_backup(ui, value.to_f64());
+        }
     }
 
     if is_active(ui, id) && page_has_focus(ui) {
         glow(ui, total_rect, 4.0);
-        ui.input_mut(|i| {
-            for (modifiers, unit) in [(egui::Modifiers::SHIFT, 10.0), (egui::Modifiers::NONE, 1.0)] {
-                if i.consume_key(modifiers, egui::Key::ArrowUp) {
-                    delta += unit;
+        scroll_active_into_view(ui, &res.response);
+
+        if !is_editing(ui) {
+            // Navigate Mode: Enter enters Edit Mode
+            let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            if enter {
+                set_editing(ui, true);
+                set_edit_backup(ui, value.to_f64());
+                drag_response.request_focus();
+                request_scroll_to_active(ui);
+            }
+        } else {
+            // Edit Mode:
+            // 1. Esc cancels and restores backup
+            let esc = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            if esc {
+                if let Some(backup) = edit_backup(ui) {
+                    *value = T::from_f64(backup);
                 }
-                if i.consume_key(modifiers, egui::Key::ArrowDown) {
-                    delta -= unit;
+                ui.data_mut(|d| d.remove::<String>(drag_response.id));
+                cancel_editing(ui);
+            }
+
+            // 2. Enter confirms and leaves Edit Mode
+            let enter = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            if enter {
+                set_editing(ui, false);
+            }
+
+            // 3. Arrow keys increment/decrement
+            ui.input_mut(|i| {
+                for (modifiers, unit) in [(egui::Modifiers::SHIFT, 10.0), (egui::Modifiers::NONE, 1.0)] {
+                    if i.consume_key(modifiers, egui::Key::ArrowUp) {
+                        delta += unit;
+                    }
+                    if i.consume_key(modifiers, egui::Key::ArrowDown) {
+                        delta -= unit;
+                    }
                 }
-            }
-            if i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
-                delta += 10.0;
-            }
-            if i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
-                delta -= 10.0;
-            }
-        });
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                    delta += 10.0;
+                }
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                    delta -= 10.0;
+                }
+            });
+        }
     }
 
     let unit = if ui.input(|i| i.modifiers.shift) { 10.0 } else { 1.0 };
@@ -225,8 +432,6 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
 
     if delta != 0.0 {
         *value = T::from_f64(stepped(value.to_f64(), delta, min, max));
-        // While the field is being typed in, it keeps its own text and would write the old number
-        // back: the text is dropped, and the field shows the new number at the next frame.
         ui.data_mut(|d| d.remove::<String>(drag_response.id));
     }
     value.to_f64() != before
@@ -299,6 +504,7 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
+                set_editing(ui, true);
                 spin(ui, &mut hp, 0.0, 255.0);
             });
         });
@@ -323,11 +529,63 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
+                set_editing(ui, true);
                 spin(ui, &mut catch_rate, 0.0, 255.0);
             });
         });
 
         assert_eq!(catch_rate, 44);
+    }
+
+    #[test]
+    fn spin_enters_edit_mode_on_enter() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.events.push(egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+
+        let mut hp: u8 = 45;
+        let _ = ctx.run(raw_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let id = ui.next_auto_id();
+                set_active_id(ui, id);
+                assert!(!is_editing(ui));
+                spin(ui, &mut hp, 0.0, 255.0);
+                assert!(is_editing(ui));
+            });
+        });
+    }
+
+    #[test]
+    fn spin_cancels_edit_and_restores_backup_on_escape() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+
+        let mut hp: u8 = 99;
+        let _ = ctx.run(raw_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let id = ui.next_auto_id();
+                set_active_id(ui, id);
+                set_editing(ui, true);
+                set_edit_backup(ui, 45.0);
+                spin(ui, &mut hp, 0.0, 255.0);
+                assert!(!is_editing(ui));
+            });
+        });
+
+        assert_eq!(hp, 45);
     }
 
     #[test]
@@ -348,6 +606,7 @@ mod test {
             egui::CentralPanel::default().show(ctx, |ui| {
                 let id = ui.next_auto_id();
                 set_active_id(ui, id);
+                set_editing(ui, true);
                 spin(ui, &mut hp, 0.0, 255.0);
             });
         });

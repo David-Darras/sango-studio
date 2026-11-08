@@ -165,7 +165,7 @@ impl Species {
 
                 let button_width = 220.0;
                 let button_height = ui.spacing().interact_size.y;
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(button_width, button_height), egui::Sense::click());
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(button_width, button_height), egui::Sense::hover());
                 let button_response = ui.interact(rect, species_id, egui::Sense::click());
 
                 if ui.is_rect_visible(rect) {
@@ -206,6 +206,7 @@ impl Species {
                     widget::set_active_id(ui, species_id);
                 }
 
+                widget::register_focusable(ui, species_id);
                 let popup_res = egui::popup::popup_below_widget(
                     ui,
                     popup_id,
@@ -297,14 +298,12 @@ impl Species {
                     }
                 }
 
-                if button_response.clicked() {
-                    widget::set_active_id(ui, species_id);
-                }
                 if widget::active_id(ui).is_none() {
                     widget::set_active_id(ui, species_id);
                 }
                 if widget::is_active(ui, species_id) && widget::page_has_focus(ui) && popup_res.is_none() {
                     widget::glow(ui, button_response.rect, 6.0);
+                    widget::scroll_active_into_view(ui, &button_response);
                     let open_key = ui.input_mut(|i| {
                         i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                             || i.consume_key(egui::Modifiers::NONE, egui::Key::Space)
@@ -312,20 +311,6 @@ impl Species {
                     if open_key {
                         ui.memory_mut(|m| m.open_popup(popup_id));
                     }
-                    ui.input_mut(|i| {
-                        let one = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
-                            - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
-                        let ten = i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) as isize
-                            - i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) as isize;
-                        let step = one + 10 * ten;
-                        if step != 0 {
-                            let next = (self.species as isize + step).clamp(1, SPECIES_COUNT as isize) as usize;
-                            if next != self.species {
-                                self.species = next;
-                                self.scroll_list = true;
-                            }
-                        }
-                    });
                 }
                 let forms = self.form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
@@ -343,11 +328,13 @@ impl Species {
                     }
                 });
                 let form_id = form_combo.response.id;
+                widget::register_focusable(ui, form_id);
                 if form_combo.response.clicked() {
                     widget::set_active_id(ui, form_id);
                 }
                 if widget::is_active(ui, form_id) && widget::page_has_focus(ui) {
                     widget::glow(ui, form_combo.response.rect, 6.0);
+                    widget::scroll_active_into_view(ui, &form_combo.response);
                     ui.input_mut(|i| {
                         let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
                             - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
@@ -356,9 +343,8 @@ impl Species {
                         }
                     });
                 }
-                reset = ui.button("Reset").on_hover_text("Read the data again from the romfs").clicked();
-                let button = egui::Button::new(egui::RichText::new("Save").color(color::WHITE)).fill(color::ACCENT);
-                save = ui.add_enabled(self.data.is_some(), button).on_hover_text("Write the file on the SD card").clicked();
+                reset = widget::button(ui, "Reset");
+                save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
                 if self.data.is_some() && self.data != self.baseline {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_sd {
@@ -470,11 +456,13 @@ fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f32) 
         }
     });
     let menu_id = combo.response.id;
+    widget::register_focusable(ui, menu_id);
     if combo.response.clicked() {
         widget::set_active_id(ui, menu_id);
     }
     if widget::is_active(ui, menu_id) && widget::page_has_focus(ui) {
         widget::glow(ui, combo.response.rect, 6.0);
+        widget::scroll_active_into_view(ui, &combo.response);
         ui.input_mut(|i| {
             let mut step: isize = 0;
             if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
@@ -583,11 +571,13 @@ fn group_machines(ui: &mut egui::Ui, d: &mut SpeciesData) {
             for (i, word) in d.technical_moves.iter_mut().enumerate() {
                 line(ui, &format!("Bits {} to {}", i * 32, i * 32 + 31), |ui| {
                     let r = ui.add(egui::DragValue::new(word).hexadecimal(8, false, true).speed(1.0));
+                    widget::register_focusable(ui, r.id);
                     if r.clicked() || r.dragged() || r.has_focus() {
                         widget::set_active_id(ui, r.id);
                     }
                     if widget::is_active(ui, r.id) && widget::page_has_focus(ui) {
                         widget::glow(ui, r.rect, 4.0);
+                        widget::scroll_active_into_view(ui, &r);
                         ui.input_mut(|inp| {
                             let mut delta: i64 = 0;
                             if inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
@@ -659,6 +649,7 @@ impl Module for Species {
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
         widget::set_page_focus(ui.ctx(), session.focus_page);
+        widget::update_navigation(ui);
         ui.add_space(8.0);
         ui.heading("Species");
         ui.add_space(8.0);
@@ -685,6 +676,7 @@ impl Module for Species {
         self.top_bar(ui, session);
         ui.add_space(8.0);
         let tabs_id = ui.make_persistent_id("species_tabs");
+        widget::register_focusable(ui, tabs_id);
         ui.horizontal_wrapped(|ui| {
             for (i, name) in TABS.iter().enumerate() {
                 let chosen = self.tab == i;
@@ -756,5 +748,43 @@ mod test {
         assert_eq!(match_species("25")[0], 25);
         assert_eq!(match_species("025")[0], 25);
         assert_eq!(match_species("flabebe")[0], 669);
+    }
+
+    #[test]
+    fn clicking_top_bar_and_general_tab_does_not_crash() {
+        let mut species = Species::default();
+        let mut data = data::SpeciesData::from_bytes(&[0; 80]).unwrap();
+        species.data = Some(data.clone());
+        species.baseline = Some(data.clone());
+
+        let ctx = egui::Context::default();
+        let session = Session::default();
+
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                widget::set_page_focus(ctx, true);
+                widget::update_navigation(ui);
+                species.top_bar(ui, &session);
+                general_tab(ui, &mut data);
+            });
+        });
+
+        for &(x, y) in &[(10.0, 10.0), (100.0, 50.0), (250.0, 50.0), (350.0, 50.0), (50.0, 200.0), (200.0, 300.0)] {
+            let mut click = egui::RawInput::default();
+            click.events.push(egui::Event::PointerButton {
+                pos: egui::pos2(x, y),
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            let _ = ctx.run(click, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::set_page_focus(ctx, true);
+                    widget::update_navigation(ui);
+                    species.top_bar(ui, &session);
+                    general_tab(ui, &mut data);
+                });
+            });
+        }
     }
 }

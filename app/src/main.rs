@@ -51,10 +51,8 @@ impl App {
             });
         });
     }
-}
 
-impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update_ctx(&mut self, ctx: &egui::Context) {
         // The option of the window alone leaves it at its first width: the window is made normal, then
         // maximized again, once it is on the screen.
         self.frames += 1;
@@ -66,16 +64,36 @@ impl eframe::App for App {
         if self.frames < 10 {
             ctx.request_repaint();
         }
-        // The last click says who owns the arrow keys: the side bar or the page.
+        // Focus owner: mouse click or keyboard switching.
         if let Some(position) = ctx.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None }) {
             self.side_bar_focus = position.x < SIDE_BAR_WIDTH;
         }
-        if self.side_bar_focus && !ctx.wants_keyboard_input() {
-            let step: isize = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown) as isize - i.key_pressed(egui::Key::ArrowUp) as isize);
-            if step != 0 {
-                self.current = (self.current as isize + step).clamp(0, self.modules.len() as isize - 1) as usize;
+
+        if self.side_bar_focus {
+            if !ctx.wants_keyboard_input() {
+                let step: isize = ctx.input(|i| i.key_pressed(egui::Key::ArrowDown) as isize - i.key_pressed(egui::Key::ArrowUp) as isize);
+                if step != 0 {
+                    self.current = (self.current as isize + step).clamp(0, self.modules.len() as isize - 1) as usize;
+                }
+                let enter_page = ctx.input_mut(|i| {
+                    i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+                });
+                if enter_page {
+                    self.side_bar_focus = false;
+                }
+            }
+        } else {
+            let is_editing = widget::is_editing_ctx(ctx);
+            let return_sidebar = ctx.input_mut(|i| {
+                (!is_editing && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::F6)
+            });
+            if return_sidebar {
+                self.side_bar_focus = true;
             }
         }
+
         self.session.focus_page = !self.side_bar_focus;
         widget::set_page_focus(ctx, self.session.focus_page);
         self.side_bar(ctx);
@@ -88,6 +106,12 @@ impl eframe::App for App {
     }
 }
 
+impl eframe::App for App {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_ctx(ctx);
+    }
+}
+
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]).with_min_inner_size([720.0, 480.0]).with_title(sango_core::NAME),
@@ -95,4 +119,48 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
     eframe::run_native(sango_core::NAME, options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn clicking_in_species_page() {
+        let mut app = App {
+            modules: vec![
+                Box::new(sango_home::Home::default()),
+                Box::new(sango_archive::Archive::default()),
+                Box::new(sango_species::Species::default()),
+                Box::new(sango_item::Item),
+                Box::new(sango_move::Move),
+                Box::new(sango_ability::Ability),
+                Box::new(sango_type::Type),
+            ],
+            current: 2,
+            session: Session::restore(),
+            frames: 10,
+            side_bar_focus: false,
+        };
+
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            app.update_ctx(ctx);
+        });
+
+        for x in [250.0, 300.0, 400.0, 500.0, 600.0] {
+            for y in [50.0, 100.0, 150.0, 200.0, 300.0, 400.0] {
+                let mut input = egui::RawInput::default();
+                input.events.push(egui::Event::PointerButton {
+                    pos: egui::pos2(x, y),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                let _ = ctx.run(input, |ctx| {
+                    app.update_ctx(ctx);
+                });
+            }
+        }
+    }
 }
