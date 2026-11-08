@@ -65,12 +65,57 @@ pub struct Species {
     list_shown: bool,
     /// The list must show the chosen species at the middle (after a key).
     scroll_list: bool,
+    /// Text typed into the species search box.
+    species_search: String,
+    /// True once the search box has received focus on opening the dropdown.
+    search_focused: bool,
 }
 
 impl Default for Species {
     fn default() -> Self {
-        Species { root: None, garc: None, species: 1, form: 0, data: None, baseline: None, from_sd: false, loaded: None, tab: 0, status: None, list_shown: false, scroll_list: false }
+        Species {
+            root: None,
+            garc: None,
+            species: 1,
+            form: 0,
+            data: None,
+            baseline: None,
+            from_sd: false,
+            loaded: None,
+            tab: 0,
+            status: None,
+            list_shown: false,
+            scroll_list: false,
+            species_search: String::new(),
+            search_focused: false,
+        }
     }
+}
+
+/// Matches species by name (prefix or substring) or by number.
+fn match_species(raw_query: &str) -> Vec<usize> {
+    let clean = |s: &str| s.to_lowercase().replace(['é', 'è'], "e");
+    let query = clean(raw_query.trim());
+    let num_query = raw_query.trim().trim_start_matches('0');
+
+    if query.is_empty() {
+        return (1..=SPECIES_COUNT).collect();
+    }
+
+    let mut starts_with = Vec::new();
+    let mut contains = Vec::new();
+    for number in 1..=SPECIES_COUNT {
+        let name = clean(names::SPECIES[number - 1]);
+        let num_str = number.to_string();
+        let is_num_match = !num_query.is_empty() && num_str == num_query;
+        if name.starts_with(&query) || is_num_match {
+            starts_with.push(number);
+        } else if name.contains(&query) || (!num_query.is_empty() && num_str.contains(num_query)) {
+            contains.push(number);
+        }
+    }
+    starts_with.extend(contains);
+    starts_with
 }
 
 impl Species {
@@ -114,36 +159,159 @@ impl Species {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let species_text = format!("{:>3}  {}", self.species, name_from(&names::SPECIES, self.species, 1));
-                let combo = egui::ComboBox::from_id_salt("species_menu").selected_text(species_text).width(240.0).height(420.0).show_ui(ui, |ui| {
-                    for number in 1..=SPECIES_COUNT {
-                        let chosen = self.species == number;
-                        let row = ui.selectable_label(chosen, format!("{number:>3}  {}", names::SPECIES[number - 1]));
-                        if chosen {
-                            // The chosen species is always the one with the glow, and it stays on the screen.
-                            widget::glow(ui, row.rect, 5.0);
-                            if self.scroll_list || !self.list_shown {
-                                row.scroll_to_me(Some(egui::Align::Center));
-                            }
-                        }
-                        if row.clicked() {
-                            self.species = number;
-                        }
-                    }
-                    self.list_shown = true;
-                    self.scroll_list = false;
-                });
-                if combo.inner.is_none() {
-                    self.list_shown = false;
+                let species_id = ui.make_persistent_id("species_menu");
+                let popup_id = species_id.with("popup");
+                let is_popup_open = ui.memory(|m| m.is_popup_open(popup_id));
+
+                let button_width = 220.0;
+                let button_height = ui.spacing().interact_size.y;
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(button_width, button_height), egui::Sense::click());
+                let button_response = ui.interact(rect, species_id, egui::Sense::click());
+
+                if ui.is_rect_visible(rect) {
+                    let visuals = if is_popup_open {
+                        &ui.visuals().widgets.open
+                    } else {
+                        ui.style().interact(&button_response)
+                    };
+                    ui.painter().rect(
+                        rect.expand(visuals.expansion),
+                        visuals.rounding,
+                        visuals.weak_bg_fill,
+                        visuals.bg_stroke,
+                    );
+                    let galley = egui::WidgetText::from(&species_text).into_galley(
+                        ui,
+                        Some(egui::TextWrapMode::Truncate),
+                        button_width - 28.0,
+                        egui::TextStyle::Button,
+                    );
+                    let text_rect = rect.shrink2(ui.spacing().button_padding);
+                    let text_pos = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect).min;
+                    ui.painter().galley(text_pos, galley, visuals.text_color());
+
+                    let icon_rect = egui::Rect::from_center_size(
+                        egui::pos2(rect.right() - 14.0, rect.center().y),
+                        egui::vec2(8.0, 5.0),
+                    );
+                    ui.painter().add(egui::Shape::convex_polygon(
+                        vec![icon_rect.left_top(), icon_rect.right_top(), icon_rect.center_bottom()],
+                        visuals.fg_stroke.color,
+                        egui::Stroke::NONE,
+                    ));
                 }
-                let species_id = combo.response.id;
-                if combo.response.clicked() {
+
+                if button_response.clicked() {
+                    ui.memory_mut(|m| m.toggle_popup(popup_id));
+                    widget::set_active_id(ui, species_id);
+                }
+
+                let popup_res = egui::popup::popup_below_widget(
+                    ui,
+                    popup_id,
+                    &button_response,
+                    egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+                    |ui| {
+                        ui.set_width(260.0);
+                        ui.set_max_width(260.0);
+                        ui.spacing_mut().item_spacing.y = 4.0;
+
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.label(widget::hint("🔍"));
+                            let search_input = ui.add(
+                                egui::TextEdit::singleline(&mut self.species_search)
+                                    .hint_text("Search name or number...")
+                                    .desired_width(185.0)
+                                    .clip_text(true),
+                            );
+                            if !self.search_focused {
+                                search_input.request_focus();
+                                self.search_focused = true;
+                            }
+                            if !self.species_search.is_empty() && ui.small_button("✕").clicked() {
+                                self.species_search.clear();
+                            }
+                        });
+                        ui.separator();
+
+                        let query = self.species_search.trim();
+                        let matches = match_species(query);
+
+                        if matches.is_empty() {
+                            ui.add_space(4.0);
+                            ui.label(widget::hint("No matching Pokémon."));
+                            ui.add_space(4.0);
+                        } else {
+                            let up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
+                            let down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
+                            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                            if let Some(pos) = matches.iter().position(|&n| n == self.species) {
+                                if down && pos + 1 < matches.len() {
+                                    self.species = matches[pos + 1];
+                                }
+                                if up && pos > 0 {
+                                    self.species = matches[pos - 1];
+                                }
+                            } else if (up || down) && !matches.is_empty() {
+                                self.species = matches[0];
+                            }
+
+                            if enter && !matches.is_empty() {
+                                if !matches.contains(&self.species) {
+                                    self.species = matches[0];
+                                }
+                                ui.memory_mut(|m| m.close_popup());
+                            }
+
+                            let nav_key = up || down;
+                            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
+                                for &number in &matches {
+                                    let chosen = self.species == number
+                                        || (!matches.contains(&self.species) && number == matches[0]);
+                                    let row = ui.selectable_label(chosen, format!("{number:>3}  {}", names::SPECIES[number - 1]));
+                                    if chosen {
+                                        widget::glow(ui, row.rect, 5.0);
+                                        if nav_key || (query.is_empty() && (self.scroll_list || !self.list_shown)) {
+                                            row.scroll_to_me(Some(egui::Align::Center));
+                                        }
+                                    }
+                                    if row.clicked() {
+                                        self.species = number;
+                                        ui.memory_mut(|m| m.close_popup());
+                                    }
+                                }
+                            });
+                        }
+                        self.list_shown = true;
+                        self.scroll_list = false;
+                    },
+                );
+
+                if popup_res.is_none() {
+                    self.list_shown = false;
+                    self.search_focused = false;
+                    if !self.species_search.is_empty() {
+                        self.species_search.clear();
+                    }
+                }
+
+                if button_response.clicked() {
                     widget::set_active_id(ui, species_id);
                 }
                 if widget::active_id(ui).is_none() {
                     widget::set_active_id(ui, species_id);
                 }
-                if widget::is_active(ui, species_id) && widget::page_has_focus(ui) {
-                    widget::glow(ui, combo.response.rect, 6.0);
+                if widget::is_active(ui, species_id) && widget::page_has_focus(ui) && popup_res.is_none() {
+                    widget::glow(ui, button_response.rect, 6.0);
+                    let open_key = ui.input_mut(|i| {
+                        i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            || i.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+                    });
+                    if open_key {
+                        ui.memory_mut(|m| m.open_popup(popup_id));
+                    }
                     ui.input_mut(|i| {
                         let one = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
                             - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
@@ -578,5 +746,15 @@ mod test {
         assert_eq!(gender_text(255), "no gender");
         assert_eq!(gender_text(31), "12.5 % female, 87.5 % male");
         assert_eq!(gender_text(127), "50 % female, 50 % male");
+    }
+
+    #[test]
+    fn species_can_be_searched_by_name_or_number() {
+        assert_eq!(match_species("").len(), 721);
+        assert_eq!(match_species("pika")[0], 25);
+        assert_eq!(match_species("char")[0], 4);
+        assert_eq!(match_species("25")[0], 25);
+        assert_eq!(match_species("025")[0], 25);
+        assert_eq!(match_species("flabebe")[0], 669);
     }
 }
