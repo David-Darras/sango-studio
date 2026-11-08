@@ -19,7 +19,7 @@ const ARCHIVE: usize = 195;
 const SPECIES_COUNT: usize = names::SPECIES.len();
 
 /// The tabs of the page. Only the first one works for now.
-const TABS: [&str; 7] = ["Data", "Movepool", "Evolution", "Mega evolution", "Form", "2D view", "3D view"];
+const TABS: [&str; 7] = ["General", "Movepool", "Evolution", "Mega evolution", "Form", "Icon", "Model"];
 
 /// The place in the archive of the file of a species and a form.
 ///
@@ -61,11 +61,15 @@ pub struct Species {
     tab: usize,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
+    /// True while the list of the species is open: it shows the chosen species at the middle once.
+    list_shown: bool,
+    /// The list must show the chosen species at the middle (after a key).
+    scroll_list: bool,
 }
 
 impl Default for Species {
     fn default() -> Self {
-        Species { root: None, garc: None, species: 1, form: 0, data: None, baseline: None, from_sd: false, loaded: None, tab: 0, status: None }
+        Species { root: None, garc: None, species: 1, form: 0, data: None, baseline: None, from_sd: false, loaded: None, tab: 0, status: None, list_shown: false, scroll_list: false }
     }
 }
 
@@ -110,19 +114,80 @@ impl Species {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let species_text = format!("{:>3}  {}", self.species, name_from(&names::SPECIES, self.species, 1));
-                egui::ComboBox::from_id_salt("species_menu").selected_text(species_text).width(240.0).height(420.0).show_ui(ui, |ui| {
+                let combo = egui::ComboBox::from_id_salt("species_menu").selected_text(species_text).width(240.0).height(420.0).show_ui(ui, |ui| {
                     for number in 1..=SPECIES_COUNT {
-                        ui.selectable_value(&mut self.species, number, format!("{number:>3}  {}", names::SPECIES[number - 1]));
+                        let chosen = self.species == number;
+                        let row = ui.selectable_label(chosen, format!("{number:>3}  {}", names::SPECIES[number - 1]));
+                        if chosen {
+                            // The chosen species is always the one with the glow, and it stays on the screen.
+                            widget::glow(ui, row.rect, 5.0);
+                            if self.scroll_list || !self.list_shown {
+                                row.scroll_to_me(Some(egui::Align::Center));
+                            }
+                        }
+                        if row.clicked() {
+                            self.species = number;
+                        }
                     }
+                    self.list_shown = true;
+                    self.scroll_list = false;
                 });
+                if combo.inner.is_none() {
+                    self.list_shown = false;
+                }
+                let species_id = combo.response.id;
+                if combo.response.clicked() {
+                    widget::set_active_id(ui, species_id);
+                }
+                if widget::active_id(ui).is_none() {
+                    widget::set_active_id(ui, species_id);
+                }
+                if widget::is_active(ui, species_id) && widget::page_has_focus(ui) {
+                    widget::glow(ui, combo.response.rect, 6.0);
+                    ui.input_mut(|i| {
+                        let one = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
+                            - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
+                        let ten = i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) as isize
+                            - i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) as isize;
+                        let step = one + 10 * ten;
+                        if step != 0 {
+                            let next = (self.species as isize + step).clamp(1, SPECIES_COUNT as isize) as usize;
+                            if next != self.species {
+                                self.species = next;
+                                self.scroll_list = true;
+                            }
+                        }
+                    });
+                }
                 let forms = self.form_count();
-                self.form = self.form.min(forms - 1);
+                self.form = self.form.min(forms.saturating_sub(1));
                 let form_text = |form: usize| if form == 0 { "Form 0 (normal)".to_string() } else { format!("Form {form}") };
-                egui::ComboBox::from_id_salt("form_menu").selected_text(form_text(self.form)).width(150.0).show_ui(ui, |ui| {
+                let form_combo = egui::ComboBox::from_id_salt("form_menu").selected_text(form_text(self.form)).width(150.0).show_ui(ui, |ui| {
                     for form in 0..forms {
-                        ui.selectable_value(&mut self.form, form, form_text(form));
+                        let chosen = self.form == form;
+                        let row = ui.selectable_label(chosen, form_text(form));
+                        if chosen {
+                            widget::glow(ui, row.rect, 5.0);
+                        }
+                        if row.clicked() {
+                            self.form = form;
+                        }
                     }
                 });
+                let form_id = form_combo.response.id;
+                if form_combo.response.clicked() {
+                    widget::set_active_id(ui, form_id);
+                }
+                if widget::is_active(ui, form_id) && widget::page_has_focus(ui) {
+                    widget::glow(ui, form_combo.response.rect, 6.0);
+                    ui.input_mut(|i| {
+                        let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
+                            - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
+                        if step != 0 && forms > 0 {
+                            self.form = (self.form as isize + step).clamp(0, forms as isize - 1) as usize;
+                        }
+                    });
+                }
                 reset = ui.button("Reset").on_hover_text("Read the data again from the romfs").clicked();
                 let button = egui::Button::new(egui::RichText::new("Save").color(color::WHITE)).fill(color::ACCENT);
                 save = ui.add_enabled(self.data.is_some(), button).on_hover_text("Write the file on the SD card").clicked();
@@ -172,6 +237,32 @@ impl Species {
     }
 }
 
+/// A rate from 0 to 255 as a percentage of the maximum.
+fn percent(value: u8) -> String {
+    let text = format!("{:.1}", value as f32 * 100.0 / 255.0);
+    format!("{} %", text.strip_suffix(".0").unwrap_or(&text))
+}
+
+/// What a gender number means: 0 is only male, 254 only female, 255 no gender, and in between
+/// the chance to be female is `(number + 1) / 256`.
+fn gender_text(value: u8) -> String {
+    match value {
+        0 => "male only".to_string(),
+        254 => "female only".to_string(),
+        255 => "no gender".to_string(),
+        _ => {
+            let female = (value as f32 + 1.0) * 100.0 / 256.0;
+            format!("{} % female, {} % male", trim(female), trim(100.0 - female))
+        }
+    }
+}
+
+/// A number with one digit, without a useless ".0".
+fn trim(value: f32) -> String {
+    let text = format!("{value:.1}");
+    text.strip_suffix(".0").unwrap_or(&text).to_string()
+}
+
 /// A number field with arrow buttons: the up and down keys work too.
 fn number<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, max: f64) {
     widget::spin(ui, value, 0.0, max);
@@ -198,98 +289,193 @@ fn item(ui: &mut egui::Ui, value: &mut u16) {
 
 /// A menu of names: the value is the place in the list.
 fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f32) {
-    egui::ComboBox::from_id_salt(id).selected_text(name_from(list, *value as usize, 0)).width(width).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt(id).selected_text(name_from(list, *value as usize, 0)).width(width).show_ui(ui, |ui| {
         for (place, name) in list.iter().enumerate() {
-            ui.selectable_value(value, place as u8, *name);
+            let chosen = *value == place as u8;
+            let row = ui.selectable_label(chosen, *name);
+            if chosen {
+                widget::glow(ui, row.rect, 5.0);
+            }
+            if row.clicked() {
+                *value = place as u8;
+            }
         }
+    });
+    let menu_id = combo.response.id;
+    if combo.response.clicked() {
+        widget::set_active_id(ui, menu_id);
+    }
+    if widget::is_active(ui, menu_id) && widget::page_has_focus(ui) {
+        widget::glow(ui, combo.response.rect, 6.0);
+        ui.input_mut(|i| {
+            let mut step: isize = 0;
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                step += 1;
+            }
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                step -= 1;
+            }
+            if step != 0 && !list.is_empty() {
+                *value = (*value as isize + step).clamp(0, list.len() as isize - 1) as u8;
+            }
+        });
+    }
+}
+
+/// The width of one column of groups, in points.
+const COLUMN_WIDTH: f32 = 430.0;
+
+/// A grid for the fields of a group.
+fn grid(name: &'static str) -> egui::Grid {
+    egui::Grid::new(name).num_columns(2).spacing([24.0, 8.0])
+}
+
+/// A group of fields: a card with a title.
+fn group(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
+    widget::card(ui, |ui| {
+        ui.set_min_width(COLUMN_WIDTH - 36.0);
+        ui.label(widget::title(title));
+        add(ui);
+    });
+    ui.add_space(10.0);
+}
+
+fn group_statistics(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    group(ui, &format!("Base statistics (total {})", d.base_total()), |ui| {
+        grid("stats").show(ui, |ui| {
+            line(ui, "HP", |ui| number(ui, &mut d.base_hp, 255.0));
+            line(ui, "Attack", |ui| number(ui, &mut d.base_attack, 255.0));
+            line(ui, "Defense", |ui| number(ui, &mut d.base_defense, 255.0));
+            line(ui, "Special Attack", |ui| number(ui, &mut d.base_special_attack, 255.0));
+            line(ui, "Special Defense", |ui| number(ui, &mut d.base_special_defense, 255.0));
+            line(ui, "Speed", |ui| number(ui, &mut d.base_speed, 255.0));
+        });
     });
 }
 
-/// The form of the data: one card for each group of fields.
-fn data_tab(ui: &mut egui::Ui, d: &mut SpeciesData) {
+fn group_types(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    group(ui, "Types and abilities", |ui| {
+        grid("types").show(ui, |ui| {
+            line(ui, "Type 1", |ui| menu(ui, "type_1", &mut d.types[0], &names::TYPE, 120.0));
+            line(ui, "Type 2", |ui| menu(ui, "type_2", &mut d.types[1], &names::TYPE, 120.0));
+            line(ui, "Ability 1", |ui| ability(ui, &mut d.ability[0]));
+            line(ui, "Ability 2", |ui| ability(ui, &mut d.ability[1]));
+            line(ui, "Hidden ability", |ui| ability(ui, &mut d.ability[2]));
+        });
+    });
+}
+
+fn group_catch(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    group(ui, "Catch, rewards and breeding", |ui| {
+        grid("catch").show(ui, |ui| {
+            line(ui, "Catch rate", |ui| {
+                number(ui, &mut d.capture_rate, 255.0);
+                ui.label(widget::hint(&percent(d.capture_rate)));
+            });
+            line(ui, "Escape rate", |ui| {
+                number(ui, &mut d.escape_rate, 255.0);
+                ui.label(widget::hint(&percent(d.escape_rate)));
+            });
+            line(ui, "Base experience", |ui| number(ui, &mut d.give_experience, 65535.0));
+            line(ui, "Effort values given", |ui| {
+                number(ui, &mut d.give_effort_values, 65535.0);
+                ui.label(widget::hint("2 bits per stat"));
+            });
+            line(ui, "Item 1 (wild)", |ui| item(ui, &mut d.give_item[0]));
+            line(ui, "Item 2 (wild)", |ui| item(ui, &mut d.give_item[1]));
+            line(ui, "Item 3 (wild)", |ui| item(ui, &mut d.give_item[2]));
+            line(ui, "Gender", |ui| {
+                number(ui, &mut d.gender, 255.0);
+                ui.label(widget::hint(&gender_text(d.gender)));
+            });
+            line(ui, "Egg hatch cycles", |ui| number(ui, &mut d.egg_hatch_steps, 255.0));
+            line(ui, "Base friendship", |ui| number(ui, &mut d.base_friendship, 255.0));
+            line(ui, "Egg Group 1", |ui| menu(ui, "egg_1", &mut d.egg_group[0], &names::EGG_GROUP, 140.0));
+            line(ui, "Egg Group 2", |ui| menu(ui, "egg_2", &mut d.egg_group[1], &names::EGG_GROUP, 140.0));
+        });
+    });
+}
+
+fn group_size(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    group(ui, "Size and forms", |ui| {
+        grid("size").show(ui, |ui| {
+            line(ui, "Height", |ui| number(ui, &mut d.height, 65535.0));
+            line(ui, "Fake height", |ui| number(ui, &mut d.fake_height, 65535.0));
+            line(ui, "Weight (hectograms)", |ui| number(ui, &mut d.weight, 65535.0));
+            line(ui, "Form count", |ui| number(ui, &mut d.form_count, 255.0));
+            line(ui, "Form index", |ui| number(ui, &mut d.form_index, 65535.0));
+            line(ui, "Form index 2", |ui| number(ui, &mut d.form_index_2, 65535.0));
+        });
+    });
+}
+
+fn group_machines(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    group(ui, "Machines (one bit each)", |ui| {
+        grid("machines").show(ui, |ui| {
+            for (i, word) in d.technical_moves.iter_mut().enumerate() {
+                line(ui, &format!("Bits {} to {}", i * 32, i * 32 + 31), |ui| {
+                    let r = ui.add(egui::DragValue::new(word).hexadecimal(8, false, true).speed(1.0));
+                    if r.clicked() || r.dragged() || r.has_focus() {
+                        widget::set_active_id(ui, r.id);
+                    }
+                    if widget::is_active(ui, r.id) && widget::page_has_focus(ui) {
+                        widget::glow(ui, r.rect, 4.0);
+                        ui.input_mut(|inp| {
+                            let mut delta: i64 = 0;
+                            if inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                                delta += 1;
+                            }
+                            if inp.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                                delta -= 1;
+                            }
+                            if delta != 0 {
+                                *word = word.wrapping_add_signed(delta as i32);
+                            }
+                        });
+                    }
+                });
+            }
+        });
+    });
+}
+
+fn group_unknown(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    group(ui, "Not described yet", |ui| {
+        grid("unknown").show(ui, |ui| {
+            line(ui, "Unknown 0", |ui| number(ui, &mut d.unknown_0, 255.0));
+            line(ui, "Unknown 1", |ui| number(ui, &mut d.unknown_1, 255.0));
+            line(ui, "Unknown 2", |ui| number(ui, &mut d.unknown_2, 255.0));
+            line(ui, "Unknown 4", |ui| number(ui, &mut d.unknown_4, 65535.0));
+            line(ui, "Last 16 bytes", |ui| {
+                // Two lines of eight bytes, to keep the group narrow.
+                let hex = |bytes: &[u8]| bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+                ui.label(egui::RichText::new(format!("{}
+{}", hex(&d.rest[..8]), hex(&d.rest[8..]))).monospace());
+            });
+        });
+    });
+}
+
+/// The groups of the General tab, side by side: as many columns as the window has room for.
+fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData) {
+    const GROUPS: [fn(&mut egui::Ui, &mut SpeciesData); 6] = [group_statistics, group_types, group_catch, group_size, group_machines, group_unknown];
+    let columns = (((ui.available_width() + 10.0) / (COLUMN_WIDTH + 10.0)).floor() as usize).clamp(1, 3);
+    let layout: Vec<Vec<usize>> = match columns {
+        3 => vec![vec![0, 1], vec![2], vec![3, 4, 5]],
+        2 => vec![vec![0, 1, 3], vec![2, 4, 5]],
+        _ => vec![(0..GROUPS.len()).collect()],
+    };
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        let grid = |name: &'static str| egui::Grid::new(name).num_columns(2).spacing([24.0, 8.0]);
-        widget::card(ui, |ui| {
-            ui.label(widget::title(&format!("Base statistics (total {})", d.base_total())));
-            grid("stats").show(ui, |ui| {
-                line(ui, "HP", |ui| number(ui, &mut d.base_hp, 255.0));
-                line(ui, "Attack", |ui| number(ui, &mut d.base_attack, 255.0));
-                line(ui, "Defense", |ui| number(ui, &mut d.base_defense, 255.0));
-                line(ui, "Special Attack", |ui| number(ui, &mut d.base_special_attack, 255.0));
-                line(ui, "Special Defense", |ui| number(ui, &mut d.base_special_defense, 255.0));
-                line(ui, "Speed", |ui| number(ui, &mut d.base_speed, 255.0));
-            });
-        });
-        ui.add_space(8.0);
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Types and abilities"));
-            grid("types").show(ui, |ui| {
-                line(ui, "Type 1", |ui| menu(ui, "type_1", &mut d.types[0], &names::TYPE, 120.0));
-                line(ui, "Type 2", |ui| menu(ui, "type_2", &mut d.types[1], &names::TYPE, 120.0));
-                line(ui, "Ability 1", |ui| ability(ui, &mut d.ability[0]));
-                line(ui, "Ability 2", |ui| ability(ui, &mut d.ability[1]));
-                line(ui, "Hidden ability", |ui| ability(ui, &mut d.ability[2]));
-            });
-        });
-        ui.add_space(8.0);
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Catch, rewards and breeding"));
-            grid("catch").show(ui, |ui| {
-                line(ui, "Catch rate", |ui| number(ui, &mut d.capture_rate, 255.0));
-                line(ui, "Escape rate", |ui| number(ui, &mut d.escape_rate, 255.0));
-                line(ui, "Base experience", |ui| number(ui, &mut d.give_experience, 65535.0));
-                line(ui, "Effort values given", |ui| {
-                    number(ui, &mut d.give_effort_values, 65535.0);
-                    ui.label(widget::hint("two bits for each statistic"));
+        ui.horizontal_top(|ui| {
+            for column in layout {
+                ui.vertical(|ui| {
+                    ui.set_width(COLUMN_WIDTH);
+                    for index in column {
+                        GROUPS[index](ui, d);
+                    }
                 });
-                line(ui, "Item 1 (wild)", |ui| item(ui, &mut d.give_item[0]));
-                line(ui, "Item 2 (wild)", |ui| item(ui, &mut d.give_item[1]));
-                line(ui, "Item 3 (wild)", |ui| item(ui, &mut d.give_item[2]));
-                line(ui, "Gender", |ui| {
-                    number(ui, &mut d.gender, 255.0);
-                    ui.label(widget::hint("0 male only, 254 female only, 255 no gender"));
-                });
-                line(ui, "Egg hatch cycles", |ui| number(ui, &mut d.egg_hatch_steps, 255.0));
-                line(ui, "Base friendship", |ui| number(ui, &mut d.base_friendship, 255.0));
-                line(ui, "Egg Group 1", |ui| menu(ui, "egg_1", &mut d.egg_group[0], &names::EGG_GROUP, 140.0));
-                line(ui, "Egg Group 2", |ui| menu(ui, "egg_2", &mut d.egg_group[1], &names::EGG_GROUP, 140.0));
-            });
-        });
-        ui.add_space(8.0);
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Size and forms"));
-            grid("size").show(ui, |ui| {
-                line(ui, "Height", |ui| number(ui, &mut d.height, 65535.0));
-                line(ui, "Fake height", |ui| number(ui, &mut d.fake_height, 65535.0));
-                line(ui, "Weight (hectograms)", |ui| number(ui, &mut d.weight, 65535.0));
-                line(ui, "Form count", |ui| number(ui, &mut d.form_count, 255.0));
-                line(ui, "Form index", |ui| number(ui, &mut d.form_index, 65535.0));
-                line(ui, "Form index 2", |ui| number(ui, &mut d.form_index_2, 65535.0));
-            });
-        });
-        ui.add_space(8.0);
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Technical and hidden machines (one bit each)"));
-            grid("machines").show(ui, |ui| {
-                for (i, word) in d.technical_moves.iter_mut().enumerate() {
-                    line(ui, &format!("Bits {} to {}", i * 32, i * 32 + 31), |ui| {
-                        ui.add(egui::DragValue::new(word).hexadecimal(8, false, true).speed(1.0));
-                    });
-                }
-            });
-        });
-        ui.add_space(8.0);
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Not described yet"));
-            grid("unknown").show(ui, |ui| {
-                line(ui, "Unknown 0", |ui| number(ui, &mut d.unknown_0, 255.0));
-                line(ui, "Unknown 1", |ui| number(ui, &mut d.unknown_1, 255.0));
-                line(ui, "Unknown 2", |ui| number(ui, &mut d.unknown_2, 255.0));
-                line(ui, "Unknown 4", |ui| number(ui, &mut d.unknown_4, 65535.0));
-                line(ui, "Last 16 bytes", |ui| {
-                    ui.label(egui::RichText::new(d.rest.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")).monospace());
-                });
-            });
+                ui.add_space(10.0);
+            }
         });
     });
 }
@@ -304,6 +490,7 @@ impl Module for Species {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
+        widget::set_page_focus(ui.ctx(), session.focus_page);
         ui.add_space(8.0);
         ui.heading("Species");
         ui.add_space(8.0);
@@ -329,18 +516,67 @@ impl Module for Species {
         }
         self.top_bar(ui, session);
         ui.add_space(8.0);
+        let tabs_id = ui.make_persistent_id("species_tabs");
         ui.horizontal_wrapped(|ui| {
             for (i, name) in TABS.iter().enumerate() {
-                ui.selectable_value(&mut self.tab, i, *name);
+                let chosen = self.tab == i;
+                let r = ui.selectable_label(chosen, *name);
+                if r.clicked() {
+                    self.tab = i;
+                    widget::set_active_id(ui, tabs_id);
+                }
+                if chosen && widget::is_active(ui, tabs_id) && widget::page_has_focus(ui) {
+                    widget::glow(ui, r.rect, 6.0);
+                }
             }
         });
+        if widget::is_active(ui, tabs_id) && widget::page_has_focus(ui) {
+            ui.input_mut(|i| {
+                let mut step: isize = 0;
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight)
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                {
+                    step += 1;
+                }
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft)
+                    || i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+                {
+                    step -= 1;
+                }
+                if step != 0 {
+                    self.tab = (self.tab as isize + step).clamp(0, TABS.len() as isize - 1) as usize;
+                }
+            });
+        }
         ui.add_space(6.0);
         match (self.tab, self.data.as_mut()) {
-            (0, Some(data)) => data_tab(ui, data),
+            (0, Some(data)) => general_tab(ui, data),
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn a_rate_is_a_percentage_of_255() {
+        assert_eq!(percent(255), "100 %");
+        assert_eq!(percent(0), "0 %");
+        assert_eq!(percent(45), "17.6 %");
+        assert_eq!(percent(3), "1.2 %");
+    }
+
+    #[test]
+    fn the_gender_number_gives_the_chance_to_be_female() {
+        assert_eq!(gender_text(0), "male only");
+        assert_eq!(gender_text(254), "female only");
+        assert_eq!(gender_text(255), "no gender");
+        assert_eq!(gender_text(31), "12.5 % female, 87.5 % male");
+        assert_eq!(gender_text(127), "50 % female, 50 % male");
     }
 }

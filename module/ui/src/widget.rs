@@ -79,6 +79,51 @@ pub fn placeholder(ui: &mut egui::Ui, name: &str, text: &str, session: &sango_co
     });
 }
 
+/// The keys used in egui temp data to remember which widget has focus on the page.
+const ACTIVE_WIDGET_KEY: &str = "sango_active_widget";
+const PAGE_FOCUS_KEY: &str = "sango_page_focus";
+
+/// Sets whether the page currently has focus (false when side bar has focus).
+pub fn set_page_focus(ctx: &egui::Context, focus: bool) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(PAGE_FOCUS_KEY), focus));
+}
+
+/// Returns true if the page currently has focus.
+pub fn page_has_focus(ui: &egui::Ui) -> bool {
+    ui.data(|d| d.get_temp(egui::Id::new(PAGE_FOCUS_KEY)).unwrap_or(true))
+}
+
+/// Returns the ID of the widget that currently has focus on the page.
+pub fn active_id(ui: &egui::Ui) -> Option<egui::Id> {
+    ui.data(|d| d.get_temp(egui::Id::new(ACTIVE_WIDGET_KEY)))
+}
+
+/// Sets the active widget ID on the page.
+pub fn set_active_id(ui: &egui::Ui, id: egui::Id) {
+    ui.data_mut(|d| d.insert_temp(egui::Id::new(ACTIVE_WIDGET_KEY), id));
+}
+
+/// Checks if this widget is the active one on the page.
+pub fn is_active(ui: &egui::Ui, id: egui::Id) -> bool {
+    active_id(ui) == Some(id)
+}
+
+/// A glow around a rectangle that gets brighter and darker again and again (about every 2.4 seconds).
+///
+/// It shows which element the keyboard is for. The window is drawn again while the glow is visible.
+pub fn glow(ui: &egui::Ui, rect: egui::Rect, rounding: f32) {
+    let time = ui.input(|i| i.time) as f32;
+    let pulse = 0.5 + 0.5 * (time * 2.6).sin();
+    let strength = 0.2 + 0.8 * pulse;
+    for layer in 0..4 {
+        let grow = 1.0 + layer as f32 * 1.6;
+        let alpha = (strength * (170.0 - 38.0 * layer as f32)) as u8;
+        let colour = egui::Color32::from_rgba_unmultiplied(79, 70, 229, alpha);
+        ui.painter().rect_stroke(rect.expand(grow), Rounding::same(rounding + grow), Stroke::new(1.6_f32, colour));
+    }
+    ui.ctx().request_repaint();
+}
+
 /// Adds a step to a number and keeps it between the limits.
 pub fn stepped(value: f64, delta: f64, min: f64, max: f64) -> f64 {
     (value + delta).clamp(min, max)
@@ -126,9 +171,36 @@ fn arrow_button(ui: &mut egui::Ui, up: bool) -> u32 {
 pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64, max: f64) -> bool {
     let before = value.to_f64();
     let mut delta = 0.0;
-    // The keys are taken before the field is drawn: the field would use them to move its cursor.
     let id = ui.next_auto_id();
-    if ui.memory(|m| m.has_focus(id)) {
+
+    let res = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let drag_response = ui.add(egui::DragValue::new(value).range(min..=max).speed(0.5));
+        let (up_steps, down_steps) = ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let up = arrow_button(ui, true);
+            let down = arrow_button(ui, false);
+            (up, down)
+        }).inner;
+        (drag_response, up_steps, down_steps)
+    });
+
+    let (drag_response, up_steps, down_steps) = res.inner;
+    let total_rect = res.response.rect;
+
+    let clicked = drag_response.clicked()
+        || drag_response.dragged()
+        || drag_response.has_focus()
+        || up_steps > 0
+        || down_steps > 0
+        || (ui.rect_contains_pointer(total_rect) && ui.input(|i| i.pointer.any_pressed()));
+
+    if clicked {
+        set_active_id(ui, id);
+    }
+
+    if is_active(ui, id) && page_has_focus(ui) {
+        glow(ui, total_rect, 4.0);
         ui.input_mut(|i| {
             for (modifiers, unit) in [(egui::Modifiers::SHIFT, 10.0), (egui::Modifiers::NONE, 1.0)] {
                 if i.consume_key(modifiers, egui::Key::ArrowUp) {
@@ -138,27 +210,32 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
                     delta -= unit;
                 }
             }
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::PageUp) {
+                delta += 10.0;
+            }
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+                delta -= 10.0;
+            }
         });
     }
+
     let unit = if ui.input(|i| i.modifiers.shift) { 10.0 } else { 1.0 };
-    ui.add(egui::DragValue::new(value).range(min..=max).speed(0.5));
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = 2.0;
-        delta += unit * arrow_button(ui, true) as f64;
-        delta -= unit * arrow_button(ui, false) as f64;
-    });
+    delta += unit * up_steps as f64;
+    delta -= unit * down_steps as f64;
+
     if delta != 0.0 {
         *value = T::from_f64(stepped(value.to_f64(), delta, min, max));
         // While the field is being typed in, it keeps its own text and would write the old number
         // back: the text is dropped, and the field shows the new number at the next frame.
-        ui.data_mut(|d| d.remove::<String>(id));
+        ui.data_mut(|d| d.remove::<String>(drag_response.id));
     }
     value.to_f64() != before
 }
 
 #[cfg(test)]
 mod test {
-    use super::stepped;
+    use super::*;
+    use eframe::egui;
 
     #[test]
     fn a_step_stays_between_the_limits() {
@@ -166,5 +243,115 @@ mod test {
         assert_eq!(stepped(255.0, 1.0, 0.0, 255.0), 255.0);
         assert_eq!(stepped(0.0, -10.0, 0.0, 255.0), 0.0);
         assert_eq!(stepped(250.0, 10.0, 0.0, 255.0), 255.0);
+    }
+
+    #[test]
+    fn page_focus_can_be_set_and_read() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                assert!(page_has_focus(ui));
+                set_page_focus(ctx, false);
+                assert!(!page_has_focus(ui));
+                set_page_focus(ctx, true);
+                assert!(page_has_focus(ui));
+            });
+        });
+    }
+
+    #[test]
+    fn active_id_can_be_set_and_checked() {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let id1 = egui::Id::new("widget_1");
+                let id2 = egui::Id::new("widget_2");
+                assert_eq!(active_id(ui), None);
+                assert!(!is_active(ui, id1));
+
+                set_active_id(ui, id1);
+                assert_eq!(active_id(ui), Some(id1));
+                assert!(is_active(ui, id1));
+                assert!(!is_active(ui, id2));
+
+                set_active_id(ui, id2);
+                assert_eq!(active_id(ui), Some(id2));
+                assert!(!is_active(ui, id1));
+                assert!(is_active(ui, id2));
+            });
+        });
+    }
+
+    #[test]
+    fn spin_increments_with_arrow_up_when_active() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+
+        let mut hp: u8 = 45;
+        let _ = ctx.run(raw_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let id = ui.next_auto_id();
+                set_active_id(ui, id);
+                spin(ui, &mut hp, 0.0, 255.0);
+            });
+        });
+
+        assert_eq!(hp, 46);
+    }
+
+    #[test]
+    fn spin_decrements_with_arrow_down_when_active() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowDown,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+
+        let mut catch_rate: u8 = 45;
+        let _ = ctx.run(raw_input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let id = ui.next_auto_id();
+                set_active_id(ui, id);
+                spin(ui, &mut catch_rate, 0.0, 255.0);
+            });
+        });
+
+        assert_eq!(catch_rate, 44);
+    }
+
+    #[test]
+    fn spin_does_not_change_when_page_lacks_focus() {
+        let ctx = egui::Context::default();
+        let mut raw_input = egui::RawInput::default();
+        raw_input.events.push(egui::Event::Key {
+            key: egui::Key::ArrowUp,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+
+        let mut hp: u8 = 45;
+        let _ = ctx.run(raw_input, |ctx| {
+            set_page_focus(ctx, false);
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let id = ui.next_auto_id();
+                set_active_id(ui, id);
+                spin(ui, &mut hp, 0.0, 255.0);
+            });
+        });
+
+        assert_eq!(hp, 45);
     }
 }

@@ -77,6 +77,7 @@ impl eframe::App for App {
             }
         }
         self.session.focus_page = !self.side_bar_focus;
+        widget::set_page_focus(ctx, self.session.focus_page);
         self.side_bar(ctx);
         let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(18.0));
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
