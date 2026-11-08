@@ -51,22 +51,30 @@ pub fn side_button(ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) -
     response
 }
 
-/// A page that is not written yet. Without the dump of the game, it asks for it.
+/// A card that says which folder of Home is missing.
+pub fn missing_card(ui: &mut egui::Ui, message: &str) {
+    card(ui, |ui| {
+        ui.set_width(420.0_f32.min(ui.available_width()));
+        badge(ui, "Folders needed", color::ROSE);
+        ui.add_space(4.0);
+        ui.label(hint(message));
+    });
+}
+
+/// A page that is not written yet. Without the two folders of Home, it asks for them.
 pub fn placeholder(ui: &mut egui::Ui, name: &str, text: &str, session: &sango_core::Session) {
     ui.add_space(8.0);
     ui.heading(name);
     ui.label(hint(text));
     ui.add_space(16.0);
+    if let Some(message) = session.missing() {
+        missing_card(ui, message);
+        return;
+    }
     card(ui, |ui| {
         ui.set_width(420.0_f32.min(ui.available_width()));
-        if session.dump.is_none() {
-            badge(ui, "Dump needed", color::ROSE);
-            ui.add_space(4.0);
-            ui.label(hint("Choose the romfs dump of the game in Home first."));
-        } else {
-            badge(ui, "Not started", color::AMBER);
-            ui.add_space(4.0);
-            ui.label(hint("..."));
-        }
+        badge(ui, "Not started", color::AMBER);
+        ui.add_space(4.0);
+        ui.label(hint("..."));
     });
 }

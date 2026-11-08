@@ -376,8 +376,10 @@ impl Module for Archive {
         ui.heading("Archive");
         ui.label(widget::hint("The files of the romfs, with the tree of each GARC archive."));
         ui.add_space(10.0);
-        let Some(dump) = session.dump.clone() else {
-            widget::placeholder(ui, "Archive", "...", session);
+        let (None, Some(dump)) = (session.missing(), session.dump.clone()) else {
+            if let Some(message) = session.missing() {
+                widget::missing_card(ui, message);
+            }
             return;
         };
         if self.dump_root.as_deref() != Some(dump.root()) {

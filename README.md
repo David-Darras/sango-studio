@@ -1,6 +1,9 @@
 # Sango Studio
 
-Studio for Pokemon Alpha Sapphire, version 1.4 only. It needs a dump of the romfs of the game (chosen in Home).
+Studio for Pokémon Alpha Sapphire, version 1.4 only. It needs two folders, chosen in Home:
+
+- a dump of the romfs of the game (read only);
+- the folder `sdmc/sango-studio`, where the changed files go. The game loads them again while it runs.
 
 ![The Archive page: the tree of a GARC archive, its files and a hex view](docs/archive.png)
 
