@@ -7,3 +7,4 @@ description = "The species editor of Sango Studio."
 [dependencies]
 sango-core.workspace = true
 sango-ui.workspace = true
+zerocopy.workspace = true

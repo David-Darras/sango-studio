@@ -6,11 +6,11 @@
 /// The size of a file of the archive.
 pub const FILE_SIZE: usize = 80;
 
-/// The size of the part that has fields.
-const FIELDS_SIZE: usize = 64;
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// The data of a species or of a form.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable)]
+#[repr(C)]
 pub struct SpeciesData {
     pub base_hp: u8,
     pub base_attack: u8,
@@ -58,101 +58,19 @@ pub struct SpeciesData {
     pub rest: [u8; 16],
 }
 
-/// A reader of little-endian numbers.
-struct Reader<'a> {
-    bytes: &'a [u8],
-    at: usize,
-}
-
-impl Reader<'_> {
-    fn u8(&mut self) -> u8 {
-        let v = self.bytes[self.at];
-        self.at += 1;
-        v
-    }
-
-    fn u16(&mut self) -> u16 {
-        let v = u16::from_le_bytes([self.bytes[self.at], self.bytes[self.at + 1]]);
-        self.at += 2;
-        v
-    }
-
-    fn u32(&mut self) -> u32 {
-        let b = &self.bytes[self.at..self.at + 4];
-        self.at += 4;
-        u32::from_le_bytes([b[0], b[1], b[2], b[3]])
-    }
-}
-
 impl SpeciesData {
     /// Reads the data from the bytes of a file.
     pub fn from_bytes(bytes: &[u8]) -> Result<SpeciesData, String> {
         if bytes.len() != FILE_SIZE {
             return Err(format!("The file has {} bytes. It must have {FILE_SIZE}.", bytes.len()));
         }
-        let mut r = Reader { bytes, at: 0 };
-        let data = SpeciesData {
-            base_hp: r.u8(),
-            base_attack: r.u8(),
-            base_defense: r.u8(),
-            base_speed: r.u8(),
-            base_special_attack: r.u8(),
-            base_special_defense: r.u8(),
-            types: [r.u8(), r.u8()],
-            capture_rate: r.u8(),
-            unknown_0: r.u8(),
-            give_effort_values: r.u16(),
-            give_item: [r.u16(), r.u16(), r.u16()],
-            gender: r.u8(),
-            egg_hatch_steps: r.u8(),
-            base_friendship: r.u8(),
-            unknown_1: r.u8(),
-            egg_group: [r.u8(), r.u8()],
-            ability: [r.u8(), r.u8(), r.u8()],
-            escape_rate: r.u8(),
-            form_index: r.u16(),
-            form_index_2: r.u16(),
-            form_count: r.u8(),
-            unknown_2: r.u8(),
-            give_experience: r.u16(),
-            height: r.u16(),
-            weight: r.u16(),
-            technical_moves: [r.u32(), r.u32(), r.u32(), r.u32(), r.u32()],
-            fake_height: r.u16(),
-            unknown_4: r.u16(),
-            rest: bytes[FIELDS_SIZE..].try_into().map_err(|_| "The end of the file is cut.".to_string())?,
-        };
-        debug_assert_eq!(r.at, FIELDS_SIZE);
-        Ok(data)
+        SpeciesData::read_from_bytes(bytes)
+            .map_err(|e| format!("The file could not be read: {e}"))
     }
 
     /// Writes the data as the bytes of a file.
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(FILE_SIZE);
-        out.extend_from_slice(&[self.base_hp, self.base_attack, self.base_defense, self.base_speed, self.base_special_attack, self.base_special_defense]);
-        out.extend_from_slice(&self.types);
-        out.extend_from_slice(&[self.capture_rate, self.unknown_0]);
-        out.extend_from_slice(&self.give_effort_values.to_le_bytes());
-        for item in self.give_item {
-            out.extend_from_slice(&item.to_le_bytes());
-        }
-        out.extend_from_slice(&[self.gender, self.egg_hatch_steps, self.base_friendship, self.unknown_1]);
-        out.extend_from_slice(&self.egg_group);
-        out.extend_from_slice(&self.ability);
-        out.push(self.escape_rate);
-        out.extend_from_slice(&self.form_index.to_le_bytes());
-        out.extend_from_slice(&self.form_index_2.to_le_bytes());
-        out.extend_from_slice(&[self.form_count, self.unknown_2]);
-        out.extend_from_slice(&self.give_experience.to_le_bytes());
-        out.extend_from_slice(&self.height.to_le_bytes());
-        out.extend_from_slice(&self.weight.to_le_bytes());
-        for word in self.technical_moves {
-            out.extend_from_slice(&word.to_le_bytes());
-        }
-        out.extend_from_slice(&self.fake_height.to_le_bytes());
-        out.extend_from_slice(&self.unknown_4.to_le_bytes());
-        out.extend_from_slice(&self.rest);
-        out
+        self.as_bytes().to_vec()
     }
 
     /// An array of the six base stats.
@@ -178,6 +96,60 @@ impl SpeciesData {
             diff * diff
         }).sum::<f32>() / 6.0;
         variance.sqrt()
+    }
+
+    /// The effort values that the Pokémon gives when it faints: 2 bits per stat (0 to 3).
+    pub fn ev_hp(&self) -> u8 {
+        (self.give_effort_values & 0x3) as u8
+    }
+
+    pub fn ev_attack(&self) -> u8 {
+        ((self.give_effort_values >> 2) & 0x3) as u8
+    }
+
+    pub fn ev_defense(&self) -> u8 {
+        ((self.give_effort_values >> 4) & 0x3) as u8
+    }
+
+    pub fn ev_speed(&self) -> u8 {
+        ((self.give_effort_values >> 6) & 0x3) as u8
+    }
+
+    pub fn ev_special_attack(&self) -> u8 {
+        ((self.give_effort_values >> 8) & 0x3) as u8
+    }
+
+    pub fn ev_special_defense(&self) -> u8 {
+        ((self.give_effort_values >> 10) & 0x3) as u8
+    }
+
+    pub fn set_ev_hp(&mut self, val: u8) {
+        self.give_effort_values = (self.give_effort_values & !0x3) | (val as u16 & 0x3);
+    }
+
+    pub fn set_ev_attack(&mut self, val: u8) {
+        self.give_effort_values = (self.give_effort_values & !(0x3 << 2)) | ((val as u16 & 0x3) << 2);
+    }
+
+    pub fn set_ev_defense(&mut self, val: u8) {
+        self.give_effort_values = (self.give_effort_values & !(0x3 << 4)) | ((val as u16 & 0x3) << 4);
+    }
+
+    pub fn set_ev_speed(&mut self, val: u8) {
+        self.give_effort_values = (self.give_effort_values & !(0x3 << 6)) | ((val as u16 & 0x3) << 6);
+    }
+
+    pub fn set_ev_special_attack(&mut self, val: u8) {
+        self.give_effort_values = (self.give_effort_values & !(0x3 << 8)) | ((val as u16 & 0x3) << 8);
+    }
+
+    pub fn set_ev_special_defense(&mut self, val: u8) {
+        self.give_effort_values = (self.give_effort_values & !(0x3 << 10)) | ((val as u16 & 0x3) << 10);
+    }
+
+    /// The total effort values given.
+    pub fn ev_total(&self) -> u8 {
+        self.ev_hp() + self.ev_attack() + self.ev_defense() + self.ev_speed() + self.ev_special_attack() + self.ev_special_defense()
     }
 }
 
@@ -212,6 +184,8 @@ mod test {
         assert_eq!(d.give_experience, 142);
         assert_eq!(d.weight, 130);
         assert_eq!(d.technical_moves[0], 0x8439_8720);
+        assert_eq!((d.ev_hp(), d.ev_attack(), d.ev_defense(), d.ev_speed(), d.ev_special_attack(), d.ev_special_defense()), (0, 0, 0, 0, 1, 1));
+        assert_eq!(d.ev_total(), 2);
     }
 
     #[test]

@@ -477,8 +477,44 @@ pub fn stepped(value: f64, delta: f64, min: f64, max: f64) -> f64 {
 /// One of the two small arrow buttons of a spin box. Returns how many steps to do now:
 /// one at the click, then more while the button stays pressed.
 fn arrow_button(ui: &mut egui::Ui, up: bool) -> u32 {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 14.0), egui::Sense::click());
-    let fill = if response.is_pointer_button_down_on() {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 14.0), egui::Sense::click_and_drag());
+    let id = response.id.with("hold");
+    let pointer_down = response.is_pointer_button_down_on() || response.dragged();
+    let mut steps: u32 = 0;
+
+    if pointer_down {
+        let now = ui.input(|i| i.time);
+        let state: Option<(f64, f64)> = ui.data_mut(|d| d.get_temp(id));
+
+        match state {
+            None => {
+                // First frame of press: fire 1 step immediately and record start time
+                ui.data_mut(|d| d.insert_temp(id, (now, now)));
+                steps = 1;
+            }
+            Some((start, last)) => {
+                let hold_duration = now - start;
+                let interval = if hold_duration > 2.5 {
+                    0.02
+                } else if hold_duration > 1.2 {
+                    0.035
+                } else {
+                    0.06
+                };
+
+                if hold_duration > 0.35 && now - last >= interval {
+                    ui.data_mut(|d| d.insert_temp(id, (start, now)));
+                    steps = 1;
+                }
+            }
+        }
+        ui.ctx().request_repaint();
+    } else {
+        ui.data_mut(|d| d.remove::<(f64, f64)>(id));
+    }
+
+    let is_active = pointer_down;
+    let fill = if is_active {
         color::ACCENT
     } else if response.hovered() {
         color::ACCENT_SOFT
@@ -486,29 +522,17 @@ fn arrow_button(ui: &mut egui::Ui, up: bool) -> u32 {
         color::SURFACE_STRONG
     };
     ui.painter().rect_filled(rect, Rounding::same(4.0), fill);
-    let ink = if response.is_pointer_button_down_on() { color::WHITE } else { color::TEXT };
+    let ink = if is_active { color::WHITE } else { color::TEXT };
     let c = rect.center();
     let (w, h) = (4.5, 2.5);
-    let points = if up { vec![egui::pos2(c.x - w, c.y + h), egui::pos2(c.x + w, c.y + h), egui::pos2(c.x, c.y - h)] } else { vec![egui::pos2(c.x - w, c.y - h), egui::pos2(c.x + w, c.y - h), egui::pos2(c.x, c.y + h)] };
-    ui.painter().add(egui::Shape::convex_polygon(points, ink, Stroke::NONE));
-    // The first step is at the click. After a short wait, the button repeats while it is pressed.
-    let id = response.id.with("hold");
-    if response.is_pointer_button_down_on() {
-        let now = ui.input(|i| i.time);
-        let (start, last): (f64, f64) = ui.data_mut(|d| *d.get_temp_mut_or(id, (now, now)));
-        if response.clicked() {
-            return 1;
-        }
-        ui.ctx().request_repaint();
-        if now - start > 0.45 && now - last > 0.05 {
-            ui.data_mut(|d| d.insert_temp(id, (start, now)));
-            return 1;
-        }
-        0
+    let points = if up {
+        vec![egui::pos2(c.x - w, c.y + h), egui::pos2(c.x + w, c.y + h), egui::pos2(c.x, c.y - h)]
     } else {
-        ui.data_mut(|d| d.remove::<(f64, f64)>(id));
-        response.clicked() as u32
-    }
+        vec![egui::pos2(c.x - w, c.y - h), egui::pos2(c.x + w, c.y - h), egui::pos2(c.x, c.y + h)]
+    };
+    ui.painter().add(egui::Shape::convex_polygon(points, ink, Stroke::NONE));
+
+    steps
 }
 
 /// A button that can be focused with keyboard navigation. Pressing Enter or Space clicks it.
@@ -546,6 +570,53 @@ pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill:
     clicked
 }
 
+/// An imposing, polished tab button with distinct active, hovered, and inactive states.
+pub fn tab_button(ui: &mut egui::Ui, text: &str, selected: bool, has_glow: bool) -> egui::Response {
+    let font_id = egui::FontId::proportional(14.5);
+    let text_width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), color::WHITE).size().x);
+    let padding_x = 18.0_f32;
+    let height = 36.0_f32;
+    let width = (text_width + 2.0 * padding_x).max(74.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::click());
+
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+
+    let rounding = Rounding::same(10.0);
+
+    let fill = if selected {
+        color::ACCENT
+    } else if response.hovered() {
+        color::ACCENT_SOFT
+    } else {
+        egui::Color32::TRANSPARENT
+    };
+
+    let text_color = if selected {
+        color::WHITE
+    } else if response.hovered() {
+        color::ACCENT
+    } else {
+        color::TEXT
+    };
+
+    ui.painter().rect_filled(rect, rounding, fill);
+    if selected && has_glow {
+        glow(ui, rect, 10.0);
+    }
+
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        font_id,
+        text_color,
+    );
+
+    response
+}
+
 /// A number field with two arrow buttons. When active, plain ArrowUp and ArrowDown
 /// directly increment and decrement the value without requiring an edit mode.
 /// Holding Shift steps by 10. PageUp and PageDown step by 10.
@@ -556,7 +627,8 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
 
     let res = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        let drag_response = ui.add(egui::DragValue::new(value).range(min..=max).speed(0.5));
+        let drag_width = if max > 999.0 { 60.0 } else { 44.0 };
+        let drag_response = ui.add_sized([drag_width, 22.0], egui::DragValue::new(value).range(min..=max).speed(0.5));
         let (up_steps, down_steps) = ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let up = arrow_button(ui, true);
@@ -611,6 +683,7 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
     if delta != 0.0 {
         *value = T::from_f64(stepped(value.to_f64(), delta, min, max));
         ui.data_mut(|d| d.remove::<String>(drag_response.id));
+        ui.ctx().request_repaint();
     }
     value.to_f64() != before
 }
@@ -840,6 +913,61 @@ mod test {
         });
 
         assert_eq!(hp, 55);
+    }
+
+    #[test]
+    fn spin_arrow_button_repeats_while_held() {
+        let ctx = egui::Context::default();
+        let mut hp: u8 = 45;
+        let click_pos = egui::pos2(65.0, 14.0);
+
+        // Frame 0: Lay out UI and position pointer over the arrow button
+        let mut warm_up = egui::RawInput::default();
+        warm_up.events.push(egui::Event::PointerMoved(click_pos));
+        let _ = ctx.run(warm_up, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                spin(ui, &mut hp, 0.0, 255.0);
+            });
+        });
+        assert_eq!(hp, 45);
+
+        // Frame 1: Press down on the arrow button at time = 0.0
+        let mut input0 = egui::RawInput::default();
+        input0.time = Some(0.0);
+        input0.events.push(egui::Event::PointerButton {
+            pos: click_pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        let _ = ctx.run(input0, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                spin(ui, &mut hp, 0.0, 255.0);
+            });
+        });
+        assert_eq!(hp, 46); // stepped immediately on click!
+
+        // Frame 2: Holding past initial repeat delay (t = 0.45s)
+        let mut input1 = egui::RawInput::default();
+        input1.time = Some(0.45);
+        let _ = ctx.run(input1, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                spin(ui, &mut hp, 0.0, 255.0);
+            });
+        });
+        assert_eq!(hp, 47);
+
+        // Frame 3: Holding continuously through multiple intervals
+        for t in 1..=10 {
+            let mut input = egui::RawInput::default();
+            input.time = Some(0.45 + t as f64 * 0.07);
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    spin(ui, &mut hp, 0.0, 255.0);
+                });
+            });
+        }
+        assert!(hp >= 55);
     }
 
     #[test]

@@ -549,7 +549,7 @@ mod test {
             app.update_ctx(ctx);
         });
 
-        // Frame 3: press Ctrl + ArrowRight to move to tab 1 ("Movepool")
+        // Frame 3: press Ctrl + ArrowRight to move to tab 1 ("Learnset")
         let mut right_input = egui::RawInput::default();
         right_input.events.push(egui::Event::Key {
             key: egui::Key::ArrowRight,

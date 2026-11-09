@@ -9,6 +9,7 @@ edition = "2021"
 [workspace.dependencies]
 eframe = { version = "0.29", default-features = false, features = ["wgpu", "default_fonts", "wayland", "x11"] }
 rfd = "0.15"
+zerocopy = { version = "0.8", features = ["derive"] }
 
 sango-core = { path = "module/core" }
 sango-ui = { path = "module/ui" }
