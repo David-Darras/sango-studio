@@ -10,9 +10,10 @@ mod names;
 
 use data::SpeciesData;
 use pokedex_data::PokedexData;
-use sango_core::Garc;
+use sango_core::{Clim, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// The number of the archive that has the data of the species.
@@ -82,6 +83,16 @@ pub struct Species {
     species_search: String,
     /// True once the search box has received focus on opening the dropdown.
     search_focused: bool,
+    /// The archive of the Pokémon icons.
+    icon_garc: Option<Garc>,
+    /// The icon textures, one per species: decoded at the first display, then kept.
+    icon_textures: HashMap<usize, Option<egui::TextureHandle>>,
+    /// The types and the base stats of all the species, for the species list.
+    list_rows: Option<Vec<ListRow>>,
+    /// The column that sorts the species list.
+    sort_column: SortColumn,
+    /// True when the species list goes from the largest value to the smallest one.
+    sort_descending: bool,
 }
 
 impl Default for Species {
@@ -106,8 +117,117 @@ impl Default for Species {
             scroll_list: false,
             species_search: String::new(),
             search_focused: false,
+            icon_garc: None,
+            icon_textures: HashMap::new(),
+            list_rows: None,
+            sort_column: SortColumn::Number,
+            sort_descending: false,
         }
     }
+}
+
+/// What the species list shows and sorts for one species: the types and the base stats.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ListRow {
+    /// The two types. The second one is the first one again when the species has one type.
+    types: [u8; 2],
+    /// The base stats: HP, Attack, Defense, Special Attack, Special Defense, Speed.
+    stats: [u8; 6],
+    /// The sum of the six base stats.
+    total: u16,
+}
+
+/// A column of the species list. A click on its header sorts the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SortColumn {
+    Number,
+    Name,
+    Type1,
+    Type2,
+    /// The place of the stat: HP, Attack, Defense, Special Attack, Special Defense, Speed.
+    Stat(usize),
+    Total,
+}
+
+/// The width of the species list, in points.
+const LIST_WIDTH: f32 = 624.0;
+
+/// The height of one row of the species list, in points.
+const LIST_ROW_HEIGHT: f32 = 34.0;
+
+/// The columns of the species list: x position, width, name, and the sort of a click on the header.
+const LIST_COLUMNS: [(f32, f32, &str, SortColumn); 11] = [
+    (0.0, 96.0, "#", SortColumn::Number),
+    (96.0, 144.0, "Name", SortColumn::Name),
+    (240.0, 62.0, "Type 1", SortColumn::Type1),
+    (302.0, 62.0, "Type 2", SortColumn::Type2),
+    (364.0, 36.0, "HP", SortColumn::Stat(0)),
+    (400.0, 36.0, "Atk", SortColumn::Stat(1)),
+    (436.0, 36.0, "Def", SortColumn::Stat(2)),
+    (472.0, 36.0, "SpA", SortColumn::Stat(3)),
+    (508.0, 36.0, "SpD", SortColumn::Stat(4)),
+    (544.0, 36.0, "Spe", SortColumn::Stat(5)),
+    (580.0, 44.0, "BST", SortColumn::Total),
+];
+
+/// True for a column of stats: its text is on the right, and a first click sorts it
+/// from the largest value to the smallest one.
+fn stat_column(column: SortColumn) -> bool {
+    matches!(column, SortColumn::Stat(_) | SortColumn::Total)
+}
+
+/// The name of the second type, or "-" when it is the first one again.
+fn second_type(row: &ListRow) -> &'static str {
+    if row.types[1] == row.types[0] {
+        "-"
+    } else {
+        names::TYPE.get(row.types[1] as usize).copied().unwrap_or("-")
+    }
+}
+
+/// Sorts the species of the list on one column. Equal species stay in the order of their numbers.
+fn sort_species(list: &mut [usize], rows: &[ListRow], column: SortColumn, descending: bool) {
+    let first_type = |n: usize| rows.get(n - 1).map_or("-", |r| names::TYPE.get(r.types[0] as usize).copied().unwrap_or("-"));
+    let second = |n: usize| rows.get(n - 1).map_or("-", second_type);
+    let stat = |n: usize, place: usize| rows.get(n - 1).map_or(0, |r| r.stats[place]);
+    let total = |n: usize| rows.get(n - 1).map_or(0, |r| r.total);
+    list.sort_by(|&a, &b| {
+        let order = match column {
+            SortColumn::Number => a.cmp(&b),
+            SortColumn::Name => names::SPECIES[a - 1].cmp(&names::SPECIES[b - 1]),
+            SortColumn::Type1 => first_type(a).cmp(&first_type(b)),
+            SortColumn::Type2 => second(a).cmp(&second(b)),
+            SortColumn::Stat(place) => stat(a, place).cmp(&stat(b, place)),
+            SortColumn::Total => total(a).cmp(&total(b)),
+        };
+        let order = if descending { order.reverse() } else { order };
+        order.then(a.cmp(&b))
+    });
+}
+
+/// The texture of the icon of a species: decoded at the first display, then kept.
+fn icon_texture<'a>(
+    textures: &'a mut HashMap<usize, Option<egui::TextureHandle>>,
+    garc: Option<&Garc>,
+    ctx: &egui::Context,
+    species: usize,
+) -> Option<&'a egui::TextureHandle> {
+    textures
+        .entry(species)
+        .or_insert_with(|| {
+            let file = *icons::ICON_FILES.get(species)? as usize;
+            let bytes = garc?.first_file(file)?;
+            let bytes = if sango_core::lz::is_compressed(bytes) {
+                sango_core::lz::decompress(bytes).ok()?
+            } else {
+                bytes.to_vec()
+            };
+            let image = Clim::parse(&bytes).ok()?;
+            let rgba = image.to_rgba().ok()?;
+            let pixels = egui::ColorImage::from_rgba_unmultiplied([image.width(), image.height()], &rgba);
+            Some(ctx.load_texture(format!("species_icon_{species}"), pixels, egui::TextureOptions::NEAREST))
+        })
+        .as_ref()
 }
 
 /// Matches species by name (prefix or substring) or by number.
@@ -181,6 +301,24 @@ impl Species {
         self.shape_baseline = self.shape;
     }
 
+    /// Reads the list data of all the species: the SD card first, then the romfs.
+    fn build_list_rows(&self, session: &Session) -> Vec<ListRow> {
+        (1..=SPECIES_COUNT)
+            .map(|species| {
+                let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+                let data = on_card.or_else(|| self.garc.as_ref().and_then(|g| g.first_file(species)).and_then(|b| SpeciesData::from_bytes(b).ok()));
+                match data {
+                    Some(d) => ListRow {
+                        types: [d.type_1, d.type_2],
+                        stats: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
+                        total: d.base_total() as u16,
+                    },
+                    None => ListRow { types: [0, 0], stats: [0; 6], total: 0 },
+                }
+            })
+            .collect()
+    }
+
     /// The number of forms of the chosen species (at least one).
     fn total_form_count(&self) -> usize {
         let base = self.garc.as_ref().and_then(|g| g.first_file(self.species)).and_then(|b| SpeciesData::from_bytes(b).ok());
@@ -200,7 +338,7 @@ impl Species {
                 let is_popup_open = ui.memory(|m| m.is_popup_open(popup_id));
 
                 let button_width = 220.0;
-                let button_height = ui.spacing().interact_size.y;
+                let button_height = 36.0;
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(button_width, button_height), egui::Sense::hover());
                 let button_response = ui.interact(rect, species_id, egui::Sense::click());
 
@@ -216,14 +354,22 @@ impl Species {
                         visuals.weak_bg_fill,
                         visuals.bg_stroke,
                     );
+                    // The icon of the chosen species, before its name.
+                    let mut icon_width = 0.0;
+                    if let Some(texture) = icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), self.species) {
+                        let icon = egui::Rect::from_min_size(egui::pos2(rect.left() + 6.0, rect.center().y - 15.0), egui::vec2(40.0, 30.0));
+                        let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                        ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
+                        icon_width = 44.0;
+                    }
                     let galley = egui::WidgetText::from(&species_text).into_galley(
                         ui,
                         Some(egui::TextWrapMode::Truncate),
-                        button_width - 28.0,
+                        button_width - 28.0 - icon_width,
                         egui::TextStyle::Button,
                     );
                     let text_rect = rect.shrink2(ui.spacing().button_padding);
-                    let text_pos = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect).min;
+                    let text_pos = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect).min + egui::vec2(icon_width, 0.0);
                     ui.painter().galley(text_pos, galley, visuals.text_color());
 
                     let icon_rect = egui::Rect::from_center_size(
@@ -243,14 +389,18 @@ impl Species {
                 }
 
                 widget::register_focusable(ui, species_id, button_response.rect);
+                if ui.memory(|m| m.is_popup_open(popup_id)) && self.list_rows.is_none() {
+                    let rows = self.build_list_rows(session);
+                    self.list_rows = Some(rows);
+                }
                 let popup_res = egui::popup::popup_below_widget(
                     ui,
                     popup_id,
                     &button_response,
                     egui::popup::PopupCloseBehavior::CloseOnClickOutside,
                     |ui| {
-                        ui.set_width(260.0);
-                        ui.set_max_width(260.0);
+                        ui.set_width(LIST_WIDTH);
+                        ui.set_max_width(LIST_WIDTH);
                         ui.spacing_mut().item_spacing.y = 4.0;
 
                         ui.horizontal(|ui| {
@@ -273,7 +423,49 @@ impl Species {
                         ui.separator();
 
                         let query = self.species_search.trim();
-                        let matches = match_species(query);
+                        let mut matches = match_species(query);
+
+                        // The header: a click sorts the list on that column.
+                        let (header_rect, _) = ui.allocate_exact_size(egui::vec2(LIST_WIDTH, 20.0), egui::Sense::hover());
+                        for (x, width, label, column) in LIST_COLUMNS {
+                            let cell = egui::Rect::from_min_size(egui::pos2(header_rect.left() + x, header_rect.top()), egui::vec2(width, 20.0));
+                            let response = ui.interact(cell, ui.make_persistent_id(("species_list_header", label)), egui::Sense::click());
+                            if response.hovered() {
+                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                            }
+                            let active = self.sort_column == column;
+                            let (position, anchor) = if stat_column(column) {
+                                (egui::pos2(cell.right() - 4.0, cell.center().y), egui::Align2::RIGHT_CENTER)
+                            } else {
+                                (egui::pos2(cell.left(), cell.center().y), egui::Align2::LEFT_CENTER)
+                            };
+                            let ink = if active { color::ACCENT } else { color::MUTED };
+                            let text_rect = ui.painter().text(position, anchor, label, egui::FontId::proportional(12.0), ink);
+                            if active {
+                                // A small triangle drawn by hand: the font has no arrow glyph.
+                                let centre_x = if stat_column(column) { text_rect.left() - 8.0 } else { text_rect.right() + 8.0 };
+                                let centre_y = cell.center().y;
+                                let (w, h) = (3.5, 2.5);
+                                let points = if self.sort_descending {
+                                    vec![egui::pos2(centre_x - w, centre_y - h), egui::pos2(centre_x + w, centre_y - h), egui::pos2(centre_x, centre_y + h)]
+                                } else {
+                                    vec![egui::pos2(centre_x - w, centre_y + h), egui::pos2(centre_x + w, centre_y + h), egui::pos2(centre_x, centre_y - h)]
+                                };
+                                ui.painter().add(egui::Shape::convex_polygon(points, color::ACCENT, egui::Stroke::NONE));
+                            }
+                            if response.clicked() {
+                                if active {
+                                    self.sort_descending = !self.sort_descending;
+                                } else {
+                                    self.sort_column = column;
+                                    self.sort_descending = stat_column(column);
+                                }
+                            }
+                        }
+                        ui.separator();
+
+                        let rows: &[ListRow] = self.list_rows.as_deref().unwrap_or(&[]);
+                        sort_species(&mut matches, rows, self.sort_column, self.sort_descending);
 
                         if matches.is_empty() {
                             ui.add_space(4.0);
@@ -303,18 +495,54 @@ impl Species {
                             }
 
                             let nav_key = up || down;
-                            egui::ScrollArea::vertical().max_height(360.0).show(ui, |ui| {
-                                for &number in &matches {
-                                    let chosen = self.species == number
-                                        || (!matches.contains(&self.species) && number == matches[0]);
-                                    let row = ui.selectable_label(chosen, format!("#{:04} {}", number, names::SPECIES[number - 1]));
-                                    if chosen {
-                                        widget::glow(ui, row.rect, 5.0);
-                                        if nav_key || (query.is_empty() && (self.scroll_list || !self.list_shown)) {
-                                            row.scroll_to_me(Some(egui::Align::Center));
-                                        }
+                            let highlighted = if matches.contains(&self.species) { self.species } else { matches[0] };
+                            let highlighted_place = matches.iter().position(|&n| n == highlighted);
+                            // The list shows the highlighted species at the middle after a key, and at the opening.
+                            let centre = highlighted_place.filter(|_| nav_key || (query.is_empty() && (self.scroll_list || !self.list_shown)));
+
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            let mut area = egui::ScrollArea::vertical().max_height(360.0);
+                            if let Some(place) = centre {
+                                area = area.vertical_scroll_offset(((place as f32 + 0.5) * LIST_ROW_HEIGHT - 180.0).max(0.0));
+                            }
+                            area.show_rows(ui, LIST_ROW_HEIGHT, matches.len(), |ui, range| {
+                                for place in range {
+                                    let number = matches[place];
+                                    let (rect, response) = ui.allocate_exact_size(egui::vec2(LIST_WIDTH, LIST_ROW_HEIGHT), egui::Sense::click());
+                                    if !ui.is_rect_visible(rect) {
+                                        continue;
                                     }
-                                    if row.clicked() {
+                                    if number == highlighted {
+                                        ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::ACCENT_SOFT);
+                                        widget::glow(ui, rect, 6.0);
+                                    } else if response.hovered() {
+                                        ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::SURFACE_STRONG);
+                                    }
+                                    if response.hovered() {
+                                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                    }
+                                    if let Some(texture) = icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), number) {
+                                        let icon = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.center().y - 15.0), egui::vec2(40.0, 30.0));
+                                        let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                                        ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
+                                    }
+                                    let y = rect.center().y;
+                                    let left = rect.left();
+                                    ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
+                                    ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), color::TEXT);
+                                    if let Some(row) = rows.get(number - 1) {
+                                        let type_1 = names::TYPE.get(row.types[0] as usize).copied().unwrap_or("-");
+                                        ui.painter().text(egui::pos2(left + 240.0, y), egui::Align2::LEFT_CENTER, type_1, egui::FontId::proportional(12.5), color::TEXT);
+                                        let type_2 = second_type(row);
+                                        let ink = if type_2 == "-" { color::MUTED } else { color::TEXT };
+                                        ui.painter().text(egui::pos2(left + 302.0, y), egui::Align2::LEFT_CENTER, type_2, egui::FontId::proportional(12.5), ink);
+                                        for (stat, &value) in row.stats.iter().enumerate() {
+                                            let x = left + 364.0 + 36.0 * stat as f32;
+                                            ui.painter().text(egui::pos2(x + 32.0, y), egui::Align2::RIGHT_CENTER, value.to_string(), egui::FontId::proportional(12.5), widget::stat_color(value as f32));
+                                        }
+                                        ui.painter().text(egui::pos2(left + 620.0, y), egui::Align2::RIGHT_CENTER, row.total.to_string(), egui::FontId::proportional(12.5), color::TEXT);
+                                    }
+                                    if response.clicked() {
                                         self.species = number;
                                         ui.memory_mut(|m| m.close_popup());
                                     }
@@ -447,6 +675,8 @@ impl Species {
                 }
                 self.baseline = self.data.clone();
                 self.from_sd = true;
+                // The stats or the types may have changed: the species list reads them again.
+                self.list_rows = None;
                 self.status = Some((true, format!("Saved in {path}. The game loads it again by itself.")));
             }
             Err(message) => self.status = Some((false, message)),
@@ -1569,6 +1799,9 @@ impl Module for Species {
                 }
             }
             self.pokedex_archive = Garc::open(&dump.archive(pokedex_data::ARCHIVE)).ok();
+            self.icon_garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).ok();
+            self.icon_textures.clear();
+            self.list_rows = None;
             self.loaded = None;
         }
         if self.garc.is_some() && self.loaded != Some((self.species, self.form)) {
@@ -1733,6 +1966,105 @@ mod test {
                 });
             });
         }
+    }
+
+    /// Opens the species list with a click on its button, then moves the choice with the keys.
+    #[test]
+    fn the_open_species_list_draws_and_moves_with_the_keys() {
+        let mut species = Species::default();
+        let ctx = egui::Context::default();
+        let session = Session::default();
+
+        let run = |species: &mut Species, events: Vec<egui::Event>| {
+            let mut input = egui::RawInput::default();
+            input.events = events;
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::set_page_focus(ctx, true);
+                    widget::update_navigation(ui);
+                    species.top_bar(ui, &session);
+                });
+            });
+        };
+        let click = |x: f32, y: f32| {
+            let press = |pressed| egui::Event::PointerButton {
+                pos: egui::pos2(x, y),
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            vec![press(true), press(false)]
+        };
+
+        // Search for the species button in the top bar, until the list opens.
+        run(&mut species, vec![]);
+        'outer: for y in [30.0, 40.0, 50.0, 60.0, 70.0, 80.0] {
+            for x in [40.0, 100.0, 160.0, 220.0] {
+                run(&mut species, click(x, y));
+                run(&mut species, vec![]);
+                if species.list_shown {
+                    break 'outer;
+                }
+            }
+        }
+        assert!(species.list_shown, "the species list did not open");
+        assert!(species.list_rows.is_some(), "the list data was not read");
+
+        // The down key moves the choice to the next species of the sorted list.
+        let key = |k| egui::Event::Key { key: k, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+        assert_eq!(species.species, 1);
+        run(&mut species, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(species.species, 2);
+        run(&mut species, vec![key(egui::Key::ArrowUp)]);
+        assert_eq!(species.species, 1);
+
+        // The enter key closes the list and keeps the choice.
+        run(&mut species, vec![key(egui::Key::Enter)]);
+        run(&mut species, vec![]);
+        assert!(!species.list_shown);
+        assert_eq!(species.species, 1);
+    }
+
+    #[test]
+    fn the_species_list_sorts_on_each_column() {
+        let mut rows = vec![ListRow { types: [0, 0], stats: [0; 6], total: 0 }; 3];
+        rows[0] = ListRow { types: [0, 1], stats: [10, 0, 0, 0, 0, 0], total: 10 }; // Bulbasaur
+        rows[1] = ListRow { types: [2, 2], stats: [30, 0, 0, 0, 0, 0], total: 30 }; // Ivysaur
+        rows[2] = ListRow { types: [1, 0], stats: [30, 5, 0, 0, 0, 0], total: 35 }; // Venusaur
+
+        let mut list = vec![1, 2, 3];
+        // Equal HP: the species number decides.
+        sort_species(&mut list, &rows, SortColumn::Stat(0), true);
+        assert_eq!(list, [2, 3, 1]);
+        sort_species(&mut list, &rows, SortColumn::Total, false);
+        assert_eq!(list, [1, 2, 3]);
+        sort_species(&mut list, &rows, SortColumn::Name, true);
+        assert_eq!(list, [3, 2, 1]);
+        sort_species(&mut list, &rows, SortColumn::Number, false);
+        assert_eq!(list, [1, 2, 3]);
+        // The names of the types: "Fighting" comes before "Flying", which comes before "Normal".
+        sort_species(&mut list, &rows, SortColumn::Type1, false);
+        assert_eq!(list, [3, 2, 1]);
+        // A second type that is the first one again shows "-", which comes before the names.
+        sort_species(&mut list, &rows, SortColumn::Type2, false);
+        assert_eq!(list, [2, 1, 3]);
+        assert_eq!(second_type(&rows[1]), "-");
+        assert_eq!(second_type(&rows[0]), "Fighting");
+    }
+
+    /// With the dump of the game: the icon of a species is decoded into a texture once,
+    /// then the texture is kept.
+    #[test]
+    fn the_icon_of_a_species_becomes_a_texture() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).ok();
+        let ctx = egui::Context::default();
+        let mut textures = HashMap::new();
+        let texture = icon_texture(&mut textures, garc.as_ref(), &ctx, 25).expect("no texture");
+        assert_eq!(texture.size(), [40, 30]);
+        let _ = icon_texture(&mut textures, garc.as_ref(), &ctx, 25);
+        assert_eq!(textures.len(), 1);
     }
 
     /// With the dump of the game: every icon file of the table is in the archive of
