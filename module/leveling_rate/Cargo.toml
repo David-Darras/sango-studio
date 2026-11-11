@@ -8,3 +8,4 @@ description = "The Leveling rate page of Sango Studio."
 sango-core.workspace = true
 sango-species.workspace = true
 sango-ui.workspace = true
+rfd.workspace = true

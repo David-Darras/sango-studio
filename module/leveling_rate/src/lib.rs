@@ -5,12 +5,14 @@
 //! SD card as `pokemon/experience/<rate>.bin` (same layout as the file of the romfs). The Leveling rate of each
 //! species comes from its data (the SD card first, then the romfs).
 //!
-//! The graph has three views, like the graph of Bulbapedia and more:
-//! the total experience of each level, the experience from a level to the next one, and the experience from
-//! a chosen level to each higher one. The six Leveling rates are drawn together, each in its own colour.
+//! The graph has two views: the total experience of each level (like the graph of Bulbapedia), and the
+//! experience from a level to the next one. The six Leveling rates are drawn together, each in its own colour.
+//! The tables can be exported to a CSV file and imported from one: see the module `csv`.
+
+mod csv;
 
 use sango_core::experience::{self, Curve, ExperienceTable, MAX_LEVEL};
-use sango_core::Garc;
+use sango_core::{Garc, SdCard};
 use sango_species::{SpeciesTable, LEVELING_RATE};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
@@ -52,57 +54,49 @@ enum View {
     Total,
     /// The experience to gain to go from each level to the next one.
     Gain,
-    /// The experience to gain to go from a chosen level to each higher level.
-    From,
 }
 
 /// The views, with the name of their button.
-const VIEWS: [(&str, View); 3] = [("Experience by level", View::Total), ("Experience per level", View::Gain), ("From a level", View::From)];
+const VIEWS: [(&str, View); 2] = [("Experience by level", View::Total), ("Experience per level", View::Gain)];
 
 impl View {
-    /// The levels that have a value, on the horizontal axis. `from` is the chosen level of the view `From`.
-    fn levels(self, from: usize) -> RangeInclusive<usize> {
+    /// The levels that have a value, on the horizontal axis.
+    fn levels(self) -> RangeInclusive<usize> {
         match self {
             View::Total => 1..=MAX_LEVEL,
             View::Gain => 1..=MAX_LEVEL - 1,
-            View::From => from.clamp(1, MAX_LEVEL - 1)..=MAX_LEVEL,
         }
     }
 
-    /// The levels whose point the user can move. The view `From` is computed: it has none.
+    /// The levels whose point the user can move.
     fn editable(self) -> RangeInclusive<usize> {
         match self {
             View::Total => 2..=MAX_LEVEL,
             View::Gain => 1..=MAX_LEVEL - 1,
-            #[allow(clippy::reversed_empty_ranges)]
-            View::From => 1..=0,
         }
     }
 
     /// The value of a level on the vertical axis.
-    fn value(self, curve: &Curve, level: usize, from: usize) -> Option<u32> {
+    fn value(self, curve: &Curve, level: usize) -> Option<u32> {
         match self {
             View::Total => curve.experience(level),
             View::Gain => curve.between(level, level + 1),
-            View::From => curve.between(from.clamp(1, MAX_LEVEL - 1), level),
         }
     }
 
     /// The text of the vertical axis.
-    fn title(self, from: usize) -> String {
+    fn title(self) -> &'static str {
         match self {
-            View::Total => "Experience".to_string(),
-            View::Gain => "Experience to the next level".to_string(),
-            View::From => format!("Experience from level {}", from.clamp(1, MAX_LEVEL - 1)),
+            View::Total => "Experience",
+            View::Gain => "Experience to the next level",
         }
     }
 
     /// The name of a level on the graph.
-    fn describe(self, from: usize, level: usize) -> String {
+    fn describe(self, level: usize) -> String {
         match self {
             View::Total => format!("Level {level}"),
             View::Gain => format!("Level {level} to {}", level + 1),
-            View::From => format!("Level {} to {level}", from.clamp(1, MAX_LEVEL - 1)),
         }
     }
 }
@@ -302,12 +296,12 @@ impl LevelingRate {
         if let Some(frozen) = self.frozen_axis {
             return frozen;
         }
-        let (view, from) = (self.current_view(), self.from as usize);
+        let view = self.current_view();
         let top = self
             .table
             .as_ref()
             .map(|table| {
-                (0..REAL_RATES).filter_map(|rate| table.curve(rate)).flat_map(|curve| view.levels(from).filter_map(move |level| view.value(curve, level, from))).max().unwrap_or(0)
+                (0..REAL_RATES).filter_map(|rate| table.curve(rate)).flat_map(|curve| view.levels().filter_map(move |level| view.value(curve, level))).max().unwrap_or(0)
             })
             .unwrap_or(0);
         nice_axis(top)
@@ -325,7 +319,6 @@ impl LevelingRate {
         let changed = match view {
             View::Total => curve.set_experience(level, value, axis, !keep_neighbours),
             View::Gain => curve.set_gain(level, value, TOTAL_CAP),
-            View::From => false,
         };
         if changed {
             self.status = None;
@@ -360,12 +353,14 @@ impl LevelingRate {
         });
     }
 
-    /// The state, and the two buttons. Returns what the user asked: (reset, save).
-    fn tool_bar(&mut self, ui: &mut egui::Ui, can_save: bool) -> (bool, bool) {
-        let mut asked = (false, false);
+    /// The state, and the buttons. Returns what the user asked: (reset, save, export, import).
+    fn tool_bar(&mut self, ui: &mut egui::Ui, can_save: bool) -> (bool, bool, bool, bool) {
+        let mut asked = (false, false, false, false);
         ui.horizontal_wrapped(|ui| {
             asked.0 = widget::button(ui, "Reset");
             asked.1 = can_save && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+            asked.2 = widget::button(ui, "Export CSV");
+            asked.3 = can_save && widget::button(ui, "Import CSV");
             if (0..LEVELING_RATE.len()).any(|rate| self.changed(rate)) {
                 widget::badge(ui, "Not saved", color::AMBER);
             } else if self.from_card.contains(&self.rate) {
@@ -383,9 +378,9 @@ impl LevelingRate {
 
     /// The graph: the levels on the horizontal axis, a value on the vertical axis, one curve for each rate.
     fn graph(&mut self, ui: &mut egui::Ui, width: f32) {
-        let (view, from) = (self.current_view(), self.from as usize);
+        let view = self.current_view();
         let editable = view.editable();
-        let levels = view.levels(from);
+        let levels = view.levels();
         let (axis, step) = self.axis();
         let (rect, response) = ui.allocate_exact_size(egui::vec2(width.max(360.0), GRAPH_HEIGHT), egui::Sense::click_and_drag());
         self.plot = plot_rect(rect);
@@ -448,11 +443,11 @@ impl LevelingRate {
             painter.text(egui::pos2(x, plot.bottom() + 6.0), egui::Align2::CENTER_TOP, level.to_string(), label_font.clone(), color::MUTED);
         }
         painter.text(egui::pos2(plot.center().x, rect.bottom() - 1.0), egui::Align2::CENTER_BOTTOM, "Level", label_font.clone(), color::MUTED);
-        painter.text(egui::pos2(rect.left() + 6.0, plot.top() - 8.0), egui::Align2::LEFT_BOTTOM, view.title(from), label_font.clone(), color::MUTED);
+        painter.text(egui::pos2(rect.left() + 6.0, plot.top() - 8.0), egui::Align2::LEFT_BOTTOM, view.title(), label_font.clone(), color::MUTED);
 
         let (Some(table), Some(saved)) = (&self.table, &self.saved) else { return };
         let line = |curve: &Curve| -> Vec<egui::Pos2> {
-            levels.clone().filter_map(|level| view.value(curve, level, from).map(|value| point_pos(plot, axis, level, value))).collect()
+            levels.clone().filter_map(|level| view.value(curve, level).map(|value| point_pos(plot, axis, level, value))).collect()
         };
         let chosen_color = RATE_COLORS[self.rate.min(REAL_RATES - 1) * usize::from(self.rate < REAL_RATES)];
 
@@ -478,7 +473,7 @@ impl LevelingRate {
         let Some(curve) = table.curve(self.rate) else { return };
         painter.add(egui::Shape::line(line(curve), egui::Stroke::new(3.0_f32, chosen_color)));
         for level in editable.clone() {
-            let Some(value) = view.value(curve, level, from) else { continue };
+            let Some(value) = view.value(curve, level) else { continue };
             let pos = point_pos(plot, axis, level, value);
             let marked = level == self.selected || Some(level) == hovered || Some(level) == self.dragging;
             let (radius, fill) = if marked { (6.0, chosen_color) } else { (3.0, color::WHITE) };
@@ -514,9 +509,9 @@ impl LevelingRate {
         // The numbers of the six rates at the column under the pointer.
         if let Some(level) = shown {
             let rows: Vec<(usize, String)> = (0..REAL_RATES)
-                .map(|rate| (rate, table.curve(rate).and_then(|curve| view.value(curve, level, from)).map_or("-".to_string(), thousands)))
+                .map(|rate| (rate, table.curve(rate).and_then(|curve| view.value(curve, level)).map_or("-".to_string(), thousands)))
                 .collect();
-            let title = view.describe(from, level);
+            let title = view.describe(level);
             response.on_hover_ui_at_pointer(|ui| {
                 ui.label(egui::RichText::new(title).strong());
                 for (rate, value) in rows {
@@ -614,6 +609,49 @@ impl LevelingRate {
         }
     }
 
+    /// Writes the six real tables to a CSV file that the user chooses.
+    fn export_csv(&mut self) {
+        let Some(table) = &self.table else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("leveling_rates.csv").save_file() else { return };
+        self.status = Some(match std::fs::write(&path, csv::export(table)) {
+            Ok(()) => (true, format!("Exported 100 levels to {}.", path.display())),
+            Err(error) => (false, format!("{}: {error}", path.display())),
+        });
+    }
+
+    /// Reads a CSV file that the user chooses, checks it, and writes the changed tables on the SD card.
+    fn import_csv(&mut self, session: &Session) {
+        let Some(sd) = &session.sd else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
+        let result = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|text| self.import_text(&text, sd));
+        self.status = Some(match result {
+            Ok(0) => (true, "The file matches the current tables: nothing to write.".to_string()),
+            Ok(files) => (true, format!("Imported: {files} file(s) written on the SD card. The game loads them again by itself.")),
+            Err(message) => (false, message),
+        });
+    }
+
+    /// Checks the text of a CSV file, then writes each table that it changes on the SD card.
+    /// Nothing is written when the text has a mistake. Returns the number of written files.
+    fn import_text(&mut self, text: &str, sd: &SdCard) -> Result<usize, String> {
+        let tables = csv::parse(text)?;
+        let (Some(table), Some(saved)) = (self.table.as_mut(), self.saved.as_mut()) else { return Err("The tables are not read.".into()) };
+        let mut written = 0;
+        for (rate, curve) in tables {
+            if table.curve(rate) == Some(&curve) && saved.curve(rate) == Some(&curve) {
+                continue;
+            }
+            curve.save(sd, rate)?;
+            table.set_curve(rate, curve.clone());
+            saved.set_curve(rate, curve);
+            if !self.from_card.contains(&rate) {
+                self.from_card.push(rate);
+            }
+            written += 1;
+        }
+        Ok(written)
+    }
+
     /// Writes the tables that changed on the SD card.
     fn save(&mut self, session: &Session) {
         let (Some(table), Some(sd)) = (&self.table, &session.sd) else { return };
@@ -698,12 +736,18 @@ impl Module for LevelingRate {
         }
         self.rate_tabs(ui);
         ui.add_space(8.0);
-        let (reset, save) = self.tool_bar(ui, session.sd.is_some());
+        let (reset, save, export, import) = self.tool_bar(ui, session.sd.is_some());
         if reset {
             self.reset();
         }
         if save {
             self.save(session);
+        }
+        if export {
+            self.export_csv();
+        }
+        if import {
+            self.import_csv(session);
         }
         ui.add_space(8.0);
         let wide = ui.available_width() >= 760.0 + LIST_CARD_WIDTH;
@@ -795,18 +839,13 @@ mod test {
     fn each_view_has_its_levels_and_values() {
         let bytes: Vec<u8> = (0..=MAX_LEVEL as u32).flat_map(|n| (n * n).to_le_bytes()).collect();
         let curve = Curve::from_bytes(&bytes).unwrap();
-        assert_eq!(View::Total.levels(1), 1..=100);
-        assert_eq!(View::Gain.levels(1), 1..=99);
-        assert_eq!(View::From.levels(40), 40..=100);
-        assert!(View::From.editable().is_empty());
-        assert_eq!(View::Total.value(&curve, 10, 1), Some(100));
-        assert_eq!(View::Gain.value(&curve, 10, 1), Some(21));
-        assert_eq!(View::From.value(&curve, 12, 10), Some(44));
-        assert_eq!(View::From.value(&curve, 10, 10), Some(0));
-        assert_eq!(View::Gain.describe(1, 10), "Level 10 to 11");
-        assert_eq!(View::From.describe(10, 12), "Level 10 to 12");
+        assert_eq!(View::Total.levels(), 1..=100);
+        assert_eq!(View::Gain.levels(), 1..=99);
+        assert_eq!(View::Total.value(&curve, 10), Some(100));
+        assert_eq!(View::Gain.value(&curve, 10), Some(21));
+        assert_eq!(View::Gain.describe(10), "Level 10 to 11");
         assert_eq!(clamp_level(500, &View::Total.editable()), 100);
-        assert_eq!(clamp_level(7, &View::From.editable()), 7);
+        assert_eq!(clamp_level(0, &View::Gain.editable()), 1);
     }
 
     /// The list of Pokémon, drawn in the layout of the page (a column beside the graph), shows more than 10 rows.
@@ -882,7 +921,7 @@ mod test {
             let (axis, _) = page.axis();
             let view = page.current_view();
             let curve = page.table.as_ref().unwrap().curve(page.rate).unwrap();
-            let start = point_pos(page.plot, axis, level, view.value(curve, level, 1).unwrap());
+            let start = point_pos(page.plot, axis, level, view.value(curve, level).unwrap());
             let press = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
             let target = egui::pos2(start.x, start.y - lift);
             frame(page, session, vec![egui::Event::PointerMoved(start)]);
@@ -928,6 +967,20 @@ mod test {
         again.load_tables(&session);
         assert_eq!(again.table.as_ref().unwrap().curve(0), Some(&high));
         assert_eq!(again.from_card, [0, 1]);
+
+        // A CSV file goes out and comes back through the page: a changed column is written on the SD card.
+        let text = csv::export(page.table.as_ref().unwrap());
+        let sd = session.sd.as_ref().unwrap();
+        assert_eq!(page.import_text(&text, sd), Ok(0));
+        let edited = text.replacen("100,", "100,0,", 1);
+        assert!(page.import_text(&edited, sd).is_err(), "a line with too many fields is refused");
+        let lowered: String = text.lines().map(|line| if line.starts_with("100,") { let mut f: Vec<String> = line.split(',').map(String::from).collect(); f[6] = "1250001".into(); format!("{}
+", f.join(",")) } else { format!("{line}
+") }).collect();
+        assert_eq!(page.import_text(&lowered, sd), Ok(1));
+        assert_eq!(page.table.as_ref().unwrap().curve(5).unwrap().experience(100), Some(1_250_001));
+        assert!(!page.changed(5));
+        assert!(written(5).exists());
 
         // Reset gives back the romfs.
         page.rate = 0;

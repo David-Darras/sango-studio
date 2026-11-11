@@ -137,6 +137,14 @@ impl ExperienceTable {
         Ok(ExperienceTable { curves })
     }
 
+    /// Builds the tables from one curve for each Leveling rate (8 in all).
+    pub fn from_curves(curves: Vec<Curve>) -> Result<ExperienceTable, String> {
+        if curves.len() != RATE_COUNT {
+            return Err(format!("There are {} tables. There must be {RATE_COUNT}.", curves.len()));
+        }
+        Ok(ExperienceTable { curves })
+    }
+
     /// The table of a Leveling rate (0 to 7).
     pub fn curve(&self, rate: usize) -> Option<&Curve> {
         self.curves.get(rate)
