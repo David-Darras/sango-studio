@@ -5,17 +5,20 @@
 
 mod csv;
 mod data;
+mod examples;
 mod icons;
 mod pokedex_data;
 mod names;
 
 use data::SpeciesData;
+use examples::{Examples, Field};
 use pokedex_data::PokedexData;
 use sango_core::{Clim, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// The number of the archive that has the data of the species.
 const ARCHIVE: usize = 195;
@@ -25,6 +28,17 @@ const SPECIES_COUNT: usize = names::SPECIES.len();
 
 /// The tabs of the page. Only the first one works for now.
 const TABS: [&str; 6] = ["General", "Learnset", "Evolution", "Text", "Icon", "Model"];
+
+/// The data and the shape of all the species of the romfs, form 0: the source of the examples in the help.
+fn build_index(garc: &Garc, pokedex: &PokedexData) -> examples::Index {
+    let rows = (1..=SPECIES_COUNT)
+        .filter_map(|species| {
+            let data = SpeciesData::from_bytes(garc.first_file(species)?).ok()?;
+            Some((species, data, pokedex.shape(species, 0).unwrap_or(0)))
+        })
+        .collect();
+    examples::Index::new(rows)
+}
 
 /// The place in the archive of the file of a species and a form.
 ///
@@ -94,6 +108,8 @@ pub struct Species {
     sort_column: SortColumn,
     /// True when the species list goes from the largest value to the smallest one.
     sort_descending: bool,
+    /// The examples of the help of the fields: built once for each dump.
+    examples: Option<Arc<examples::Index>>,
 }
 
 impl Default for Species {
@@ -123,6 +139,7 @@ impl Default for Species {
             list_rows: None,
             sort_column: SortColumn::Number,
             sort_descending: false,
+            examples: None,
         }
     }
 }
@@ -1281,9 +1298,38 @@ fn number<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, max: f64) {
     widget::spin(ui, value, 0.0, max);
 }
 
+/// The help of a field: a short note, the Bulbapedia page, and the field and value for the examples.
 struct FieldNote {
     summary: &'static str,
     url: &'static str,
+    /// The field and its current value: the help lists the species that have the same value.
+    example: Option<(Field, u32)>,
+}
+
+/// The key of the examples in the memory of the interface.
+const EXAMPLES_ID: &str = "species_examples";
+
+/// The examples of the help of a field, as lines of text. Empty when the data of the game is not open.
+fn example_lines(ui: &egui::Ui, field: Field, value: u32) -> Vec<String> {
+    let shared: Option<(Arc<examples::Index>, usize)> = ui.ctx().data(|d| d.get_temp(egui::Id::new(EXAMPLES_ID)));
+    let Some((index, current)) = shared else { return Vec::new() };
+    let found = index.examples(field, value, current);
+    let mut lines = Vec::new();
+    if !found.species.is_empty() {
+        let list = found.species.iter().map(|&n| Examples::name(n)).collect::<Vec<_>>().join(", ");
+        let more = if found.more > 0 { format!(" and {} more", found.more) } else { String::new() };
+        lines.push(format!("Same value: {list}{more}."));
+    }
+    if let (Some((low, low_value)), Some((high, high_value))) = (found.lowest, found.highest) {
+        lines.push(format!(
+            "Lowest: {} ({}). Highest: {} ({}).",
+            Examples::name(low),
+            field.format(low_value),
+            Examples::name(high),
+            field.format(high_value)
+        ));
+    }
+    lines
 }
 
 /// A line of the grid: field label with an optional Bulbapedia info note, then its widgets.
@@ -1298,6 +1344,11 @@ fn line_with_note(ui: &mut egui::Ui, label: &str, note: Option<FieldNote>, add: 
                 ui.spacing_mut().item_spacing.y = 4.0;
                 ui.label(egui::RichText::new(label).strong());
                 ui.label(n.summary);
+                if let Some((field, value)) = n.example {
+                    for text in example_lines(ui, field, value) {
+                        ui.label(widget::hint(&text));
+                    }
+                }
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
@@ -1372,13 +1423,14 @@ fn group(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(10.0);
 }
 
-fn stat_line(ui: &mut egui::Ui, label: &str, summary: &'static str, value: &mut u8) {
+fn stat_line(ui: &mut egui::Ui, label: &str, field: Field, summary: &'static str, value: &mut u8) {
     line_with_note(
         ui,
         label,
         Some(FieldNote {
             summary,
             url: "https://bulbapedia.bulbagarden.net/wiki/Stat#Base_stat_values",
+            example: Some((field, *value as u32)),
         }),
         |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
@@ -1392,12 +1444,12 @@ fn stat_line(ui: &mut egui::Ui, label: &str, summary: &'static str, value: &mut 
 fn group_statistics(ui: &mut egui::Ui, d: &mut SpeciesData, _shape: &mut u8) {
     group(ui, "Base stats", |ui| {
         grid("stats").show(ui, |ui| {
-            stat_line(ui, "HP", "Hit Points (HP). Amount of damage this Pokémon can withstand before fainting.", &mut d.base_hp);
-            stat_line(ui, "Attack", "Physical Attack. Governs direct damage dealt (e.g. Slash, Earthquake) against enemy Defense.", &mut d.base_attack);
-            stat_line(ui, "Defense", "Physical Defense. Reduces damage taken from enemy physical attacks.", &mut d.base_defense);
-            stat_line(ui, "Special Attack", "Special Attack. Governs special move damage dealt (e.g. Surf, Flamethrower) against enemy Special Defense.", &mut d.base_special_attack);
-            stat_line(ui, "Special Defense", "Special Defense. Reduces damage taken from enemy special attacks.", &mut d.base_special_defense);
-            stat_line(ui, "Speed", "Speed. Determines turn order: the Pokémon with higher Speed acts first.", &mut d.base_speed);
+            stat_line(ui, "HP", Field::Hp, "Hit Points (HP). Amount of damage this Pokémon can withstand before fainting.", &mut d.base_hp);
+            stat_line(ui, "Attack", Field::Attack, "Physical Attack. Governs direct damage dealt (e.g. Slash, Earthquake) against enemy Defense.", &mut d.base_attack);
+            stat_line(ui, "Defense", Field::Defense, "Physical Defense. Reduces damage taken from enemy physical attacks.", &mut d.base_defense);
+            stat_line(ui, "Special Attack", Field::SpecialAttack, "Special Attack. Governs special move damage dealt (e.g. Surf, Flamethrower) against enemy Special Defense.", &mut d.base_special_attack);
+            stat_line(ui, "Special Defense", Field::SpecialDefense, "Special Defense. Reduces damage taken from enemy special attacks.", &mut d.base_special_defense);
+            stat_line(ui, "Speed", Field::Speed, "Speed. Determines turn order: the Pokémon with higher Speed acts first.", &mut d.base_speed);
         });
 
         ui.add_space(10.0);
@@ -1435,6 +1487,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Primary elemental type defining offensive and defensive effectiveness, plus STAB bonus (+50%).",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Type",
+                    example: Some((Field::Type1, d.type_1 as u32)),
                 }),
                 |ui| {
                     menu(ui, "type_1", &mut d.type_1, &names::TYPE, 130.0);
@@ -1447,6 +1500,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Secondary elemental type (optional for dual-type Pokémon).",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Type",
+                    example: Some((Field::Type2, d.type_2 as u32)),
                 }),
                 |ui| {
                     menu(ui, "type_2", &mut d.type_2, &names::TYPE, 130.0);
@@ -1459,6 +1513,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "First standard passive ability providing a unique battle or field effect.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Ability",
+                    example: Some((Field::Ability1, d.ability_1 as u32)),
                 }),
                 |ui| {
                     searchable_picker(ui, "ability_1", &mut d.ability_1, &names::ABILITY, 180.0);
@@ -1471,6 +1526,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Second standard passive ability possible for this species (if any).",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Ability",
+                    example: Some((Field::Ability2, d.ability_2 as u32)),
                 }),
                 |ui| {
                     searchable_picker(ui, "ability_2", &mut d.ability_2, &names::ABILITY, 180.0);
@@ -1483,6 +1539,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Rare hidden ability, typically obtainable through special encounters, Friend Safari, or hordes.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Ability",
+                    example: Some((Field::HiddenAbility, d.ability_hidden as u32)),
                 }),
                 |ui| {
                     searchable_picker(ui, "ability_hidden", &mut d.ability_hidden, &names::ABILITY, 180.0);
@@ -1495,6 +1552,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Primary egg group determining breeding compatibility at the Pokémon Day Care.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Egg_Group",
+                    example: Some((Field::EggGroup1, d.egg_group_1 as u32)),
                 }),
                 |ui| {
                     menu(ui, "egg_1", &mut d.egg_group_1, &names::EGG_GROUP, 140.0);
@@ -1507,6 +1565,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Secondary egg group for Pokémon belonging to multiple breeding categories.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Egg_Group",
+                    example: Some((Field::EggGroup2, d.egg_group_2 as u32)),
                 }),
                 |ui| {
                     menu(ui, "egg_2", &mut d.egg_group_2, &names::EGG_GROUP, 140.0);
@@ -1519,6 +1578,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Common held item present on 50% of wild Pokémon of this species upon encounter.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
+                    example: Some((Field::HeldItem50, d.item_50 as u32)),
                 }),
                 |ui| {
                     searchable_picker(ui, "item_50", &mut d.item_50, &names::ITEM, 180.0);
@@ -1531,6 +1591,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Rare held item present on 5% of wild Pokémon of this species upon encounter.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
+                    example: Some((Field::HeldItem5, d.item_5 as u32)),
                 }),
                 |ui| {
                     searchable_picker(ui, "item_5", &mut d.item_5, &names::ITEM, 180.0);
@@ -1543,6 +1604,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Growth rate determining the total experience points required to reach level 100 (e.g. 1,000,000 for Medium Fast).",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Experience#Experience_total_by_growth_rate",
+                    example: Some((Field::LevelingRate, d.leveling_rate as u32)),
                 }),
                 |ui| {
                     menu(ui, "leveling_rate", &mut d.leveling_rate, &names::LEVELING_RATE, 165.0);
@@ -1565,6 +1627,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Physical body shape (quadruped, winged, serpentine...) used for form sorting in the Pokédex.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_shape",
+                    example: Some((Field::Shape, *shape as u32)),
                 }),
                 |ui| {
                     menu(ui, "shape", shape, &names::SHAPE, 190.0);
@@ -1577,6 +1640,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Official dominant color used for visual search in the Pokédex.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_color",
+                    example: Some((Field::Color, d.color as u32)),
                 }),
                 |ui| {
                     menu(ui, "pokedex_color", &mut d.color, &names::COLOR, 130.0);
@@ -1589,6 +1653,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Probability of being male or female. 0 = 100% ♂, 254 = 100% ♀, 255 = Genderless.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Gender",
+                    example: Some((Field::GenderRatio, d.gender_ratio as u32)),
                 }),
                 |ui| {
                     gender_widget(ui, &mut d.gender_ratio);
@@ -1600,6 +1665,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Number of egg cycles required to hatch. In Gen VI, one cycle equals 256 steps.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Egg_cycle",
+                    example: Some((Field::HatchTime, d.hatch_time as u32)),
                 }),
                 |ui| {
                     number(ui, &mut d.hatch_time, 255.0);
@@ -1613,6 +1679,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Pokémon height from head to toe.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_height",
+                    example: Some((Field::Height, d.height as u32)),
                 }),
                 |ui| {
                     height_field(ui, "height", &mut d.height);
@@ -1624,6 +1691,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Pokémon body weight. Determines damage dealt or taken by Heavy Slam, Heat Crash, Grass Knot, and Low Kick.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_weight",
+                    example: Some((Field::Weight, d.weight as u32)),
                 }),
                 |ui| {
                     weight_field(ui, "weight", &mut d.weight);
@@ -1635,6 +1703,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Catch rate (3 to 255). Higher values make the Pokémon easier to catch with a Poké Ball.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Catch_rate",
+                    example: Some((Field::CatchRate, d.catch_rate as u32)),
                 }),
                 |ui| {
                     number(ui, &mut d.catch_rate, 255.0);
@@ -1647,6 +1716,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Initial friendship value (usually 70) upon catch or hatch. Requires 220 to evolve by friendship.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Friendship",
+                    example: Some((Field::BaseFriendship, d.base_friendship as u32)),
                 }),
                 |ui| {
                     number(ui, &mut d.base_friendship, 255.0);
@@ -1659,6 +1729,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Base experience yield determining XP awarded to the party upon defeating this Pokémon.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Experience",
+                    example: Some((Field::BaseExperience, d.base_experience as u32)),
                 }),
                 |ui| {
                     number(ui, &mut d.base_experience, 65535.0);
@@ -1671,6 +1742,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 Some(FieldNote {
                     summary: "Specifies whether the Pokémon emerges directly burrowed in the ground upon entering battle (Diglett and Dugtrio), skipping the standard mid-air Poké Ball drop animation.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/Diglett_(Pok%C3%A9mon)#Trivia",
+                    example: Some((Field::BurrowedEntry, d.is_burrowed_entry() as u32)),
                 }),
                 |ui| {
                     let is_burrowed = d.is_burrowed_entry();
@@ -1748,13 +1820,14 @@ fn ev_graduated_bar(ui: &mut egui::Ui, value: &mut u8) {
     );
 }
 
-fn ev_line(ui: &mut egui::Ui, label: &str, summary: &'static str, mut value: u8, mut set: impl FnMut(u8)) {
+fn ev_line(ui: &mut egui::Ui, label: &str, field: Field, summary: &'static str, mut value: u8, mut set: impl FnMut(u8)) {
     line_with_note(
         ui,
         label,
         Some(FieldNote {
             summary,
             url: "https://bulbapedia.bulbagarden.net/wiki/Effort_values",
+            example: Some((field, value as u32)),
         }),
         |ui| {
             let before = value;
@@ -1769,12 +1842,12 @@ fn ev_line(ui: &mut egui::Ui, label: &str, summary: &'static str, mut value: u8,
 fn group_ev_yield(ui: &mut egui::Ui, d: &mut SpeciesData, _shape: &mut u8) {
     group(ui, "EV yield", |ui| {
         grid("ev_yield").show(ui, |ui| {
-            ev_line(ui, "HP", "Effort Values (EVs) in HP awarded to the victor (0 to 3).", d.ev_hp(), |v| d.set_ev_hp(v));
-            ev_line(ui, "Attack", "Effort Values (EVs) in Attack awarded to the victor (0 to 3).", d.ev_attack(), |v| d.set_ev_attack(v));
-            ev_line(ui, "Defense", "Effort Values (EVs) in Defense awarded to the victor (0 to 3).", d.ev_defense(), |v| d.set_ev_defense(v));
-            ev_line(ui, "Special Attack", "Effort Values (EVs) in Special Attack awarded to the victor (0 to 3).", d.ev_special_attack(), |v| d.set_ev_special_attack(v));
-            ev_line(ui, "Special Defense", "Effort Values (EVs) in Special Defense awarded to the victor (0 to 3).", d.ev_special_defense(), |v| d.set_ev_special_defense(v));
-            ev_line(ui, "Speed", "Effort Values (EVs) in Speed awarded to the victor (0 to 3).", d.ev_speed(), |v| d.set_ev_speed(v));
+            ev_line(ui, "HP", Field::EvHp, "Effort Values (EVs) in HP awarded to the victor (0 to 3).", d.ev_hp(), |v| d.set_ev_hp(v));
+            ev_line(ui, "Attack", Field::EvAttack, "Effort Values (EVs) in Attack awarded to the victor (0 to 3).", d.ev_attack(), |v| d.set_ev_attack(v));
+            ev_line(ui, "Defense", Field::EvDefense, "Effort Values (EVs) in Defense awarded to the victor (0 to 3).", d.ev_defense(), |v| d.set_ev_defense(v));
+            ev_line(ui, "Special Attack", Field::EvSpecialAttack, "Effort Values (EVs) in Special Attack awarded to the victor (0 to 3).", d.ev_special_attack(), |v| d.set_ev_special_attack(v));
+            ev_line(ui, "Special Defense", Field::EvSpecialDefense, "Effort Values (EVs) in Special Defense awarded to the victor (0 to 3).", d.ev_special_defense(), |v| d.set_ev_special_defense(v));
+            ev_line(ui, "Speed", Field::EvSpeed, "Effort Values (EVs) in Speed awarded to the victor (0 to 3).", d.ev_speed(), |v| d.set_ev_speed(v));
         });
 
         ui.add_space(8.0);
@@ -1859,6 +1932,10 @@ impl Module for Species {
             self.icon_textures.clear();
             self.list_rows = None;
             self.loaded = None;
+            self.examples = match (&self.garc, self.read_pokedex_romfs()) {
+                (Some(garc), Ok(pokedex)) => Some(Arc::new(build_index(garc, &pokedex))),
+                _ => None,
+            };
         }
         if self.garc.is_some() && self.loaded != Some((self.species, self.form)) {
             self.load(session);
@@ -1918,6 +1995,10 @@ impl Module for Species {
             ui.ctx().request_repaint();
         }
         ui.add_space(6.0);
+        if let Some(index) = &self.examples {
+            let shared = (index.clone(), self.species);
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(EXAMPLES_ID), shared));
+        }
         match (self.tab, self.data.as_mut()) {
             (0, Some(data)) => general_tab(ui, data, &mut self.shape),
             (0, None) => {}
@@ -1931,6 +2012,26 @@ impl Module for Species {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn the_help_of_a_field_lists_examples_from_the_index() {
+        let row = |n: usize, hp: u8| {
+            let mut d = SpeciesData::from_bytes(&[0; 80]).unwrap();
+            d.base_hp = hp;
+            (n, d, 0u8)
+        };
+        let index = Arc::new(examples::Index::new(vec![row(1, 45), row(2, 60), row(3, 45)]));
+        let ctx = egui::Context::default();
+        let mut lines = Vec::new();
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                assert!(example_lines(ui, Field::Hp, 45).is_empty(), "no index: no lines");
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(EXAMPLES_ID), (index.clone(), 1usize)));
+                lines = example_lines(ui, Field::Hp, 45);
+            });
+        });
+        assert_eq!(lines, ["Same value: Venusaur.", "Lowest: Bulbasaur (45). Highest: Ivysaur (60)."]);
+    }
 
     #[test]
     fn a_rate_is_a_percentage_of_255() {
