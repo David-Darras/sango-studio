@@ -24,6 +24,7 @@ impl App {
             Box::new(sango_home::Home::default()),
             Box::new(sango_archive::Archive::default()),
             Box::new(sango_species::Species::default()),
+            Box::new(sango_leveling_rate::LevelingRate::default()),
             Box::new(sango_item::Item),
             Box::new(sango_move::Move),
             Box::new(sango_ability::Ability),
@@ -144,6 +145,16 @@ impl App {
             ctx.request_repaint();
         }
 
+        // A page asked for another page by its title.
+        if let Some(title) = widget::take_open_page(ctx) {
+            if let Some(target) = self.modules.iter().position(|module| module.title() == title) {
+                self.current = target;
+                self.side_bar_focus = false;
+                ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+                ctx.request_repaint();
+            }
+        }
+
         if let Some(target) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new("sango_switch_module"))) {
             self.current = target;
             self.side_bar_focus = false;
@@ -179,6 +190,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -218,6 +230,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -231,7 +244,7 @@ mod test {
 
         let ctx = egui::Context::default();
 
-        // 1. ArrowUp on Home (0) wraps to Type (6)
+        // 1. ArrowUp on Home (0) wraps to Type (7)
         let mut up_input = egui::RawInput::default();
         up_input.events.push(egui::Event::Key {
             key: egui::Key::ArrowUp,
@@ -243,9 +256,9 @@ mod test {
         let _ = ctx.run(up_input, |ctx| {
             app.update_ctx(ctx);
         });
-        assert_eq!(app.current, 6);
+        assert_eq!(app.current, 7);
 
-        // 2. ArrowDown on Type (6) wraps to Home (0)
+        // 2. ArrowDown on Type (7) wraps to Home (0)
         let mut down_input = egui::RawInput::default();
         down_input.events.push(egui::Event::Key {
             key: egui::Key::ArrowDown,
@@ -267,6 +280,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -321,6 +335,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -368,6 +383,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -414,6 +430,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -457,6 +474,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),
@@ -523,6 +541,7 @@ mod test {
                 Box::new(sango_home::Home::default()),
                 Box::new(sango_archive::Archive::default()),
                 Box::new(sango_species::Species::default()),
+                Box::new(sango_leveling_rate::LevelingRate::default()),
                 Box::new(sango_item::Item),
                 Box::new(sango_move::Move),
                 Box::new(sango_ability::Ability),

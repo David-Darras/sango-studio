@@ -11,6 +11,7 @@ sango-ui.workspace = true
 sango-home.workspace = true
 sango-archive.workspace = true
 sango-species.workspace = true
+sango-leveling-rate.workspace = true
 sango-item.workspace = true
 sango-move.workspace = true
 sango-ability.workspace = true

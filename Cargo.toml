@@ -16,6 +16,7 @@ sango-ui = { path = "module/ui" }
 sango-home = { path = "module/home" }
 sango-archive = { path = "module/archive" }
 sango-species = { path = "module/species" }
+sango-leveling-rate = { path = "module/leveling_rate" }
 sango-item = { path = "module/item" }
 sango-move = { path = "module/move" }
 sango-ability = { path = "module/ability" }

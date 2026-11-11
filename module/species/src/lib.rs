@@ -8,6 +8,7 @@ mod data;
 mod examples;
 mod icons;
 mod pokedex_data;
+mod table;
 mod names;
 
 use data::SpeciesData;
@@ -23,8 +24,34 @@ use std::sync::Arc;
 /// The number of the archive that has the data of the species.
 const ARCHIVE: usize = 195;
 
+pub use names::{LEVELING_RATE, SPECIES};
+pub use table::SpeciesTable;
+
 /// The number of species that the list shows.
 const SPECIES_COUNT: usize = names::SPECIES.len();
+
+/// The key, in the memory of the interface, of the species that another page asks this page to open.
+const OPEN_SPECIES: &str = "sango_open_species";
+
+/// Asks the Species page to show a species (its form 0) and switches to that page.
+pub fn open_species(ctx: &egui::Context, species: usize) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OPEN_SPECIES), species));
+    widget::open_page(ctx, "Species");
+}
+
+/// The Leveling rate of each species, from the species 1 on (form 0).
+///
+/// The SD card comes first, then the romfs. A species whose file cannot be read gives `None`.
+pub fn leveling_rates(session: &Session) -> Result<Vec<Option<u8>>, String> {
+    let dump = session.dump.as_ref().ok_or("The dump is not open.")?;
+    let garc = Garc::open(&dump.archive(ARCHIVE))?;
+    Ok((1..=SPECIES_COUNT)
+        .map(|species| {
+            let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+            on_card.or_else(|| garc.first_file(species).and_then(|b| SpeciesData::from_bytes(b).ok())).map(|d| d.leveling_rate)
+        })
+        .collect())
+}
 
 /// The tabs of the page. Only the first one works for now.
 const TABS: [&str; 6] = ["General", "Learnset", "Evolution", "Text", "Icon", "Model"];
@@ -223,6 +250,91 @@ fn sort_species(list: &mut [usize], rows: &[ListRow], column: SortColumn, descen
     });
 }
 
+/// Reads the list data of all the species: the SD card first, then the romfs.
+fn read_list_rows(garc: Option<&Garc>, session: &Session) -> Vec<ListRow> {
+    (1..=SPECIES_COUNT)
+        .map(|species| {
+            let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+            let data = on_card.or_else(|| garc.and_then(|g| g.first_file(species)).and_then(|b| SpeciesData::from_bytes(b).ok()));
+            match data {
+                Some(d) => ListRow {
+                    types: [d.type_1, d.type_2],
+                    stats: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
+                    total: d.base_total() as u16,
+                },
+                None => ListRow { types: [0, 0], stats: [0; 6], total: 0 },
+            }
+        })
+        .collect()
+}
+
+/// The header of a species list: a click on a column name sorts the list on that column.
+///
+/// The width is `LIST_WIDTH`. A second click on the same column reverses the order.
+fn list_header(ui: &mut egui::Ui, sort_column: &mut SortColumn, sort_descending: &mut bool) {
+    let (header_rect, _) = ui.allocate_exact_size(egui::vec2(LIST_WIDTH, 20.0), egui::Sense::hover());
+    for (x, width, label, column) in LIST_COLUMNS {
+        let cell = egui::Rect::from_min_size(egui::pos2(header_rect.left() + x, header_rect.top()), egui::vec2(width, 20.0));
+        let response = ui.interact(cell, ui.make_persistent_id(("species_list_header", label)), egui::Sense::click());
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let active = *sort_column == column;
+        let (position, anchor) = if stat_column(column) {
+            (egui::pos2(cell.right() - 4.0, cell.center().y), egui::Align2::RIGHT_CENTER)
+        } else {
+            (egui::pos2(cell.left(), cell.center().y), egui::Align2::LEFT_CENTER)
+        };
+        let ink = if active { color::ACCENT } else { color::MUTED };
+        let text_rect = ui.painter().text(position, anchor, label, egui::FontId::proportional(12.0), ink);
+        if active {
+            // A small triangle drawn by hand: the font has no arrow glyph.
+            let centre_x = if stat_column(column) { text_rect.left() - 8.0 } else { text_rect.right() + 8.0 };
+            let centre_y = cell.center().y;
+            let (w, h) = (3.5, 2.5);
+            let points = if *sort_descending {
+                vec![egui::pos2(centre_x - w, centre_y - h), egui::pos2(centre_x + w, centre_y - h), egui::pos2(centre_x, centre_y + h)]
+            } else {
+                vec![egui::pos2(centre_x - w, centre_y + h), egui::pos2(centre_x + w, centre_y + h), egui::pos2(centre_x, centre_y - h)]
+            };
+            ui.painter().add(egui::Shape::convex_polygon(points, color::ACCENT, egui::Stroke::NONE));
+        }
+        if response.clicked() {
+            if active {
+                *sort_descending = !*sort_descending;
+            } else {
+                *sort_column = column;
+                *sort_descending = stat_column(column);
+            }
+        }
+    }
+}
+
+/// Paints one row of a species list in `rect` (`LIST_WIDTH` wide): icon, number, name, types, base stats and total.
+fn paint_list_row(ui: &egui::Ui, rect: egui::Rect, number: usize, row: Option<&ListRow>, icon: Option<&egui::TextureHandle>) {
+    if let Some(texture) = icon {
+        let target = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.center().y - 15.0), egui::vec2(40.0, 30.0));
+        let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+        ui.painter().image(texture.id(), target, full, egui::Color32::WHITE);
+    }
+    let y = rect.center().y;
+    let left = rect.left();
+    ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
+    ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), color::TEXT);
+    if let Some(row) = row {
+        let type_1 = names::TYPE.get(row.types[0] as usize).copied().unwrap_or("-");
+        ui.painter().text(egui::pos2(left + 240.0, y), egui::Align2::LEFT_CENTER, type_1, egui::FontId::proportional(12.5), color::TEXT);
+        let type_2 = second_type(row);
+        let ink = if type_2 == "-" { color::MUTED } else { color::TEXT };
+        ui.painter().text(egui::pos2(left + 302.0, y), egui::Align2::LEFT_CENTER, type_2, egui::FontId::proportional(12.5), ink);
+        for (stat, &value) in row.stats.iter().enumerate() {
+            let x = left + 364.0 + 36.0 * stat as f32;
+            ui.painter().text(egui::pos2(x + 32.0, y), egui::Align2::RIGHT_CENTER, value.to_string(), egui::FontId::proportional(12.5), widget::stat_color(value as f32));
+        }
+        ui.painter().text(egui::pos2(left + 620.0, y), egui::Align2::RIGHT_CENTER, row.total.to_string(), egui::FontId::proportional(12.5), color::TEXT);
+    }
+}
+
 /// The texture of the icon of a species: decoded at the first display, then kept.
 fn icon_texture<'a>(
     textures: &'a mut HashMap<usize, Option<egui::TextureHandle>>,
@@ -321,20 +433,7 @@ impl Species {
 
     /// Reads the list data of all the species: the SD card first, then the romfs.
     fn build_list_rows(&self, session: &Session) -> Vec<ListRow> {
-        (1..=SPECIES_COUNT)
-            .map(|species| {
-                let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
-                let data = on_card.or_else(|| self.garc.as_ref().and_then(|g| g.first_file(species)).and_then(|b| SpeciesData::from_bytes(b).ok()));
-                match data {
-                    Some(d) => ListRow {
-                        types: [d.type_1, d.type_2],
-                        stats: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
-                        total: d.base_total() as u16,
-                    },
-                    None => ListRow { types: [0, 0], stats: [0; 6], total: 0 },
-                }
-            })
-            .collect()
+        read_list_rows(self.garc.as_ref(), session)
     }
 
     /// The number of forms of the chosen species (at least one).
@@ -444,42 +543,7 @@ impl Species {
                         let mut matches = match_species(query);
 
                         // The header: a click sorts the list on that column.
-                        let (header_rect, _) = ui.allocate_exact_size(egui::vec2(LIST_WIDTH, 20.0), egui::Sense::hover());
-                        for (x, width, label, column) in LIST_COLUMNS {
-                            let cell = egui::Rect::from_min_size(egui::pos2(header_rect.left() + x, header_rect.top()), egui::vec2(width, 20.0));
-                            let response = ui.interact(cell, ui.make_persistent_id(("species_list_header", label)), egui::Sense::click());
-                            if response.hovered() {
-                                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
-                            }
-                            let active = self.sort_column == column;
-                            let (position, anchor) = if stat_column(column) {
-                                (egui::pos2(cell.right() - 4.0, cell.center().y), egui::Align2::RIGHT_CENTER)
-                            } else {
-                                (egui::pos2(cell.left(), cell.center().y), egui::Align2::LEFT_CENTER)
-                            };
-                            let ink = if active { color::ACCENT } else { color::MUTED };
-                            let text_rect = ui.painter().text(position, anchor, label, egui::FontId::proportional(12.0), ink);
-                            if active {
-                                // A small triangle drawn by hand: the font has no arrow glyph.
-                                let centre_x = if stat_column(column) { text_rect.left() - 8.0 } else { text_rect.right() + 8.0 };
-                                let centre_y = cell.center().y;
-                                let (w, h) = (3.5, 2.5);
-                                let points = if self.sort_descending {
-                                    vec![egui::pos2(centre_x - w, centre_y - h), egui::pos2(centre_x + w, centre_y - h), egui::pos2(centre_x, centre_y + h)]
-                                } else {
-                                    vec![egui::pos2(centre_x - w, centre_y + h), egui::pos2(centre_x + w, centre_y + h), egui::pos2(centre_x, centre_y - h)]
-                                };
-                                ui.painter().add(egui::Shape::convex_polygon(points, color::ACCENT, egui::Stroke::NONE));
-                            }
-                            if response.clicked() {
-                                if active {
-                                    self.sort_descending = !self.sort_descending;
-                                } else {
-                                    self.sort_column = column;
-                                    self.sort_descending = stat_column(column);
-                                }
-                            }
-                        }
+                        list_header(ui, &mut self.sort_column, &mut self.sort_descending);
                         ui.separator();
 
                         let rows: &[ListRow] = self.list_rows.as_deref().unwrap_or(&[]);
@@ -539,27 +603,8 @@ impl Species {
                                     if response.hovered() {
                                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
-                                    if let Some(texture) = icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), number) {
-                                        let icon = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.center().y - 15.0), egui::vec2(40.0, 30.0));
-                                        let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                                        ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
-                                    }
-                                    let y = rect.center().y;
-                                    let left = rect.left();
-                                    ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
-                                    ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), color::TEXT);
-                                    if let Some(row) = rows.get(number - 1) {
-                                        let type_1 = names::TYPE.get(row.types[0] as usize).copied().unwrap_or("-");
-                                        ui.painter().text(egui::pos2(left + 240.0, y), egui::Align2::LEFT_CENTER, type_1, egui::FontId::proportional(12.5), color::TEXT);
-                                        let type_2 = second_type(row);
-                                        let ink = if type_2 == "-" { color::MUTED } else { color::TEXT };
-                                        ui.painter().text(egui::pos2(left + 302.0, y), egui::Align2::LEFT_CENTER, type_2, egui::FontId::proportional(12.5), ink);
-                                        for (stat, &value) in row.stats.iter().enumerate() {
-                                            let x = left + 364.0 + 36.0 * stat as f32;
-                                            ui.painter().text(egui::pos2(x + 32.0, y), egui::Align2::RIGHT_CENTER, value.to_string(), egui::FontId::proportional(12.5), widget::stat_color(value as f32));
-                                        }
-                                        ui.painter().text(egui::pos2(left + 620.0, y), egui::Align2::RIGHT_CENTER, row.total.to_string(), egui::FontId::proportional(12.5), color::TEXT);
-                                    }
+                                    let icon = icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), number);
+                                    paint_list_row(ui, rect, number, rows.get(number - 1), icon);
                                     if response.clicked() {
                                         self.species = number;
                                         ui.memory_mut(|m| m.close_popup());
@@ -1909,6 +1954,13 @@ impl Module for Species {
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
         widget::set_page_focus(ui.ctx(), session.focus_page);
         widget::update_navigation(ui);
+        // Another page asked for a species.
+        if let Some(species) = ui.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(OPEN_SPECIES))) {
+            self.species = species.clamp(1, SPECIES_COUNT);
+            self.form = 0;
+            self.tab = 0;
+            self.loaded = None;
+        }
         ui.add_space(8.0);
         ui.heading("Species");
         ui.add_space(8.0);

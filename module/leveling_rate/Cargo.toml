@@ -1,0 +1,10 @@
+[package]
+name = "sango-leveling-rate"
+version.workspace = true
+edition.workspace = true
+description = "The Leveling rate page of Sango Studio."
+
+[dependencies]
+sango-core.workspace = true
+sango-species.workspace = true
+sango-ui.workspace = true

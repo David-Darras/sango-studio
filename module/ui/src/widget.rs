@@ -65,6 +65,19 @@ pub fn missing_card(ui: &mut egui::Ui, message: &str) {
     });
 }
 
+/// Asks the application to show the page with this title (the title that the module gives).
+pub fn open_page(ctx: &egui::Context, title: &str) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OPEN_PAGE_KEY), title.to_string()));
+}
+
+/// Takes the title of the page that was asked for, if any. The application calls it once per frame.
+pub fn take_open_page(ctx: &egui::Context) -> Option<String> {
+    ctx.data_mut(|d| d.remove_temp::<String>(egui::Id::new(OPEN_PAGE_KEY)))
+}
+
+/// The key, in the memory of the interface, of the title of the page that was asked for.
+const OPEN_PAGE_KEY: &str = "sango_open_page";
+
 /// A page that is not written yet. Without the two folders of Home, it asks for them.
 pub fn placeholder(ui: &mut egui::Ui, name: &str, text: &str, session: &sango_core::Session) {
     ui.add_space(8.0);
