@@ -4,6 +4,7 @@
 //! `pokemon/data/<species>_<form>.bin` takes the place of the romfs when it exists.
 
 mod data;
+mod icons;
 mod pokedex_data;
 mod names;
 
@@ -1731,6 +1732,26 @@ mod test {
                     general_tab(ui, &mut data, &mut 0u8);
                 });
             });
+        }
+    }
+
+    /// With the dump of the game: every icon file of the table is in the archive of
+    /// the Pokemon icons and decodes to a 40 x 30 image.
+    #[test]
+    fn every_species_icon_of_the_table_is_in_the_dump() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).unwrap();
+        for species in 1..icons::ICON_FILES.len() {
+            let file = icons::ICON_FILES[species] as usize;
+            let bytes = garc.first_file(file).unwrap_or_else(|| panic!("species {species}: no file {file}"));
+            let bytes = if sango_core::lz::is_compressed(bytes) {
+                sango_core::lz::decompress(bytes).unwrap_or_else(|e| panic!("species {species}: {e}"))
+            } else {
+                bytes.to_vec()
+            };
+            let image = sango_core::Clim::parse(&bytes).unwrap_or_else(|e| panic!("species {species}: {e}"));
+            assert_eq!((image.width(), image.height()), (40, 30), "species {species}");
         }
     }
 
