@@ -14,6 +14,8 @@ mod icons;
 mod learnset;
 mod learnset_csv;
 mod machines;
+mod model_files;
+mod model_tab;
 mod move_names;
 mod pokedex_data;
 mod table;
@@ -154,6 +156,8 @@ pub struct Species {
     text: text_tab::TextTab,
     /// The state of the Icon tab.
     icon_tab: icon_tab::IconTab,
+    /// The state of the Model tab.
+    model_tab: model_tab::ModelTab,
 }
 
 impl Default for Species {
@@ -188,6 +192,7 @@ impl Default for Species {
             evolution: evolution::EvolutionTab::default(),
             text: text_tab::TextTab::default(),
             icon_tab: icon_tab::IconTab::default(),
+            model_tab: model_tab::ModelTab::default(),
         }
     }
 }
@@ -2027,6 +2032,7 @@ impl Module for Species {
             self.evolution.open(&dump);
             self.text.open(&dump);
             self.icon_tab.open(&dump);
+            self.model_tab.open(&dump);
             self.icon_textures.clear();
             self.list_rows = None;
             self.loaded = None;
@@ -2108,6 +2114,7 @@ impl Module for Species {
                 }
             }
             (4, Some(_)) => self.icon_tab.ui(ui, session, self.species, self.form),
+            (5, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
             (3, Some(_)) => {
                 let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                 self.text.ui(ui, session, self.species, self.form, place);

@@ -2360,6 +2360,9 @@ dependencies = [
 [[package]]
 name = "sango-core"
 version = "0.1.0"
+dependencies = [
+ "image",
+]
 
 [[package]]
 name = "sango-home"

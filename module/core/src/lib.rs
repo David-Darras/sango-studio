@@ -13,7 +13,9 @@ pub mod experience;
 pub mod garc;
 pub mod learnset;
 pub mod lz;
+pub mod model;
 pub mod moves;
+pub mod render;
 pub mod text;
 
 pub use bundle::Bundle;
