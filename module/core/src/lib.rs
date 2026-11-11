@@ -10,7 +10,9 @@ pub mod bundle;
 pub mod clim;
 pub mod experience;
 pub mod garc;
+pub mod learnset;
 pub mod lz;
+pub mod moves;
 
 pub use bundle::Bundle;
 pub use clim::Clim;
