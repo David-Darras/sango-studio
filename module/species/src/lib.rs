@@ -3,6 +3,7 @@
 //! The data comes from the archive 195 of the romfs. The file of the SD card
 //! `pokemon/data/<species>_<form>.bin` takes the place of the romfs when it exists.
 
+mod csv;
 mod data;
 mod icons;
 mod pokedex_data;
@@ -629,6 +630,14 @@ impl Species {
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
                 }
+                if self.garc.is_some() {
+                    if widget::button(ui, "Export CSV") {
+                        self.export_csv(session);
+                    }
+                    if session.sd.is_some() && widget::button(ui, "Import CSV") {
+                        self.import_csv(session);
+                    }
+                }
             });
             if let Some((ok, message)) = &self.status {
                 ui.add_space(4.0);
@@ -652,6 +661,48 @@ impl Species {
         }
         if save {
             self.save(session);
+        }
+    }
+
+    /// Writes all the species and forms to a CSV file that the user chooses.
+    fn export_csv(&mut self, session: &Session) {
+        let Some(garc) = &self.garc else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("species.csv").save_file() else { return };
+        let text = csv::export(garc, session.sd.as_ref(), self.pokedex.as_ref());
+        let rows = text.lines().count() - 1;
+        self.status = Some(match std::fs::write(&path, &text) {
+            Ok(()) => (true, format!("Exported {rows} rows to {}.", path.display())),
+            Err(error) => (false, format!("{}: {error}", path.display())),
+        });
+    }
+
+    /// Reads a CSV file that the user chooses, checks it, and writes the changes on the SD card.
+    fn import_csv(&mut self, session: &Session) {
+        let (Some(garc), Some(sd)) = (&self.garc, &session.sd) else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
+        let result = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))
+            .and_then(|text| csv::parse(&text))
+            .and_then(|rows| csv::apply(&rows, garc, sd, &mut self.pokedex));
+        match result {
+            Ok(report) => {
+                let files = report.written + report.shape_written as usize;
+                self.status = Some((
+                    true,
+                    if files == 0 {
+                        "The file matches the current data: nothing to write.".to_string()
+                    } else {
+                        format!("Imported: {files} files written on the SD card. The game loads them again by itself.")
+                    },
+                ));
+                // The data on the SD card changed: the form and the list read it again.
+                self.loaded = None;
+                self.list_rows = None;
+                if report.shape_written {
+                    self.pokedex_from_sd = true;
+                }
+            }
+            Err(message) => self.status = Some((false, message)),
         }
     }
 
