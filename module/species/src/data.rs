@@ -12,50 +12,77 @@ use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, FromBytes, IntoBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct SpeciesData {
+    /// The base stats.
     pub base_hp: u8,
     pub base_attack: u8,
     pub base_defense: u8,
     pub base_speed: u8,
     pub base_special_attack: u8,
     pub base_special_defense: u8,
-    /// The two types.
-    pub types: [u8; 2],
+    /// The primary type.
+    pub type_1: u8,
+    /// The secondary type.
+    pub type_2: u8,
     /// The catch rate.
-    pub capture_rate: u8,
-    pub unknown_0: u8,
-    /// The effort values that the Pokémon gives when it faints.
-    pub give_effort_values: u16,
-    /// The items that the wild Pokémon can hold.
-    pub give_item: [u16; 3],
+    pub catch_rate: u8,
+    pub unused_0: u8,
+    /// The effort values and entry flag:
+    /// bits 0..11: EV yield (2 bits each for HP, Atk, Def, Spe, SpA, SpD);
+    /// bit 12: burrowed entry flag (1 = emerges directly in the ground like Diglett/Dugtrio, 0 = standard drop from Poké Ball);
+    /// bits 13..15: unused.
+    pub ev_yield: u16,
+    /// Common held item present on 50% of wild encounters.
+    pub item_50: u16,
+    /// Rare held item present on 5% of wild encounters.
+    pub item_5: u16,
+    pub unused_1: u16,
     /// The gender ratio: 0 male only, 254 female only, 255 no gender.
-    pub gender: u8,
-    /// The steps to hatch an Egg, in cycles.
-    pub egg_hatch_steps: u8,
+    pub gender_ratio: u8,
+    /// The number of egg cycles to hatch an Egg.
+    pub hatch_time: u8,
     pub base_friendship: u8,
-    pub unknown_1: u8,
-    /// The Egg Groups.
-    pub egg_group: [u8; 2],
-    /// The two abilities and the hidden ability.
-    pub ability: [u8; 3],
-    pub escape_rate: u8,
-    /// The place of the first form in the table, or 0.
-    pub form_index: u16,
-    pub form_index_2: u16,
-    /// The number of forms.
-    pub form_count: u8,
-    pub unknown_2: u8,
+    /// Growth curve identifier / Leveling rate (0 to 7).
+    pub leveling_rate: u8,
+    /// The primary Egg Group.
+    pub egg_group_1: u8,
+    /// The secondary Egg Group.
+    pub egg_group_2: u8,
+    /// The primary ability.
+    pub ability_1: u8,
+    /// The secondary ability.
+    pub ability_2: u8,
+    /// The hidden ability.
+    pub ability_hidden: u8,
+    pub unused_2: u8,
+    /// The number of the file, in the archive 195, of the first alternate form. 0 when the species has none.
+    /// The alternate forms are one after the other: with the value 1000, the form 1 is in the file 1000,
+    /// the form 2 is in the file 1001, and so on. The form 0 is the file of the species.
+    pub alternate_form_file: u16,
+    pub unused_3: u16,
+    /// The number of total forms.
+    pub total_form_count: u8,
+    /// The Pokédex color.
+    pub color: u8,
     /// The base experience yield.
-    pub give_experience: u16,
-    /// The height.
+    pub base_experience: u16,
+    /// The height in centimeters.
     pub height: u16,
     /// The weight in hectograms.
     pub weight: u16,
-    /// The technical machines and hidden machines that the species can learn: one bit each.
-    pub technical_moves: [u32; 5],
-    pub fake_height: u16,
-    pub unknown_4: u16,
-    /// The last 16 bytes of the file. They are not described yet.
-    pub rest: [u8; 16],
+    /// The TMs and HMs that the species can learn: one bit each, 128 bits in all.
+    /// The bits 0 to 99 are TM01 to TM100, the bits 100 to 105 are HM01 to HM06, the bit 106 is HM07.
+    pub tm_hm_moves: [u32; 4],
+    /// The moves of the special Move Tutors that the species can learn: one bit each.
+    /// Bit 0: Grass Pledge. Bit 1: Fire Pledge. Bit 2: Water Pledge. Bit 3: Frenzy Plant.
+    /// Bit 4: Blast Burn. Bit 5: Hydro Cannon. Bit 6: Draco Meteor.
+    pub special_tutor_moves: u32,
+    /// Not used. It looks like a fake height.
+    pub unused_4: u16,
+    /// Not used. It looks like a size class for the online trade.
+    pub unused_5: u16,
+    /// The moves of the four Move Tutors that charge Battle Points: one `u32` of bits for each tutor.
+    /// A table of the game gives the move of each bit.
+    pub bp_tutor_moves: [u32; 4],
 }
 
 impl SpeciesData {
@@ -100,56 +127,73 @@ impl SpeciesData {
 
     /// The effort values that the Pokémon gives when it faints: 2 bits per stat (0 to 3).
     pub fn ev_hp(&self) -> u8 {
-        (self.give_effort_values & 0x3) as u8
+        (self.ev_yield & 0x3) as u8
     }
 
     pub fn ev_attack(&self) -> u8 {
-        ((self.give_effort_values >> 2) & 0x3) as u8
+        ((self.ev_yield >> 2) & 0x3) as u8
     }
 
     pub fn ev_defense(&self) -> u8 {
-        ((self.give_effort_values >> 4) & 0x3) as u8
+        ((self.ev_yield >> 4) & 0x3) as u8
     }
 
     pub fn ev_speed(&self) -> u8 {
-        ((self.give_effort_values >> 6) & 0x3) as u8
+        ((self.ev_yield >> 6) & 0x3) as u8
     }
 
     pub fn ev_special_attack(&self) -> u8 {
-        ((self.give_effort_values >> 8) & 0x3) as u8
+        ((self.ev_yield >> 8) & 0x3) as u8
     }
 
     pub fn ev_special_defense(&self) -> u8 {
-        ((self.give_effort_values >> 10) & 0x3) as u8
+        ((self.ev_yield >> 10) & 0x3) as u8
     }
 
     pub fn set_ev_hp(&mut self, val: u8) {
-        self.give_effort_values = (self.give_effort_values & !0x3) | (val as u16 & 0x3);
+        self.ev_yield = (self.ev_yield & !0x3) | (val as u16 & 0x3);
     }
 
     pub fn set_ev_attack(&mut self, val: u8) {
-        self.give_effort_values = (self.give_effort_values & !(0x3 << 2)) | ((val as u16 & 0x3) << 2);
+        self.ev_yield = (self.ev_yield & !(0x3 << 2)) | ((val as u16 & 0x3) << 2);
     }
 
     pub fn set_ev_defense(&mut self, val: u8) {
-        self.give_effort_values = (self.give_effort_values & !(0x3 << 4)) | ((val as u16 & 0x3) << 4);
+        self.ev_yield = (self.ev_yield & !(0x3 << 4)) | ((val as u16 & 0x3) << 4);
     }
 
     pub fn set_ev_speed(&mut self, val: u8) {
-        self.give_effort_values = (self.give_effort_values & !(0x3 << 6)) | ((val as u16 & 0x3) << 6);
+        self.ev_yield = (self.ev_yield & !(0x3 << 6)) | ((val as u16 & 0x3) << 6);
     }
 
     pub fn set_ev_special_attack(&mut self, val: u8) {
-        self.give_effort_values = (self.give_effort_values & !(0x3 << 8)) | ((val as u16 & 0x3) << 8);
+        self.ev_yield = (self.ev_yield & !(0x3 << 8)) | ((val as u16 & 0x3) << 8);
     }
 
     pub fn set_ev_special_defense(&mut self, val: u8) {
-        self.give_effort_values = (self.give_effort_values & !(0x3 << 10)) | ((val as u16 & 0x3) << 10);
+        self.ev_yield = (self.ev_yield & !(0x3 << 10)) | ((val as u16 & 0x3) << 10);
     }
 
     /// The total effort values given.
     pub fn ev_total(&self) -> u8 {
         self.ev_hp() + self.ev_attack() + self.ev_defense() + self.ev_speed() + self.ev_special_attack() + self.ev_special_defense()
+    }
+
+    /// Mask for the burrowed entry bit in `ev_yield` (bit 12: 1 = burrowed entry / Diglett & Dugtrio, 0 = standard drop).
+    const BURROWED_ENTRY_MASK: u16 = 1 << 12;
+
+    /// Returns true if the Pokémon emerges directly burrowed in the ground upon battle entry (e.g. Diglett, Dugtrio).
+    pub fn is_burrowed_entry(&self) -> bool {
+        (self.ev_yield & Self::BURROWED_ENTRY_MASK) != 0
+    }
+
+    /// Sets whether the Pokémon emerges directly burrowed in the ground upon battle entry.
+    pub fn set_burrowed_entry(&mut self, burrowed: bool) {
+        if burrowed {
+            self.ev_yield |= Self::BURROWED_ENTRY_MASK;
+        } else {
+            self.ev_yield &= !Self::BURROWED_ENTRY_MASK;
+        }
     }
 }
 
@@ -173,19 +217,41 @@ mod test {
         assert_eq!(d.base_total(), 405);
         assert!((d.base_average() - 67.5).abs() < 1e-4);
         assert!((d.base_standard_deviation() - 8.9022).abs() < 1e-3);
-        assert_eq!(d.types, [11, 3]); // Grass and Poison
-        assert_eq!(d.capture_rate, 45);
-        assert_eq!(d.gender, 31);
-        assert_eq!(d.egg_hatch_steps, 20);
+        assert_eq!((d.type_1, d.type_2), (11, 3)); // Grass and Poison
+        assert_eq!(d.catch_rate, 45);
+        assert_eq!((d.item_50, d.item_5), (0, 0));
+        assert_eq!(d.gender_ratio, 31);
+        assert_eq!(d.hatch_time, 20);
         assert_eq!(d.base_friendship, 70);
-        assert_eq!(d.egg_group, [1, 7]);
-        assert_eq!(d.ability, [65, 65, 34]); // Overgrow, Overgrow, Chlorophyll
-        assert_eq!(d.form_count, 1);
-        assert_eq!(d.give_experience, 142);
+        assert_eq!(d.leveling_rate, 3); // Medium Slow
+        assert_eq!((d.egg_group_1, d.egg_group_2), (1, 7));
+        assert_eq!((d.ability_1, d.ability_2, d.ability_hidden), (65, 65, 34)); // Overgrow, Overgrow, Chlorophyll
+        assert_eq!(d.total_form_count, 1);
+        assert_eq!(d.color, 3); // Green
+        assert_eq!(d.base_experience, 142);
         assert_eq!(d.weight, 130);
-        assert_eq!(d.technical_moves[0], 0x8439_8720);
+        assert_eq!(d.tm_hm_moves[0], 0x8439_8720);
         assert_eq!((d.ev_hp(), d.ev_attack(), d.ev_defense(), d.ev_speed(), d.ev_special_attack(), d.ev_special_defense()), (0, 0, 0, 0, 1, 1));
         assert_eq!(d.ev_total(), 2);
+        assert!(!d.is_burrowed_entry());
+    }
+
+    #[test]
+    fn burrowed_entry_toggles_bit_12_without_touching_evs() {
+        let mut d = SpeciesData::from_bytes(&IVYSAUR).unwrap();
+        assert!(!d.is_burrowed_entry());
+        assert_eq!(d.ev_special_attack(), 1);
+        assert_eq!(d.ev_special_defense(), 1);
+
+        d.set_burrowed_entry(true);
+        assert!(d.is_burrowed_entry());
+        assert_eq!(d.ev_special_attack(), 1);
+        assert_eq!(d.ev_special_defense(), 1);
+        assert_eq!(d.ev_yield, 0x0500 | (1 << 12));
+
+        d.set_burrowed_entry(false);
+        assert!(!d.is_burrowed_entry());
+        assert_eq!(d.ev_yield, 0x0500);
     }
 
     #[test]

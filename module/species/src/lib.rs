@@ -4,9 +4,11 @@
 //! `pokemon/data/<species>_<form>.bin` takes the place of the romfs when it exists.
 
 mod data;
+mod pokedex_data;
 mod names;
 
 use data::SpeciesData;
+use pokedex_data::PokedexData;
 use sango_core::Garc;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
@@ -29,7 +31,7 @@ fn file_index(garc: &Garc, species: usize, form: usize) -> usize {
         return species;
     }
     match garc.first_file(species).and_then(|b| SpeciesData::from_bytes(b).ok()) {
-        Some(base) if base.form_index != 0 && form < base.form_count as usize => base.form_index as usize + form - 1,
+        Some(base) if base.alternate_form_file != 0 && form < base.total_form_count as usize => base.alternate_form_file as usize + form - 1,
         _ => species,
     }
 }
@@ -56,6 +58,16 @@ pub struct Species {
     baseline: Option<SpeciesData>,
     /// True when the data came from the SD card.
     from_sd: bool,
+    /// The Pokédex data (the shapes). It comes from the SD card when the file is there.
+    pokedex: Option<PokedexData>,
+    /// The archive of the Pokédex data.
+    pokedex_archive: Option<Garc>,
+    /// The shape of the chosen species and form.
+    shape: u8,
+    /// The shape as it was loaded or saved.
+    shape_baseline: u8,
+    /// True when the Pokédex data came from the SD card.
+    pokedex_from_sd: bool,
     /// The species and the form that `data` is for.
     loaded: Option<(usize, usize)>,
     tab: usize,
@@ -81,6 +93,11 @@ impl Default for Species {
             data: None,
             baseline: None,
             from_sd: false,
+            pokedex: None,
+            pokedex_archive: None,
+            shape: 0,
+            shape_baseline: 0,
+            pokedex_from_sd: false,
             loaded: None,
             tab: 0,
             status: None,
@@ -132,6 +149,7 @@ impl Species {
         self.loaded = Some((self.species, self.form));
         let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(self.species, self.form))).and_then(|b| SpeciesData::from_bytes(&b).ok());
         self.from_sd = on_card.is_some();
+        self.load_shape(session);
         match on_card.map(Ok).unwrap_or_else(|| self.read_romfs()) {
             Ok(data) => {
                 self.baseline = Some(data.clone());
@@ -146,10 +164,26 @@ impl Species {
         }
     }
 
+    /// Reads the Pokédex data from the romfs.
+    fn read_pokedex_romfs(&self) -> Result<PokedexData, String> {
+        let garc = self.pokedex_archive.as_ref().ok_or("The archive of the Pokédex data is not open.")?;
+        let bytes = garc.first_file(pokedex_data::FILE).ok_or("The file of the Pokédex data is missing.")?;
+        PokedexData::from_bytes(bytes.to_vec())
+    }
+
+    /// Reads the Pokédex data (the SD card first, then the romfs) and takes the shape of the chosen form.
+    fn load_shape(&mut self, session: &Session) {
+        let on_card = session.sd.as_ref().and_then(|sd| sd.read(pokedex_data::SD_PATH)).and_then(|b| PokedexData::from_bytes(b).ok());
+        self.pokedex_from_sd = on_card.is_some();
+        self.pokedex = on_card.or_else(|| self.read_pokedex_romfs().ok());
+        self.shape = self.pokedex.as_ref().and_then(|e| e.shape(self.species, self.form)).unwrap_or(0);
+        self.shape_baseline = self.shape;
+    }
+
     /// The number of forms of the chosen species (at least one).
-    fn form_count(&self) -> usize {
+    fn total_form_count(&self) -> usize {
         let base = self.garc.as_ref().and_then(|g| g.first_file(self.species)).and_then(|b| SpeciesData::from_bytes(b).ok());
-        base.map_or(1, |b| (b.form_count as usize).max(1))
+        base.map_or(1, |b| (b.total_form_count as usize).max(1))
     }
 
     /// The menus, the two buttons and the state.
@@ -321,7 +355,7 @@ impl Species {
                         }
                     });
                 }
-                let forms = self.form_count();
+                let forms = self.total_form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
                 let form_text = |form: usize| if form == 0 { "Form 0 (normal)".to_string() } else { format!("Form {form}") };
                 let form_combo = egui::ComboBox::from_id_salt("form_menu").selected_text(form_text(self.form)).width(150.0).show_ui(ui, |ui| {
@@ -354,9 +388,9 @@ impl Species {
                 }
                 reset = widget::button(ui, "Reset");
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
-                if self.data.is_some() && self.data != self.baseline {
+                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline) {
                     widget::badge(ui, "Not saved", color::AMBER);
-                } else if self.from_sd {
+                } else if self.from_sd || self.pokedex_from_sd {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
@@ -374,6 +408,9 @@ impl Species {
             match self.read_romfs() {
                 Ok(data) => {
                     self.data = Some(data);
+                    if let Some(shape) = self.read_pokedex_romfs().ok().and_then(|e| e.shape(self.species, self.form)) {
+                        self.shape = shape;
+                    }
                     self.status = Some((true, "The data comes from the romfs again. Save to write it on the SD card.".into()));
                 }
                 Err(message) => self.status = Some((false, message)),
@@ -388,9 +425,25 @@ impl Species {
     fn save(&mut self, session: &Session) {
         let (Some(data), Some(sd)) = (&self.data, &session.sd) else { return };
         let path = sd_path(self.species, self.form);
-        let result = sd.write(&path, &data.to_bytes()).and_then(|_| sd.mark_changed(&path));
+        let mut result = sd.write(&path, &data.to_bytes()).and_then(|_| sd.mark_changed(&path));
+        // The shape is in the Pokédex data: the file is written again when the shape changed.
+        let mut shape_saved = false;
+        if result.is_ok() && self.shape != self.shape_baseline {
+            let placed = self.pokedex.as_mut().is_some_and(|pokedex| pokedex.set_shape(self.species, self.form, self.shape));
+            match self.pokedex.as_ref() {
+                Some(pokedex) if placed => {
+                    result = sd.write(pokedex_data::SD_PATH, &pokedex.to_bytes()).and_then(|_| sd.mark_changed(pokedex_data::SD_PATH));
+                    shape_saved = result.is_ok();
+                }
+                _ => result = Err("The shape has no place in the Pokédex data.".into()),
+            }
+        }
         match result {
             Ok(()) => {
+                if shape_saved {
+                    self.shape_baseline = self.shape;
+                    self.pokedex_from_sd = true;
+                }
                 self.baseline = self.data.clone();
                 self.from_sd = true;
                 self.status = Some((true, format!("Saved in {path}. The game loads it again by itself.")));
@@ -1049,7 +1102,7 @@ fn stat_line(ui: &mut egui::Ui, label: &str, summary: &'static str, value: &mut 
     );
 }
 
-fn group_statistics(ui: &mut egui::Ui, d: &mut SpeciesData) {
+fn group_statistics(ui: &mut egui::Ui, d: &mut SpeciesData, _shape: &mut u8) {
     group(ui, "Base stats", |ui| {
         grid("stats").show(ui, |ui| {
             stat_line(ui, "HP", "Hit Points (HP). Amount of damage this Pokémon can withstand before fainting.", &mut d.base_hp);
@@ -1086,7 +1139,7 @@ fn group_statistics(ui: &mut egui::Ui, d: &mut SpeciesData) {
     });
 }
 
-fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
+fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8) {
     group(ui, "Characteristics", |ui| {
         grid("characteristics").show(ui, |ui| {
             line_with_note(
@@ -1097,8 +1150,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Type",
                 }),
                 |ui| {
-                    menu(ui, "type_1", &mut d.types[0], &names::TYPE, 130.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.types[0])));
+                    menu(ui, "type_1", &mut d.type_1, &names::TYPE, 130.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.type_1)));
                 },
             );
             line_with_note(
@@ -1109,8 +1162,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Type",
                 }),
                 |ui| {
-                    menu(ui, "type_2", &mut d.types[1], &names::TYPE, 130.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.types[1])));
+                    menu(ui, "type_2", &mut d.type_2, &names::TYPE, 130.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.type_2)));
                 },
             );
             line_with_note(
@@ -1121,8 +1174,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Ability",
                 }),
                 |ui| {
-                    searchable_picker(ui, "ability_1", &mut d.ability[0], &names::ABILITY, 180.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.ability[0])));
+                    searchable_picker(ui, "ability_1", &mut d.ability_1, &names::ABILITY, 180.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.ability_1)));
                 },
             );
             line_with_note(
@@ -1133,8 +1186,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Ability",
                 }),
                 |ui| {
-                    searchable_picker(ui, "ability_2", &mut d.ability[1], &names::ABILITY, 180.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.ability[1])));
+                    searchable_picker(ui, "ability_2", &mut d.ability_2, &names::ABILITY, 180.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.ability_2)));
                 },
             );
             line_with_note(
@@ -1145,31 +1198,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Ability",
                 }),
                 |ui| {
-                    searchable_picker(ui, "ability_hidden", &mut d.ability[2], &names::ABILITY, 180.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.ability[2])));
-                },
-            );
-            line_with_note(
-                ui,
-                "Gender ratio",
-                Some(FieldNote {
-                    summary: "Probability of being male or female. 0 = 100% ♂, 254 = 100% ♀, 255 = Genderless.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/Gender",
-                }),
-                |ui| {
-                    gender_widget(ui, &mut d.gender);
-                },
-            );
-            line_with_note(
-                ui,
-                "Catch rate",
-                Some(FieldNote {
-                    summary: "Catch rate (3 to 255). Higher values make the Pokémon easier to catch with a Poké Ball.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/Catch_rate",
-                }),
-                |ui| {
-                    number(ui, &mut d.capture_rate, 255.0);
-                    ui.label(widget::hint(&format!("{} · 0x{:02X}", percent(d.capture_rate), d.capture_rate)));
+                    searchable_picker(ui, "ability_hidden", &mut d.ability_hidden, &names::ABILITY, 180.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.ability_hidden)));
                 },
             );
             line_with_note(
@@ -1180,8 +1210,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Egg_Group",
                 }),
                 |ui| {
-                    menu(ui, "egg_1", &mut d.egg_group[0], &names::EGG_GROUP, 140.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.egg_group[0])));
+                    menu(ui, "egg_1", &mut d.egg_group_1, &names::EGG_GROUP, 140.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.egg_group_1)));
                 },
             );
             line_with_note(
@@ -1192,8 +1222,89 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Egg_Group",
                 }),
                 |ui| {
-                    menu(ui, "egg_2", &mut d.egg_group[1], &names::EGG_GROUP, 140.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.egg_group[1])));
+                    menu(ui, "egg_2", &mut d.egg_group_2, &names::EGG_GROUP, 140.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.egg_group_2)));
+                },
+            );
+            line_with_note(
+                ui,
+                "Held Item 50%",
+                Some(FieldNote {
+                    summary: "Common held item present on 50% of wild Pokémon of this species upon encounter.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
+                }),
+                |ui| {
+                    searchable_picker(ui, "item_50", &mut d.item_50, &names::ITEM, 180.0);
+                    ui.label(widget::hint(&format!("0x{:04X}", d.item_50)));
+                },
+            );
+            line_with_note(
+                ui,
+                "Held Item 5%",
+                Some(FieldNote {
+                    summary: "Rare held item present on 5% of wild Pokémon of this species upon encounter.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
+                }),
+                |ui| {
+                    searchable_picker(ui, "item_5", &mut d.item_5, &names::ITEM, 180.0);
+                    ui.label(widget::hint(&format!("0x{:04X}", d.item_5)));
+                },
+            );
+            line_with_note(
+                ui,
+                "Leveling rate",
+                Some(FieldNote {
+                    summary: "Growth rate determining the total experience points required to reach level 100 (e.g. 1,000,000 for Medium Fast).",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/Experience#Experience_total_by_growth_rate",
+                }),
+                |ui| {
+                    menu(ui, "leveling_rate", &mut d.leveling_rate, &names::LEVELING_RATE, 165.0);
+                    let exp_at_100 = match d.leveling_rate {
+                        0 => "1,000,000 exp",
+                        1 => "600,000 exp",
+                        2 => "1,640,000 exp",
+                        3 => "1,059,860 exp",
+                        4 => "800,000 exp",
+                        5 => "1,250,000 exp",
+                        6 | 7 => "1,000,000 exp",
+                        _ => "unknown",
+                    };
+                    ui.label(widget::hint(&format!("{exp_at_100} · 0x{:02X}", d.leveling_rate)));
+                },
+            );
+            line_with_note(
+                ui,
+                "Shape",
+                Some(FieldNote {
+                    summary: "Physical body shape (quadruped, winged, serpentine...) used for form sorting in the Pokédex.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_shape",
+                }),
+                |ui| {
+                    menu(ui, "shape", shape, &names::SHAPE, 190.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", *shape)));
+                },
+            );
+            line_with_note(
+                ui,
+                "Color",
+                Some(FieldNote {
+                    summary: "Official dominant color used for visual search in the Pokédex.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_color",
+                }),
+                |ui| {
+                    menu(ui, "pokedex_color", &mut d.color, &names::COLOR, 130.0);
+                    ui.label(widget::hint(&format!("0x{:02X}", d.color)));
+                },
+            );
+            line_with_note(
+                ui,
+                "Gender ratio",
+                Some(FieldNote {
+                    summary: "Probability of being male or female. 0 = 100% ♂, 254 = 100% ♀, 255 = Genderless.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/Gender",
+                }),
+                |ui| {
+                    gender_widget(ui, &mut d.gender_ratio);
                 },
             );
             line_with_note(
@@ -1204,31 +1315,20 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Egg_cycle",
                 }),
                 |ui| {
-                    number(ui, &mut d.egg_hatch_steps, 255.0);
-                    let steps = d.egg_hatch_steps as u32 * 256;
-                    ui.label(widget::hint(&format!("{} cycles ({} steps) · 0x{:02X}", d.egg_hatch_steps, steps, d.egg_hatch_steps)));
+                    number(ui, &mut d.hatch_time, 255.0);
+                    let steps = d.hatch_time as u32 * 256;
+                    ui.label(widget::hint(&format!("{} cycles ({} steps) · 0x{:02X}", d.hatch_time, steps, d.hatch_time)));
                 },
             );
             line_with_note(
                 ui,
                 "Height",
                 Some(FieldNote {
-                    summary: "Pokémon height from head to toe. Used in formulas for moves like Grass Knot and Low Kick.",
+                    summary: "Pokémon height from head to toe.",
                     url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_height",
                 }),
                 |ui| {
                     height_field(ui, "height", &mut d.height);
-                },
-            );
-            line_with_note(
-                ui,
-                "Fake height",
-                Some(FieldNote {
-                    summary: "Internal 3DS framing height used for camera zoom and battle sprite scaling.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_height",
-                }),
-                |ui| {
-                    height_field(ui, "fake_height", &mut d.fake_height);
                 },
             );
             line_with_note(
@@ -1240,6 +1340,18 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                 }),
                 |ui| {
                     weight_field(ui, "weight", &mut d.weight);
+                },
+            );
+            line_with_note(
+                ui,
+                "Catch rate",
+                Some(FieldNote {
+                    summary: "Catch rate (3 to 255). Higher values make the Pokémon easier to catch with a Poké Ball.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/Catch_rate",
+                }),
+                |ui| {
+                    number(ui, &mut d.catch_rate, 255.0);
+                    ui.label(widget::hint(&format!("{} · 0x{:02X}", percent(d.catch_rate), d.catch_rate)));
                 },
             );
             line_with_note(
@@ -1262,32 +1374,27 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData) {
                     url: "https://bulbapedia.bulbagarden.net/wiki/Experience",
                 }),
                 |ui| {
-                    number(ui, &mut d.give_experience, 65535.0);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.give_experience)));
+                    number(ui, &mut d.base_experience, 65535.0);
+                    ui.label(widget::hint(&format!("0x{:04X}", d.base_experience)));
                 },
             );
             line_with_note(
                 ui,
-                "Shape",
+                "Burrowed entry",
                 Some(FieldNote {
-                    summary: "Physical body shape (quadruped, winged, serpentine...) used for form sorting in the Pokédex.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_shape",
+                    summary: "Specifies whether the Pokémon emerges directly burrowed in the ground upon entering battle (Diglett and Dugtrio), skipping the standard mid-air Poké Ball drop animation.",
+                    url: "https://bulbapedia.bulbagarden.net/wiki/Diglett_(Pok%C3%A9mon)#Trivia",
                 }),
                 |ui| {
-                    ui.label(widget::hint("—"));
-                    ui.label(egui::RichText::new("(TODO)").color(color::AMBER).size(12.0));
-                },
-            );
-            line_with_note(
-                ui,
-                "Pokédex color",
-                Some(FieldNote {
-                    summary: "Official dominant color used for visual search in the Pokédex.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_color",
-                }),
-                |ui| {
-                    ui.label(widget::hint("—"));
-                    ui.label(egui::RichText::new("(TODO)").color(color::AMBER).size(12.0));
+                    let is_burrowed = d.is_burrowed_entry();
+                    if ui.selectable_label(is_burrowed, "Yes").clicked() {
+                        d.set_burrowed_entry(true);
+                    }
+                    if ui.selectable_label(!is_burrowed, "No").clicked() {
+                        d.set_burrowed_entry(false);
+                    }
+                    let bit_val = if is_burrowed { 1 } else { 0 };
+                    ui.label(widget::hint(&format!("· bit 12: {bit_val}")));
                 },
             );
         });
@@ -1372,7 +1479,7 @@ fn ev_line(ui: &mut egui::Ui, label: &str, summary: &'static str, mut value: u8,
     );
 }
 
-fn group_ev_yield(ui: &mut egui::Ui, d: &mut SpeciesData) {
+fn group_ev_yield(ui: &mut egui::Ui, d: &mut SpeciesData, _shape: &mut u8) {
     group(ui, "EV yield", |ui| {
         grid("ev_yield").show(ui, |ui| {
             ev_line(ui, "HP", "Effort Values (EVs) in HP awarded to the victor (0 to 3).", d.ev_hp(), |v| d.set_ev_hp(v));
@@ -1394,68 +1501,24 @@ fn group_ev_yield(ui: &mut egui::Ui, d: &mut SpeciesData) {
                 ui.horizontal(|ui| {
                     ui.label(widget::hint("Total"));
                     ui.label(egui::RichText::new(format!("{total} EV{}", if total > 1 { "s" } else { "" })).strong());
-                    ui.label(widget::hint(&format!("· raw: 0x{:04X}", d.give_effort_values)));
+                    ui.label(widget::hint(&format!("· raw: 0x{:04X}", d.ev_yield)));
                 });
             });
     });
 }
 
-fn group_items(ui: &mut egui::Ui, d: &mut SpeciesData) {
-    group(ui, "Wild held items", |ui| {
-        grid("items").show(ui, |ui| {
-            line_with_note(
-                ui,
-                "Item 1 (50%)",
-                Some(FieldNote {
-                    summary: "Common held item present on 50% of wild Pokémon of this species upon encounter.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
-                }),
-                |ui| {
-                    searchable_picker(ui, "give_item_0", &mut d.give_item[0], &names::ITEM, 180.0);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.give_item[0])));
-                },
-            );
-            line_with_note(
-                ui,
-                "Item 2 (5%)",
-                Some(FieldNote {
-                    summary: "Rare held item present on 5% of wild Pokémon of this species upon encounter.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
-                }),
-                |ui| {
-                    searchable_picker(ui, "give_item_1", &mut d.give_item[1], &names::ITEM, 180.0);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.give_item[1])));
-                },
-            );
-            line_with_note(
-                ui,
-                "Item 3 (1%)",
-                Some(FieldNote {
-                    summary: "Ultra-rare held item present on 1% of wild Pokémon of this species upon encounter.",
-                    url: "https://bulbapedia.bulbagarden.net/wiki/List_of_Pok%C3%A9mon_by_wild_held_item",
-                }),
-                |ui| {
-                    searchable_picker(ui, "give_item_2", &mut d.give_item[2], &names::ITEM, 180.0);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.give_item[2])));
-                },
-            );
-        });
-    });
-}
-
 /// The groups of the General tab, side by side: as many columns as the window has room for.
-fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData) {
-    const GROUPS: [fn(&mut egui::Ui, &mut SpeciesData); 4] = [
+fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8) {
+    const GROUPS: [fn(&mut egui::Ui, &mut SpeciesData, &mut u8); 3] = [
         group_statistics,
         group_characteristics,
         group_ev_yield,
-        group_items,
     ];
     let columns = (((ui.available_width() + 10.0) / (COLUMN_WIDTH + 10.0)).floor() as usize).clamp(1, 2);
     let layout: Vec<Vec<usize>> = match columns {
         2 => vec![
             vec![0, 2], // Column 0: Base stats, EV yield
-            vec![1, 3], // Column 1: Characteristics, Wild held items
+            vec![1], // Column 1: Characteristics
         ],
         _ => vec![(0..GROUPS.len()).collect()],
     };
@@ -1465,7 +1528,7 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData) {
                 ui.vertical(|ui| {
                     ui.set_width(COLUMN_WIDTH);
                     for index in column {
-                        GROUPS[index](ui, d);
+                        GROUPS[index](ui, d, shape);
                     }
                 });
                 ui.add_space(10.0);
@@ -1504,6 +1567,7 @@ impl Module for Species {
                     self.status = Some((false, message));
                 }
             }
+            self.pokedex_archive = Garc::open(&dump.archive(pokedex_data::ARCHIVE)).ok();
             self.loaded = None;
         }
         if self.garc.is_some() && self.loaded != Some((self.species, self.form)) {
@@ -1565,7 +1629,7 @@ impl Module for Species {
         }
         ui.add_space(6.0);
         match (self.tab, self.data.as_mut()) {
-            (0, Some(data)) => general_tab(ui, data),
+            (0, Some(data)) => general_tab(ui, data, &mut self.shape),
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));
@@ -1647,7 +1711,7 @@ mod test {
                 widget::set_page_focus(ctx, true);
                 widget::update_navigation(ui);
                 species.top_bar(ui, &session);
-                general_tab(ui, &mut data);
+                general_tab(ui, &mut data, &mut 0u8);
             });
         });
 
@@ -1664,7 +1728,7 @@ mod test {
                     widget::set_page_focus(ctx, true);
                     widget::update_navigation(ui);
                     species.top_bar(ui, &session);
-                    general_tab(ui, &mut data);
+                    general_tab(ui, &mut data, &mut 0u8);
                 });
             });
         }

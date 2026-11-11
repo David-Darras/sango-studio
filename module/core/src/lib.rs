@@ -6,8 +6,10 @@ mod dump;
 mod sd;
 mod setting;
 
+pub mod bundle;
 pub mod garc;
 
+pub use bundle::Bundle;
 pub use dump::Dump;
 pub use garc::Garc;
 pub use sd::{SdCard, SD_FOLDER_NAME};
