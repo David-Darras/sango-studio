@@ -615,6 +615,11 @@ impl Species {
                         }
                     });
                 }
+                if let Some(garc) = &self.garc {
+                    let id = file_index(garc, self.species, self.form);
+                    ui.label(widget::hint(&format!("archive {ARCHIVE}, file {id}")))
+                        .on_hover_text("The place of the file of this species and form in the archive of the species data.");
+                }
                 reset = widget::button(ui, "Reset");
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline) {
@@ -2050,6 +2055,32 @@ mod test {
         assert_eq!(list, [2, 1, 3]);
         assert_eq!(second_type(&rows[1]), "-");
         assert_eq!(second_type(&rows[0]), "Fighting");
+    }
+
+    /// With the dump of the game: each species and form points to a file of the archive
+    /// of the species data. Two species never share a file; the forms of one species can,
+    /// because a form without data of its own uses the file of the form 0.
+    #[test]
+    fn each_species_and_form_has_its_own_file() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let garc = Garc::open(&dump.archive(ARCHIVE)).unwrap();
+        let mut seen = HashMap::new();
+        for species in 1..=SPECIES_COUNT {
+            let forms = garc
+                .first_file(species)
+                .and_then(|b| SpeciesData::from_bytes(b).ok())
+                .map_or(1, |d| (d.total_form_count as usize).max(1));
+            for form in 0..forms {
+                let id = file_index(&garc, species, form);
+                // The last file of the archive is the whole table, not a species.
+                assert!(id < garc.file_count() - 1, "species {species} form {form}: file {id}");
+                if let Some((other_species, other_form)) = seen.insert(id, (species, form)) {
+                    assert_eq!(other_species, species, "species {species} form {form} and species {other_species} form {other_form} share the file {id}");
+                }
+            }
+        }
+        assert!(seen.len() > SPECIES_COUNT);
     }
 
     /// With the dump of the game: the icon of a species is decoded into a texture once,
