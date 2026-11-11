@@ -6,9 +6,11 @@
 mod csv;
 mod data;
 mod evolution;
+mod evolution_csv;
 mod examples;
 mod icons;
 mod learnset;
+mod learnset_csv;
 mod machines;
 mod move_names;
 mod pokedex_data;
@@ -2079,8 +2081,20 @@ impl Module for Species {
         }
         match (self.tab, self.data.as_mut()) {
             (0, Some(data)) => general_tab(ui, data, &mut self.shape),
-            (1, Some(data)) => self.learnset.ui(ui, data, session),
-            (2, Some(_)) => self.evolution.ui(ui),
+            (1, Some(data)) => {
+                self.learnset.ui(ui, data, session);
+                if self.learnset.take_imported() {
+                    // The files on the SD card changed: the species data and the lists are read again.
+                    self.loaded = None;
+                    self.list_rows = None;
+                }
+            }
+            (2, Some(_)) => {
+                self.evolution.ui(ui, session);
+                if self.evolution.take_imported() {
+                    self.loaded = None;
+                }
+            }
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));

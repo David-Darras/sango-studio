@@ -4,13 +4,14 @@
 //! method needs (a level, an item, a move...). The user can change every part, add an evolution and delete one.
 //! The file of the evolutions goes on the SD card (see `sango_core::evolution` for its path and layout).
 
+use crate::evolution_csv;
 use crate::learnset::{choose, trash_button, Choice};
 use crate::move_names::MOVE;
 use crate::names;
 use sango_core::evolution::{self, argument_of, method_name, Argument, Evolution, Evolutions, METHODS, SLOTS};
 use sango_core::{Dump, Garc, SdCard};
 use sango_ui::theme::color;
-use sango_ui::{egui, widget};
+use sango_ui::{egui, widget, Session};
 use std::collections::HashMap;
 
 /// The places of the columns of a row: x and width, in points. The species, the method, the need, the delete button.
@@ -45,6 +46,7 @@ fn default_argument(kind: Argument) -> u16 {
 #[derive(Default)]
 pub struct EvolutionTab {
     archive: Option<Garc>,
+    species_archive: Option<Garc>,
     evolutions: Evolutions,
     /// The evolutions as they were read or saved: to know what changed.
     saved: Evolutions,
@@ -52,12 +54,17 @@ pub struct EvolutionTab {
     from_card: bool,
     icon_garc: Option<Garc>,
     icon_textures: HashMap<usize, Option<egui::TextureHandle>>,
+    /// What happened at the last click on a CSV button: true for a success.
+    status: Option<(bool, String)>,
+    /// True when an import wrote files: the species page reads its data again.
+    imported: bool,
 }
 
 impl EvolutionTab {
     /// Opens the archives of a dump.
     pub fn open(&mut self, dump: &Dump) {
         self.archive = Garc::open(&dump.archive(evolution::ARCHIVE)).ok();
+        self.species_archive = Garc::open(&dump.archive(crate::ARCHIVE)).ok();
         self.icon_garc = Garc::open(&dump.archive(crate::icons::ICON_ARCHIVE)).ok();
         self.icon_textures.clear();
     }
@@ -115,8 +122,21 @@ impl EvolutionTab {
     }
 
     /// Draws the tab.
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, session: &Session) {
         egui::ScrollArea::vertical().id_salt("evolution_tab").auto_shrink([false, false]).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if widget::button(ui, "Export CSV") {
+                    self.export_csv(session);
+                }
+                if session.sd.is_some() && widget::button(ui, "Import CSV") {
+                    self.import_csv(session);
+                }
+            });
+            if let Some((ok, message)) = &self.status {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
+            }
+            ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
                 self.header(ui);
@@ -132,6 +152,43 @@ impl EvolutionTab {
                 });
             });
         });
+    }
+
+    /// The archives and the SD card that the CSV functions read.
+    fn library<'a>(&'a self, sd: Option<&'a SdCard>) -> Option<evolution_csv::Library<'a>> {
+        Some(evolution_csv::Library { species: self.species_archive.as_ref()?, evolutions: self.archive.as_ref()?, sd })
+    }
+
+    /// Writes the evolutions of all the species and forms to a CSV file that the user chooses.
+    fn export_csv(&mut self, session: &Session) {
+        let Some(library) = self.library(session.sd.as_ref()) else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("evolutions.csv").save_file() else { return };
+        let text = evolution_csv::export(&library);
+        let rows = text.lines().count() - 1;
+        self.status = Some(match std::fs::write(&path, &text) {
+            Ok(()) => (true, format!("Exported {rows} rows to {}.", path.display())),
+            Err(error) => (false, format!("{}: {error}", path.display())),
+        });
+    }
+
+    /// Reads a CSV file that the user chooses, checks it, and writes the changes on the SD card.
+    fn import_csv(&mut self, session: &Session) {
+        let (Some(library), Some(sd)) = (self.library(session.sd.as_ref()), session.sd.as_ref()) else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
+        let result = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|text| evolution_csv::parse(&text)).and_then(|rows| evolution_csv::apply(&rows, &library, sd));
+        self.status = Some(match result {
+            Ok(0) => (true, "The file matches the current evolutions: nothing to write.".to_string()),
+            Ok(files) => {
+                self.imported = true;
+                (true, format!("Imported: {files} files written on the SD card. The game loads them again by itself."))
+            }
+            Err(message) => (false, message),
+        });
+    }
+
+    /// True once after an import wrote files.
+    pub fn take_imported(&mut self) -> bool {
+        std::mem::take(&mut self.imported)
     }
 
     /// The names of the columns.
@@ -291,11 +348,12 @@ mod test {
         assert!(!tab.evolutions.has_room() && !tab.changed() && !tab.from_card());
 
         let ctx = egui::Context::default();
+        let session = Session::default();
         let frame = |tab: &mut EvolutionTab| {
             let mut input = egui::RawInput::default();
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0)));
             let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| tab.ui(ui));
+                egui::CentralPanel::default().show(ctx, |ui| tab.ui(ui, &session));
             });
         };
         frame(&mut tab);

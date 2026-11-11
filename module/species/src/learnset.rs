@@ -12,6 +12,7 @@
 //! for the paths and the layout). The TMs and the tutors are bits of the species data file.
 
 use crate::data::SpeciesData;
+use crate::learnset_csv;
 use crate::machines::{machine_name, BP_TUTORS, MACHINES};
 use crate::move_names::MOVE;
 use crate::names;
@@ -50,13 +51,13 @@ fn move_id(name: &str) -> Option<u16> {
 }
 
 /// The name of a move.
-fn move_name(id: u16) -> &'static str {
+pub(crate) fn move_name(id: u16) -> &'static str {
     (id as usize).checked_sub(1).and_then(|place| MOVE.get(place)).copied().unwrap_or("-")
 }
 
 /// Where a tutor move is in the species data.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Slot {
+pub(crate) enum Slot {
     /// A bit of `special_tutor_moves`.
     Special(usize),
     /// A bit of one of the four words of `bp_tutor_moves`: (tutor, bit).
@@ -65,7 +66,7 @@ enum Slot {
 
 impl Slot {
     /// Every tutor move of the game, with its move number.
-    fn all() -> Vec<(Slot, u16)> {
+    pub(crate) fn all() -> Vec<(Slot, u16)> {
         let special = (0..SPECIAL_TUTORS.len()).map(|bit| (Slot::Special(bit), move_id(SPECIAL_TUTORS[bit]).unwrap_or(0)));
         let bp = BP_TUTORS.iter().enumerate().flat_map(|(tutor, moves)| moves.iter().enumerate().map(move |(bit, &id)| (Slot::Bp(tutor, bit), id)));
         special.chain(bp).collect()
@@ -80,7 +81,7 @@ impl Slot {
     }
 
     /// True when the species can learn this move.
-    fn is_set(self, data: &SpeciesData) -> bool {
+    pub(crate) fn is_set(self, data: &SpeciesData) -> bool {
         match self {
             Slot::Special(bit) => data.special_tutor_moves >> bit & 1 == 1,
             Slot::Bp(tutor, bit) => data.bp_tutor_moves[tutor] >> bit & 1 == 1,
@@ -88,7 +89,7 @@ impl Slot {
     }
 
     /// Lets the species learn this move, or not.
-    fn set(self, data: &mut SpeciesData, on: bool) {
+    pub(crate) fn set(self, data: &mut SpeciesData, on: bool) {
         let (word, bit) = match self {
             Slot::Special(bit) => (&mut data.special_tutor_moves, bit),
             Slot::Bp(tutor, bit) => (&mut data.bp_tutor_moves[tutor], bit),
@@ -102,12 +103,12 @@ impl Slot {
 }
 
 /// True when the species can learn the TM or HM of a bit.
-fn machine_is_set(data: &SpeciesData, bit: usize) -> bool {
+pub(crate) fn machine_is_set(data: &SpeciesData, bit: usize) -> bool {
     data.tm_hm_moves[bit / 32] >> (bit % 32) & 1 == 1
 }
 
 /// Lets the species learn the TM or HM of a bit, or not.
-fn set_machine(data: &mut SpeciesData, bit: usize, on: bool) {
+pub(crate) fn set_machine(data: &mut SpeciesData, bit: usize, on: bool) {
     if on {
         data.tm_hm_moves[bit / 32] |= 1 << (bit % 32);
     } else {
@@ -258,6 +259,7 @@ pub struct Learnset {
     moves: Option<MoveTable>,
     level_up_archive: Option<Garc>,
     egg_archive: Option<Garc>,
+    species_archive: Option<Garc>,
     level_up: LevelUp,
     /// The level-up moves as they were read or saved: to know what changed.
     level_up_saved: LevelUp,
@@ -269,6 +271,10 @@ pub struct Learnset {
     group: usize,
     /// True when a level changed: the moves go back in the order of the levels when the user lets go.
     needs_sort: bool,
+    /// What happened at the last click on a CSV button: true for a success.
+    status: Option<(bool, String)>,
+    /// True when an import wrote files: the species page reads its data again.
+    imported: bool,
 }
 
 impl Learnset {
@@ -277,6 +283,7 @@ impl Learnset {
         self.moves = Garc::open(&dump.archive(sango_core::moves::ARCHIVE)).and_then(|garc| MoveTable::from_garc(&garc)).ok();
         self.level_up_archive = Garc::open(&dump.archive(learnset::LEVEL_UP_ARCHIVE)).ok();
         self.egg_archive = Garc::open(&dump.archive(learnset::EGG_ARCHIVE)).ok();
+        self.species_archive = Garc::open(&dump.archive(crate::ARCHIVE)).ok();
     }
 
     /// Reads the moves of a species and a form: the SD card first, then the romfs.
@@ -344,14 +351,25 @@ impl Learnset {
     }
 
     /// Draws the tab: the buttons of the groups, then the table of the chosen group.
-    pub fn ui(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData, _session: &Session) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData, session: &Session) {
         egui::ScrollArea::vertical().id_salt("learnset_tab").auto_shrink([false, false]).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                 for (place, name) in GROUPS.iter().enumerate() {
                     self.group = tab(ui, place, name, self.group);
                 }
+                ui.add_space(12.0);
+                if widget::button(ui, "Export CSV") {
+                    self.export_csv(session);
+                }
+                if session.sd.is_some() && widget::button(ui, "Import CSV") {
+                    self.import_csv(session);
+                }
             });
+            if let Some((ok, message)) = &self.status {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
+            }
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
@@ -368,6 +386,43 @@ impl Learnset {
             self.level_up.sort();
             self.needs_sort = false;
         }
+    }
+
+    /// The archives and the SD card that the CSV functions read.
+    fn library<'a>(&'a self, sd: Option<&'a SdCard>) -> Option<learnset_csv::Library<'a>> {
+        Some(learnset_csv::Library { species: self.species_archive.as_ref()?, level_up: self.level_up_archive.as_ref()?, eggs: self.egg_archive.as_ref()?, sd })
+    }
+
+    /// Writes the moves of all the species and forms to a CSV file that the user chooses.
+    fn export_csv(&mut self, session: &Session) {
+        let Some(library) = self.library(session.sd.as_ref()) else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("learnsets.csv").save_file() else { return };
+        let text = learnset_csv::export(&library);
+        let rows = text.lines().count() - 1;
+        self.status = Some(match std::fs::write(&path, &text) {
+            Ok(()) => (true, format!("Exported {rows} moves to {}.", path.display())),
+            Err(error) => (false, format!("{}: {error}", path.display())),
+        });
+    }
+
+    /// Reads a CSV file that the user chooses, checks it, and writes the changes on the SD card.
+    fn import_csv(&mut self, session: &Session) {
+        let (Some(library), Some(sd)) = (self.library(session.sd.as_ref()), session.sd.as_ref()) else { return };
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
+        let result = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|text| learnset_csv::parse(&text)).and_then(|rows| learnset_csv::apply(&rows, &library, sd));
+        self.status = Some(match result {
+            Ok(report) if report.total() == 0 => (true, "The file matches the current moves: nothing to write.".to_string()),
+            Ok(report) => {
+                self.imported = true;
+                (true, format!("Imported: {} files written on the SD card. The game loads them again by itself.", report.total()))
+            }
+            Err(message) => (false, message),
+        });
+    }
+
+    /// True once after an import wrote files.
+    pub fn take_imported(&mut self) -> bool {
+        std::mem::take(&mut self.imported)
     }
 
     /// The choices of a list of moves, each with its type.
