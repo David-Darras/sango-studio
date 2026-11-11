@@ -8,6 +8,8 @@ mod data;
 mod evolution;
 mod evolution_csv;
 mod examples;
+mod icon_files;
+mod icon_tab;
 mod icons;
 mod learnset;
 mod learnset_csv;
@@ -150,6 +152,8 @@ pub struct Species {
     evolution: evolution::EvolutionTab,
     /// The state of the Text tab.
     text: text_tab::TextTab,
+    /// The state of the Icon tab.
+    icon_tab: icon_tab::IconTab,
 }
 
 impl Default for Species {
@@ -183,6 +187,7 @@ impl Default for Species {
             learnset: learnset::Learnset::default(),
             evolution: evolution::EvolutionTab::default(),
             text: text_tab::TextTab::default(),
+            icon_tab: icon_tab::IconTab::default(),
         }
     }
 }
@@ -704,9 +709,9 @@ impl Species {
                 }
                 reset = widget::button(ui, "Reset");
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
-                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed()) {
+                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
-                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() {
+                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
@@ -740,6 +745,7 @@ impl Species {
                     self.evolution.reset(file);
                     let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                     self.text.reset(self.species, place);
+                    self.icon_tab.reset(self.species, self.form);
                     self.status = Some((true, "The data comes from the romfs again. Save to write it on the SD card.".into()));
                 }
                 Err(message) => self.status = Some((false, message)),
@@ -816,6 +822,8 @@ impl Species {
             } else if let Err(message) = self.evolution.save(sd, self.species, self.form) {
                 result = Err(message);
             } else if let Err(message) = self.text.save(sd) {
+                result = Err(message);
+            } else if let Err(message) = self.icon_tab.save(sd) {
                 result = Err(message);
             }
         }
@@ -2018,6 +2026,7 @@ impl Module for Species {
             self.learnset.open(&dump);
             self.evolution.open(&dump);
             self.text.open(&dump);
+            self.icon_tab.open(&dump);
             self.icon_textures.clear();
             self.list_rows = None;
             self.loaded = None;
@@ -2098,6 +2107,7 @@ impl Module for Species {
                     self.list_rows = None;
                 }
             }
+            (4, Some(_)) => self.icon_tab.ui(ui, session, self.species, self.form),
             (3, Some(_)) => {
                 let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                 self.text.ui(ui, session, self.species, self.form, place);

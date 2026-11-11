@@ -98,9 +98,95 @@ pub fn decompress(bytes: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// The most bytes that one copy of the compressor takes: the longest copy that it writes.
+const LZ11_MAX_COPY: usize = 0x110;
+
+/// The farthest place that a copy can read from.
+const LZ11_WINDOW: usize = 4096;
+
+/// Compresses data with LZ11. The result decompresses to the same data, but it is not the same bytes that the
+/// tools of Nintendo give: the compressor takes the longest copy that it finds in the last 4096 bytes.
+pub fn compress_lz11(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x11];
+    if data.len() < 1 << 24 {
+        out.extend(&(data.len() as u32).to_le_bytes()[..3]);
+    } else {
+        out.extend([0, 0, 0]);
+        out.extend((data.len() as u32).to_le_bytes());
+    }
+    let mut at = 0;
+    while at < data.len() {
+        let flag_place = out.len();
+        out.push(0);
+        let mut flags = 0u8;
+        for bit in 0..8 {
+            if at >= data.len() {
+                break;
+            }
+            // The longest copy of what comes next, from the bytes that are already written.
+            let (mut best_length, mut best_distance) = (0, 0);
+            let longest = LZ11_MAX_COPY.min(data.len() - at);
+            if longest >= 3 {
+                for distance in 1..=at.min(LZ11_WINDOW) {
+                    let start = at - distance;
+                    let mut length = 0;
+                    // A copy can read bytes that it writes itself, so it can repeat a short pattern.
+                    while length < longest && data[start + length] == data[at + length] {
+                        length += 1;
+                    }
+                    if length > best_length {
+                        (best_length, best_distance) = (length, distance);
+                        if length == longest {
+                            break;
+                        }
+                    }
+                }
+            }
+            if best_length >= 3 {
+                flags |= 0x80 >> bit;
+                let distance = best_distance - 1;
+                if best_length <= 16 {
+                    out.push(((best_length - 1) << 4 | distance >> 8) as u8);
+                    out.push(distance as u8);
+                } else {
+                    let length = best_length - 0x11;
+                    out.push((length >> 4) as u8);
+                    out.push((length << 4 | distance >> 8) as u8);
+                    out.push(distance as u8);
+                }
+                at += best_length;
+            } else {
+                out.push(data[at]);
+                at += 1;
+            }
+        }
+        out[flag_place] = flags;
+    }
+    out
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn compressed_data_decompresses_to_the_same_data() {
+        let samples: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![7],
+            b"abcabcabcabcabcabc".to_vec(),
+            (0..=255u8).collect(),
+            vec![0; 5000],
+            (0..3000u32).map(|n| (n * n % 251) as u8).collect(),
+            [vec![1u8; 300], (0..100u8).collect(), vec![1u8; 300]].concat(),
+        ];
+        for data in samples {
+            let packed = compress_lz11(&data);
+            assert_eq!(decompress(&packed).unwrap_or_default(), data, "{} bytes", data.len());
+        }
+        // A run is much smaller than the data.
+        assert!(compress_lz11(&[0; 5000]).len() < 100);
+    }
 
     #[test]
     fn lz10_copies_bytes_and_repeats() {
