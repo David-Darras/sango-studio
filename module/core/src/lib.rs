@@ -14,6 +14,7 @@ pub mod garc;
 pub mod learnset;
 pub mod lz;
 pub mod moves;
+pub mod text;
 
 pub use bundle::Bundle;
 pub use clim::Clim;

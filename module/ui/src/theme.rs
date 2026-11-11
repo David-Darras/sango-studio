@@ -21,8 +21,38 @@ pub mod color {
     pub const GREEN: Color32 = Color32::from_rgb(34, 197, 94);
 }
 
+/// The fonts of the system that have the Japanese and the Korean letters. The first ones that exist are used
+/// after the default fonts, so that the texts of the game in these languages can be read.
+const SYSTEM_FONTS: [(&str, &str); 4] = [
+    ("japanese", "C:/Windows/Fonts/YuGothM.ttc"),
+    ("japanese-2", "C:/Windows/Fonts/msgothic.ttc"),
+    ("korean", "C:/Windows/Fonts/malgun.ttf"),
+    ("chinese", "C:/Windows/Fonts/msyh.ttc"),
+];
+
+/// Adds the fonts of the system for the Japanese and the Korean letters, when the system has them.
+fn add_system_fonts(ctx: &egui::Context) {
+    let mut fonts = egui::FontDefinitions::default();
+    let mut added = false;
+    for (name, path) in SYSTEM_FONTS {
+        if let Ok(bytes) = std::fs::read(path) {
+            fonts.font_data.insert(name.to_string(), egui::FontData::from_owned(bytes));
+            for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+                if let Some(list) = fonts.families.get_mut(&family) {
+                    list.push(name.to_string());
+                }
+            }
+            added = true;
+        }
+    }
+    if added {
+        ctx.set_fonts(fonts);
+    }
+}
+
 /// Gives the window the white theme.
 pub fn apply(ctx: &egui::Context) {
+    add_system_fonts(ctx);
     let mut v = egui::Visuals::light();
     v.panel_fill = color::WHITE;
     v.window_fill = color::WHITE;
