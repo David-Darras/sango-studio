@@ -5,6 +5,7 @@
 
 mod csv;
 mod data;
+mod evolution;
 mod examples;
 mod icons;
 mod learnset;
@@ -142,6 +143,8 @@ pub struct Species {
     examples: Option<Arc<examples::Index>>,
     /// The state of the Learnset tab.
     learnset: learnset::Learnset,
+    /// The state of the Evolution tab.
+    evolution: evolution::EvolutionTab,
 }
 
 impl Default for Species {
@@ -173,6 +176,7 @@ impl Default for Species {
             sort_descending: false,
             examples: None,
             learnset: learnset::Learnset::default(),
+            evolution: evolution::EvolutionTab::default(),
         }
     }
 }
@@ -409,6 +413,7 @@ impl Species {
         self.load_shape(session);
         let file = self.garc.as_ref().map_or(self.species, |garc| file_index(garc, self.species, self.form));
         self.learnset.load(session.sd.as_ref(), self.species, self.form, file);
+        self.evolution.load(session.sd.as_ref(), self.species, self.form, file);
         match on_card.map(Ok).unwrap_or_else(|| self.read_romfs()) {
             Ok(data) => {
                 self.baseline = Some(data.clone());
@@ -693,9 +698,9 @@ impl Species {
                 }
                 reset = widget::button(ui, "Reset");
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
-                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed()) {
+                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
-                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() {
+                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() || self.evolution.from_card() {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
@@ -726,6 +731,7 @@ impl Species {
                     }
                     let file = self.garc.as_ref().map_or(self.species, |garc| file_index(garc, self.species, self.form));
                     self.learnset.reset(self.species, file);
+                    self.evolution.reset(file);
                     self.status = Some((true, "The data comes from the romfs again. Save to write it on the SD card.".into()));
                 }
                 Err(message) => self.status = Some((false, message)),
@@ -798,6 +804,8 @@ impl Species {
         // The moves of the Learnset tab have their own files.
         if result.is_ok() {
             if let Err(message) = self.learnset.save(sd, self.species, self.form) {
+                result = Err(message);
+            } else if let Err(message) = self.evolution.save(sd, self.species, self.form) {
                 result = Err(message);
             }
         }
@@ -1998,6 +2006,7 @@ impl Module for Species {
             self.pokedex_archive = Garc::open(&dump.archive(pokedex_data::ARCHIVE)).ok();
             self.icon_garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).ok();
             self.learnset.open(&dump);
+            self.evolution.open(&dump);
             self.icon_textures.clear();
             self.list_rows = None;
             self.loaded = None;
@@ -2071,6 +2080,7 @@ impl Module for Species {
         match (self.tab, self.data.as_mut()) {
             (0, Some(data)) => general_tab(ui, data, &mut self.shape),
             (1, Some(data)) => self.learnset.ui(ui, data, session),
+            (2, Some(_)) => self.evolution.ui(ui),
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));

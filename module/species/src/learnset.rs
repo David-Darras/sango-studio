@@ -157,7 +157,7 @@ fn column(row: egui::Rect, place: usize) -> egui::Rect {
 }
 
 /// A rounded label with a fill. Returns its rectangle.
-fn pill(painter: &egui::Painter, left_center: egui::Pos2, text: &str, fill: egui::Color32, ink: egui::Color32, font_size: f32) -> egui::Rect {
+pub(crate) fn pill(painter: &egui::Painter, left_center: egui::Pos2, text: &str, fill: egui::Color32, ink: egui::Color32, font_size: f32) -> egui::Rect {
     let galley = painter.layout_no_wrap(text.to_string(), egui::FontId::proportional(font_size), ink);
     let rect = egui::Rect::from_min_size(egui::pos2(left_center.x, left_center.y - 11.0), egui::vec2(galley.size().x + 18.0, 22.0));
     painter.rect_filled(rect, egui::Rounding::same(11.0), fill);
@@ -166,7 +166,7 @@ fn pill(painter: &egui::Painter, left_center: egui::Pos2, text: &str, fill: egui
 }
 
 /// A type as a coloured label. The text is dark on a light colour.
-fn type_pill(painter: &egui::Painter, left_center: egui::Pos2, kind: u8, font_size: f32) -> egui::Rect {
+pub(crate) fn type_pill(painter: &egui::Painter, left_center: egui::Pos2, kind: u8, font_size: f32) -> egui::Rect {
     let fill = type_color(kind);
     let light = fill.r() as u32 * 299 + fill.g() as u32 * 587 + fill.b() as u32 * 114 > 170_000;
     let ink = if light { egui::Color32::from_rgb(40, 40, 50) } else { color::WHITE };
@@ -174,17 +174,17 @@ fn type_pill(painter: &egui::Painter, left_center: egui::Pos2, kind: u8, font_si
 }
 
 /// An entry of a list of choices.
-struct Choice {
-    label: String,
+pub(crate) struct Choice {
+    pub(crate) label: String,
     /// The type of the move, drawn at the right of the label.
-    kind: Option<u8>,
+    pub(crate) kind: Option<u8>,
     /// What the list gives back when the entry is chosen.
-    value: usize,
+    pub(crate) value: usize,
 }
 
 /// A list of choices that opens under `anchor` when it is clicked: a search box, then the entries that match,
 /// each with the type of its move. Gives back the value of the chosen entry.
-fn choose(ui: &mut egui::Ui, id: egui::Id, anchor: &egui::Response, options: &[Choice], current: Option<usize>) -> Option<usize> {
+pub(crate) fn choose(ui: &mut egui::Ui, id: egui::Id, anchor: &egui::Response, options: &[Choice], current: Option<usize>) -> Option<usize> {
     if anchor.clicked() {
         ui.memory_mut(|m| m.toggle_popup(id));
     }
@@ -591,7 +591,7 @@ fn tab(ui: &mut egui::Ui, place: usize, text: &str, chosen: usize) -> usize {
 }
 
 /// A trash can that deletes a row, drawn by hand (the font has no such glyph), in a cell. True when clicked.
-fn trash_button(ui: &mut egui::Ui, cell: egui::Rect) -> bool {
+pub(crate) fn trash_button(ui: &mut egui::Ui, cell: egui::Rect) -> bool {
     let rect = egui::Rect::from_center_size(cell.center(), egui::vec2(26.0, 26.0));
     let response = ui.interact(rect, ui.make_persistent_id(("learnset_trash", rect.min.x as i32, rect.min.y as i32)), egui::Sense::click());
     if response.hovered() {

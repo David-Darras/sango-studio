@@ -8,6 +8,7 @@ mod setting;
 
 pub mod bundle;
 pub mod clim;
+pub mod evolution;
 pub mod experience;
 pub mod garc;
 pub mod learnset;
