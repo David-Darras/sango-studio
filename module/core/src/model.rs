@@ -76,6 +76,63 @@ pub struct Material {
     /// with no opacity are not drawn, whatever their colour (the iris of the eyes, for example).
     /// The bit comes from the second word of the values of the material.
     pub transparent: bool,
+    /// True when the light does not touch the material (the file gives it no reflection): the flames, the gas.
+    pub unlit: bool,
+    /// The three pictures of the material (a material mixes up to three pictures) and how each one is placed.
+    pub units: [Unit; 3],
+    /// The steps that mix the pictures, the colour of the vertices and the light into the colour of a pixel.
+    /// Empty when the file gives none.
+    pub stages: Vec<Stage>,
+    /// The colour that the steps can use as a value of their own, from the file (red, green, blue, alpha).
+    pub buffer_color: [u8; 4],
+}
+
+/// One of the three pictures of a material.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Unit {
+    /// The name of the picture, or an empty text when the unit has none.
+    pub texture: String,
+    pub scale: [f32; 2],
+    pub translation: [f32; 2],
+    /// See `Material::texture_wrap`.
+    pub wrap: [u8; 2],
+}
+
+/// One step of the mix that gives the colour of a pixel. The graphics chip has up to six steps, one after the other:
+/// each one takes up to three values (a source and an operand for each) and gives a colour and an opacity.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stage {
+    /// Where each of the three values of the colour comes from: 0 the colour of the vertex, 1 the light of the
+    /// surface, 2 the shine of the surface, 3 to 5 the pictures 0 to 2, 13 the value that a step saved, 14 the colour
+    /// of the step itself, 15 the result of the step before.
+    pub color_source: [u8; 3],
+    /// What is taken from a source for the colour: 0 the colour, 1 one minus the colour, 2 the opacity, 3 one minus the
+    /// opacity, 4 red, 5 one minus red, 8 green, 9 one minus green, 12 blue, 13 one minus blue.
+    pub color_operand: [u8; 3],
+    pub alpha_source: [u8; 3],
+    /// What is taken from a source for the opacity: 0 the opacity, 1 one minus it, 2 red, 3 one minus red, 4 green,
+    /// 5 one minus green, 6 blue, 7 one minus blue.
+    pub alpha_operand: [u8; 3],
+    /// How the values make the result: 0 the first value, 1 first times second, 2 first plus second, 3 the same minus a
+    /// half, 4 a mix of the first and the second by the third, 5 first minus second, 6 and 7 a dot product,
+    /// 8 first times second plus third, 9 first plus second, times third.
+    pub color_mode: u8,
+    pub alpha_mode: u8,
+    /// The result is multiplied by 1 (0), 2 (1) or 4 (2).
+    pub color_scale: u8,
+    pub alpha_scale: u8,
+    /// The colour of the step itself, from the file (red, green, blue, alpha).
+    pub constant: [u8; 4],
+    /// True when the step saves its input colour, or its input opacity, for the later steps.
+    pub save_color: bool,
+    pub save_alpha: bool,
+}
+
+impl Default for Stage {
+    /// A step that does nothing: the result is the result of the step before.
+    fn default() -> Stage {
+        Stage { color_source: [15; 3], color_operand: [0; 3], alpha_source: [15; 3], alpha_operand: [0; 3], color_mode: 0, alpha_mode: 0, color_scale: 0, alpha_scale: 0, constant: [255; 4], save_color: false, save_alpha: false }
+    }
 }
 
 /// A mesh part: some triangles that use one material.
@@ -274,7 +331,29 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
         // that the game draws with the opacity of their picture (the iris of the eyes).
         let flags = file.u32(content + file.u32(material_table + 0x2c * i)? as usize + 4).unwrap_or(0);
         let transparent = flags & 0x0400_0000 != 0;
-        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent });
+        let params = content + file.u32(material_table + 0x2c * i)? as usize;
+        let units = std::array::from_fn(|unit| {
+            let offset = file.u32(material_table + 0x2c * i + 0x1c + 4 * unit).unwrap_or(0);
+            let name = if offset == 0 { String::new() } else { file.name(offset) };
+            let transform = params + 0x0c + 24 * unit;
+            let (scale, translation) = match (file.vec3(transform + 4), file.f32(transform + 16), file.f32(transform + 20)) {
+                (Ok(s), Ok(tx), Ok(ty)) => ([finite(s[0]), finite(s[1])], [finite(tx), finite(ty)]),
+                _ => ([1.0, 1.0], [0.0, 0.0]),
+            };
+            let sampler = content + file.u32(material_table + 0x2c * i + 0x18).unwrap_or(0) as usize + 16 * unit;
+            let wrap = match (file.data.get(sampler + 1), file.data.get(sampler + 2)) {
+                (Some(&s), Some(&t)) => [s, t],
+                _ => [2, 2],
+            };
+            Unit { texture: name, scale, translation, wrap }
+        });
+        // The steps of the mix: a list of commands of the graphics chip, at 0xc8 of the values of the material (the
+        // place, from the start of the commands, then the length in bytes).
+        let (stages, buffer_color) = match (file.u32(params + 0xc8), file.u32(params + 0xcc)) {
+            (Ok(place), Ok(length)) => file.words(place as usize, length as usize / 4).map(|words| read_stages(&registers(&words))).unwrap_or_default(),
+            _ => Default::default(),
+        };
+        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent, unlit: flags & 0x0010_0000 == 0, units, stages, buffer_color });
     }
 
     // The skeleton.
@@ -357,6 +436,40 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
         }
     }
     Ok(Model { bones, materials, meshes })
+}
+
+/// The steps of the mix of a material, from the registers of the graphics chip that its commands set. The six steps have
+/// their registers at 0xc0, 0xc8, 0xd0, 0xd8, 0xf0 and 0xf8: the sources, the operands, the modes, the colour and the
+/// scale. The register 0xe0 tells which steps save their input, and 0xfd gives the colour of the saved value.
+fn read_stages(registers: &HashMap<u16, (u32, usize)>) -> (Vec<Stage>, [u8; 4]) {
+    let value = |register: u16| registers.get(&register).map(|(value, _)| *value);
+    let rgba = |word: u32| [word as u8, (word >> 8) as u8, (word >> 16) as u8, (word >> 24) as u8];
+    if value(0xc0).is_none() {
+        return (Vec::new(), [255; 4]);
+    }
+    let saves = value(0xe0).unwrap_or(0);
+    let mut stages = Vec::new();
+    for (number, base) in [0xc0u16, 0xc8, 0xd0, 0xd8, 0xf0, 0xf8].into_iter().enumerate() {
+        let Some(source) = value(base) else {
+            stages.push(Stage::default());
+            continue;
+        };
+        let (operand, mode, constant, scale) = (value(base + 1).unwrap_or(0), value(base + 2).unwrap_or(0), value(base + 3).unwrap_or(0xffff_ffff), value(base + 4).unwrap_or(0));
+        stages.push(Stage {
+            color_source: std::array::from_fn(|k| ((source >> (4 * k)) & 0xf) as u8),
+            color_operand: std::array::from_fn(|k| ((operand >> (4 * k)) & 0xf) as u8),
+            alpha_source: std::array::from_fn(|k| ((source >> (16 + 4 * k)) & 0xf) as u8),
+            alpha_operand: std::array::from_fn(|k| ((operand >> (12 + 4 * k)) & 7) as u8),
+            color_mode: (mode & 0xf) as u8,
+            alpha_mode: ((mode >> 16) & 0xf) as u8,
+            color_scale: (scale & 3) as u8,
+            alpha_scale: ((scale >> 16) & 3) as u8,
+            constant: rgba(constant),
+            save_color: (1..=4).contains(&number) && saves & (0x100 << (number - 1)) != 0,
+            save_alpha: (1..=4).contains(&number) && saves & (0x1000 << (number - 1)) != 0,
+        });
+    }
+    (stages, rgba(value(0xfd).unwrap_or(0xffff_ffff)))
 }
 
 /// Reads one vertex. `palette` gives the skeleton place of each bone number of the part.

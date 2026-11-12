@@ -305,7 +305,7 @@ mod test {
         }
         // With the variable SANGO_RENDER_OUT, some models are written as PNG files, to look at them.
         if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
-            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0)] {
+            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0)] {
                 let Some(&(_, file)) = variants(species).iter().find(|(number, _)| *number == form) else {
                     eprintln!("{name}: no model for the form {form}");
                     continue;

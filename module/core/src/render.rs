@@ -99,8 +99,15 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, wid
         [x, y, z]
     };
     let (half_x, half_y) = (width as f32 / 2.0, height as f32 / 2.0);
+    // The meshes that mix their pictures with several steps (the iris of the eyes, the flames, the gas) are drawn after
+    // the others, and are blended with what is behind them.
+    for pass in 0..2 {
     for mesh in &model.meshes {
         let material = model.materials.get(mesh.material);
+        let mixed = material.is_some_and(is_mixed);
+        if mixed != (pass == 1) {
+            continue;
+        }
         let texture = material.and_then(|material| textures.get(&material.texture));
         // The iris: the eye that lies under it. The iris is not seen on the skin around the eye.
         let eye_under = match material {
@@ -137,6 +144,38 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, wid
                         continue;
                     }
                     let uv = |axis: usize| w0 * mesh.vertices[corners[0]].uv[axis] + w1 * mesh.vertices[corners[1]].uv[axis] + w2 * mesh.vertices[corners[2]].uv[axis];
+                    // The light comes from the point of view (the z axis of the screen points away from it).
+                    let normal: [f32; 3] = std::array::from_fn(|axis| w0 * moved[corners[0]].1[axis] + w1 * moved[corners[1]].1[axis] + w2 * moved[corners[2]].1[axis]);
+                    let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt().max(1e-6);
+                    let light = 0.45 + 0.55 * (-normal[2] / length).abs();
+                    if mixed {
+                        let Some(material) = material else { continue };
+                        let mut color = combine(material, textures, [uv(0), uv(1)], light);
+                        if let Some((eye_material, eye_texture, opening)) = &eye_under {
+                            // The mesh of an iris is bigger than the opening of the eye: the picture of the iris is
+                            // kept only where the picture of the eye is not the colour of the skin.
+                            let (eye_u, eye_v) = texture_place(eye_material, [uv(0), uv(1)]);
+                            let column = (wrap(eye_u, eye_material.texture_wrap[0]) * eye_texture.width as f32).min(eye_texture.width as f32 - 1.0) as usize;
+                            let row = (wrap(eye_v, eye_material.texture_wrap[1]) * eye_texture.height as f32).min(eye_texture.height as f32 - 1.0) as usize;
+                            if !opening[row * eye_texture.width + column] {
+                                color[3] = 0.0;
+                            }
+                        }
+                        if color[3] < 0.02 {
+                            continue;
+                        }
+                        // Blend with what is behind: the colour of the pixel and its opacity.
+                        let at = place * 4;
+                        let behind_alpha = pixels[at + 3] as f32 / 255.0;
+                        let behind = &mut pixels[at..at + 4];
+                        let alpha = color[3] + behind_alpha * (1.0 - color[3]);
+                        for channel in 0..3 {
+                            let mixed_value = (color[channel] * color[3] + behind[channel] as f32 / 255.0 * behind_alpha * (1.0 - color[3])) / alpha.max(1e-6);
+                            behind[channel] = (mixed_value.clamp(0.0, 1.0) * 255.0) as u8;
+                        }
+                        behind[3] = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+                        continue;
+                    }
                     let color = match (texture, material) {
                         (Some(texture), Some(material)) => {
                             let (u, v) = texture_place(material, [uv(0), uv(1)]);
@@ -168,17 +207,114 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, wid
                     if cut {
                         continue;
                     }
-                    // The light comes from the point of view (the z axis of the screen points away from it).
-                    let normal: [f32; 3] = std::array::from_fn(|axis| w0 * moved[corners[0]].1[axis] + w1 * moved[corners[1]].1[axis] + w2 * moved[corners[2]].1[axis]);
-                    let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt().max(1e-6);
-                    let light = 0.45 + 0.55 * (-normal[2] / length).abs();
                     depth[place] = z;
                     pixels[place * 4..place * 4 + 4].copy_from_slice(&[(color[0] as f32 * light) as u8, (color[1] as f32 * light) as u8, (color[2] as f32 * light) as u8, 255]);
                 }
             }
         }
     }
+    }
     pixels
+}
+
+/// True for a material that the game draws with several steps and the opacity of its pictures: the iris of the eyes,
+/// the flames, the gas. The ones that the light does not touch (the file gives them no reflection) and the ones that
+/// the file marks as transparent.
+fn is_mixed(material: &crate::model::Material) -> bool {
+    material.transparent || (material.unlit && !material.stages.is_empty())
+}
+
+/// The colour and the opacity of a pixel (from 0 to 1) that a material gives at a texture position, with the steps of
+/// the mix that the file gives. `light` is the light of the surface, from 0 to 1.
+fn combine(material: &crate::model::Material, textures: &HashMap<String, Texture>, uv: [f32; 2], light: f32) -> [f32; 4] {
+    use crate::model::Stage;
+    // The three pictures, at this place. A unit with no picture gives white.
+    let mut pictures = [[1.0f32; 4]; 3];
+    for (unit, picture) in material.units.iter().zip(pictures.iter_mut()) {
+        if let Some(texture) = textures.get(&unit.texture) {
+            let (u, v) = (unit.scale[0] * (uv[0] - unit.translation[0]), unit.scale[1] * (uv[1] - unit.translation[1]));
+            *picture = sample_wrapped(texture, u, v, unit.wrap).map(|c| c as f32 / 255.0);
+        }
+    }
+    let to_float = |bytes: [u8; 4]| bytes.map(|c| c as f32 / 255.0);
+    let mut previous = [1.0f32; 4];
+    let mut buffer = to_float(material.buffer_color);
+    for stage in material.stages.iter() {
+        let constant = to_float(stage.constant);
+        let source = |code: u8, previous: [f32; 4], buffer: [f32; 4]| -> [f32; 4] {
+            match code {
+                0 => [1.0; 4],
+                1 => [light, light, light, 1.0],
+                2 => [0.0; 4],
+                3..=5 => pictures[(code - 3) as usize],
+                13 => buffer,
+                14 => constant,
+                _ => previous,
+            }
+        };
+        let color_arg = |k: usize| -> [f32; 3] {
+            let value = source(stage.color_source[k], previous, buffer);
+            let operand = stage.color_operand[k];
+            let picked = match operand & !1 {
+                2 => [value[3]; 3],
+                4 => [value[0]; 3],
+                8 => [value[1]; 3],
+                12 => [value[2]; 3],
+                _ => [value[0], value[1], value[2]],
+            };
+            if operand & 1 != 0 { picked.map(|c| 1.0 - c) } else { picked }
+        };
+        let alpha_arg = |k: usize| -> f32 {
+            let value = source(stage.alpha_source[k], previous, buffer);
+            let operand = stage.alpha_operand[k];
+            let picked = match operand & !1 {
+                2 => value[0],
+                4 => value[1],
+                6 => value[2],
+                _ => value[3],
+            };
+            if operand & 1 != 0 { 1.0 - picked } else { picked }
+        };
+        let (a, b, c) = (color_arg(0), color_arg(1), color_arg(2));
+        let mut rgb: [f32; 3] = std::array::from_fn(|i| match stage.color_mode {
+            0 => a[i],
+            1 => a[i] * b[i],
+            2 => (a[i] + b[i]).min(1.0),
+            3 => (a[i] + b[i] - 0.5).clamp(0.0, 1.0),
+            4 => b[i] + (a[i] - b[i]) * c[i],
+            5 => (a[i] - b[i]).max(0.0),
+            8 => (a[i] * b[i] + c[i]).min(1.0),
+            9 => (a[i] + b[i]).min(1.0) * c[i],
+            _ => a[i],
+        });
+        if stage.color_mode == 6 || stage.color_mode == 7 {
+            let dot = (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]).min(1.0);
+            rgb = [dot; 3];
+        }
+        let (x, y, z) = (alpha_arg(0), alpha_arg(1), alpha_arg(2));
+        let mut alpha = match stage.alpha_mode {
+            1 => x * y,
+            2 => (x + y).min(1.0),
+            3 => (x + y - 0.5).clamp(0.0, 1.0),
+            4 => y + (x - y) * z,
+            5 => (x - y).max(0.0),
+            8 => (x * y + z).min(1.0),
+            9 => (x + y).min(1.0) * z,
+            _ => x,
+        };
+        let (rgb_scale, alpha_scale) = ((1 << stage.color_scale) as f32, (1 << stage.alpha_scale) as f32);
+        rgb = rgb.map(|v| (v * rgb_scale).min(1.0));
+        alpha = (alpha * alpha_scale).min(1.0);
+        if stage.save_color {
+            buffer[..3].copy_from_slice(&previous[..3]);
+        }
+        if stage.save_alpha {
+            buffer[3] = previous[3];
+        }
+        previous = [rgb[0], rgb[1], rgb[2], alpha];
+        let _: &Stage = stage;
+    }
+    previous
 }
 
 /// A place of the picture (0 to 1) from a place that can be outside, for a kind of wrap (see `Material::texture_wrap`).
@@ -277,7 +413,7 @@ mod test {
     fn triangle() -> (Model, HashMap<String, Texture>) {
         let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex { position: [x, y, 0.0], normal: [0.0, 0.0, 1.0], uv: [u, v], ..Vertex::default() };
         let mesh = Mesh { material: 0, vertices: vec![vertex(-1.0, -1.0, 0.0, 0.0), vertex(1.0, -1.0, 1.0, 0.0), vertex(0.0, 1.0, 0.5, 1.0)], triangles: vec![[0, 1, 2]] };
-        let model = Model { bones: Vec::new(), materials: vec![Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_translation: [0.0, 0.0], texture_wrap: [2, 2], transparent: false }], meshes: vec![mesh] };
+        let model = Model { bones: Vec::new(), materials: vec![Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_translation: [0.0, 0.0], texture_wrap: [2, 2], ..Material::default() }], meshes: vec![mesh] };
         let texture = Texture { name: "t".into(), width: 8, height: 8, rgba: [255u8, 0, 0, 255].repeat(64) };
         (model, HashMap::from([("t".to_string(), texture)]))
     }
