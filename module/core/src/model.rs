@@ -72,6 +72,10 @@ pub struct Material {
     /// What happens to a place outside the picture, horizontally and vertically: 0 the edge colour goes on,
     /// 1 the same with a border colour, 2 the picture repeats, 3 the picture repeats turned over (mirror).
     pub texture_wrap: [u8; 2],
+    /// True when the game draws the material with the opacity of its picture: the places of the picture
+    /// with no opacity are not drawn, whatever their colour (the iris of the eyes, for example).
+    /// The bit comes from the second word of the values of the material.
+    pub transparent: bool,
 }
 
 /// A mesh part: some triangles that use one material.
@@ -266,7 +270,11 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
             (Some(&s), Some(&t)) => [s, t],
             _ => [2, 2],
         };
-        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap });
+        // The second word of the values holds the flags of the material. The bit marks the materials
+        // that the game draws with the opacity of their picture (the iris of the eyes).
+        let flags = file.u32(content + file.u32(material_table + 0x2c * i)? as usize + 4).unwrap_or(0);
+        let transparent = flags & 0x0400_0000 != 0;
+        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent });
     }
 
     // The skeleton.

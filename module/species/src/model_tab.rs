@@ -305,12 +305,17 @@ mod test {
         }
         // With the variable SANGO_RENDER_OUT, some models are written as PNG files, to look at them.
         if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
-            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0)] {
-                let &(_, file) = variants(species).iter().find(|(number, _)| *number == form).unwrap();
+            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0)] {
+                let Some(&(_, file)) = variants(species).iter().find(|(number, _)| *number == form) else {
+                    eprintln!("{name}: no model for the form {form}");
+                    continue;
+                };
                 let (model, textures) = read_model(&archive, file, false).unwrap();
                 let by_name: HashMap<String, Texture> = textures.into_iter().map(|t| (t.name.clone(), t)).collect();
                 let image = render(&model, &by_name, &Camera::default(), 400, 400);
                 image::save_buffer(format!("{out}/{name}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
+                let front = render(&model, &by_name, &Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0 }, 800, 800);
+                image::save_buffer(format!("{out}/front_{name}.png"), &front, 800, 800, image::ColorType::Rgba8).unwrap();
                 for texture in by_name.values() {
                     image::save_buffer(format!("{out}/tex_{name}_{}.png", texture.name), &texture.rgba, texture.width as u32, texture.height as u32, image::ColorType::Rgba8).unwrap();
                 }

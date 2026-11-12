@@ -47,7 +47,38 @@ pub fn bounds(model: &Model) -> ([f32; 3], f32) {
 /// A picture of a model with `width` × `height` pixels, on a transparent background.
 ///
 /// `textures` are the pictures that the materials ask for by name. A material whose picture is missing is grey.
+/// The model is drawn two times bigger, then each pixel takes the mean of four: the edges are smooth.
 pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, width: usize, height: usize) -> Vec<u8> {
+    let big = draw(model, textures, camera, width * 2, height * 2);
+    let mut pixels = vec![0u8; width * height * 4];
+    for y in 0..height {
+        for x in 0..width {
+            // The mean of the four pixels. The colours count with their opacity: a clear pixel
+            // does not darken the edge of the model.
+            let mut color = [0u32; 3];
+            let mut alpha = 0u32;
+            for (dx, dy) in [(0, 0), (1, 0), (0, 1), (1, 1)] {
+                let at = ((y * 2 + dy) * width * 2 + x * 2 + dx) * 4;
+                let a = big[at + 3] as u32;
+                alpha += a;
+                for channel in 0..3 {
+                    color[channel] += big[at + channel] as u32 * a;
+                }
+            }
+            let at = (y * width + x) * 4;
+            if alpha > 0 {
+                for channel in 0..3 {
+                    pixels[at + channel] = (color[channel] / alpha) as u8;
+                }
+            }
+            pixels[at + 3] = (alpha / 4) as u8;
+        }
+    }
+    pixels
+}
+
+/// The drawing itself, one ray of light, no smoothing.
+fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, width: usize, height: usize) -> Vec<u8> {
     let mut pixels = vec![0u8; width * height * 4];
     let mut depth = vec![f32::MAX; width * height];
     let (centre, radius) = bounds(model);
@@ -71,9 +102,10 @@ pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camer
     for mesh in &model.meshes {
         let material = model.materials.get(mesh.material);
         let texture = material.and_then(|material| textures.get(&material.texture));
-        let frame = match (material, texture) {
-            (Some(material), Some(texture)) => frame_shift(mesh, material, texture),
-            _ => 0.0,
+        // The iris: the eye that lies under it. The iris is not seen on the skin around the eye.
+        let eye_under = match material {
+            Some(material) if material.transparent => eye_under(model, textures, mesh),
+            _ => None,
         };
         let moved: Vec<([f32; 3], [f32; 3])> = mesh.vertices.iter().map(|v| (turn(v.position), turn_direction(v.normal))).collect();
         for triangle in &mesh.triangles {
@@ -107,15 +139,33 @@ pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camer
                     let uv = |axis: usize| w0 * mesh.vertices[corners[0]].uv[axis] + w1 * mesh.vertices[corners[1]].uv[axis] + w2 * mesh.vertices[corners[2]].uv[axis];
                     let color = match (texture, material) {
                         (Some(texture), Some(material)) => {
-                            let (u, v) = texture_place(material, [uv(0), uv(1)], frame);
-                            sample_wrapped(texture, u, v, material.texture_wrap)
+                            let (u, v) = texture_place(material, [uv(0), uv(1)]);
+                            let mut color = sample_wrapped(texture, u, v, material.texture_wrap);
+                            if let Some((eye_material, eye_texture, opening)) = &eye_under {
+                                // The mesh of an iris is bigger than the opening of the eye: the picture of the iris is
+                                // kept only where the picture of the eye is not the colour of the skin.
+                                let (eye_u, eye_v) = texture_place(eye_material, [uv(0), uv(1)]);
+                                let column = (wrap(eye_u, eye_material.texture_wrap[0]) * eye_texture.width as f32).min(eye_texture.width as f32 - 1.0) as usize;
+                                let row = (wrap(eye_v, eye_material.texture_wrap[1]) * eye_texture.height as f32).min(eye_texture.height as f32 - 1.0) as usize;
+                                if !opening[row * eye_texture.width + column] {
+                                    color[3] = 0;
+                                }
+                            }
+                            color
                         }
                         (Some(texture), None) => sample_wrapped(texture, uv(0), uv(1), [2, 2]),
                         (None, _) => [170, 170, 170, 255],
                     };
-                    // The pictures mark the places that the model does not fill (the shape of a tail, of an ear, of a wing)
-                    // with black and no opacity. The fourth channel is not always an opacity, so only that mark cuts.
-                    if color[3] < 128 && color[0] < 12 && color[1] < 12 && color[2] < 12 {
+                    // A transparent material (the iris of the eyes) is cut where its picture has no
+                    // opacity: the mesh behind it (the white of the eye) shows there. For the other
+                    // materials the fourth channel is not always an opacity: the pictures mark the
+                    // places that the model does not fill (the shape of a tail, of an ear, of a wing)
+                    // with black and no opacity, and only that mark cuts.
+                    let cut = match material {
+                        Some(material) if material.transparent => color[3] < 128,
+                        _ => color[3] < 128 && color[0] < 12 && color[1] < 12 && color[2] < 12,
+                    };
+                    if cut {
                         continue;
                     }
                     // The light comes from the point of view (the z axis of the screen points away from it).
@@ -131,14 +181,6 @@ pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camer
     pixels
 }
 
-/// The number of frames that a picture with several frames (the eyes, the mouth) is cut into, one under the other.
-const FRAMES: usize = 4;
-
-/// True for the colour that the pictures of the game use for a place that no frame fills.
-fn is_marker(pixel: &[u8]) -> bool {
-    pixel[0] == 255 && pixel[1] == 0 && pixel[2] == 0
-}
-
 /// A place of the picture (0 to 1) from a place that can be outside, for a kind of wrap (see `Material::texture_wrap`).
 fn wrap(t: f32, kind: u8) -> f32 {
     match kind {
@@ -151,59 +193,70 @@ fn wrap(t: f32, kind: u8) -> f32 {
     }
 }
 
-/// The place in the picture of a mesh, from the texture position of a vertex: the transform of the material,
-/// then, for a picture with frames, a move down by `frame` (the part of the picture that one frame takes).
-fn texture_place(material: &crate::model::Material, uv: [f32; 2], frame: f32) -> (f32, f32) {
-    (material.texture_scale[0] * (uv[0] - material.texture_translation[0]), material.texture_scale[1] * (uv[1] - material.texture_translation[1]) - frame)
+/// The place in the picture of a mesh, from the texture position of a vertex: the transform of the material.
+fn texture_place(material: &crate::model::Material, uv: [f32; 2]) -> (f32, f32) {
+    (material.texture_scale[0] * (uv[0] - material.texture_translation[0]), material.texture_scale[1] * (uv[1] - material.texture_translation[1]))
 }
 
-/// How far down the picture of a mesh must be moved to show the frame that a still view should show.
-///
-/// A picture of eyes or of a mouth holds several frames (looks), one under the other, and the file of the model
-/// points at one of them that the animation then changes. For a still view the frame with the most dark pixels is
-/// taken (the eyes are open, not a closed line), unless a frame has places that no look fills: the picture marks them
-/// in pure red. Only the meshes that use a small part of their picture are looked at. Returns the move in the
-/// vertical place of the picture (a multiple of one frame), 0 when nothing needs to change.
-fn frame_shift(mesh: &crate::model::Mesh, material: &crate::model::Material, texture: &Texture) -> f32 {
-    if mesh.vertices.is_empty() {
-        return 0.0;
+// The pictures of the eyes and of the mouth hold several looks (a sheet), one under the other. The texture positions
+// of an eye mesh already point at the look that the model shows when nothing animates it (the open eye): the transform
+// of the material (scale, translation) and the wrap of the picture (mirror for the right eye) are all that is needed.
+// Turning the band of the mesh over, or moving it to another look, gives closed eyes.
+
+/// The box of the texture positions of a mesh: low and high of u, low and high of v.
+fn uv_box(mesh: &crate::model::Mesh) -> [f32; 4] {
+    let mut b = [f32::MAX, f32::MIN, f32::MAX, f32::MIN];
+    for vertex in &mesh.vertices {
+        b = [b[0].min(vertex.uv[0]), b[1].max(vertex.uv[0]), b[2].min(vertex.uv[1]), b[3].max(vertex.uv[1])];
     }
-    let spans = |axis: usize| {
-        let values = mesh.vertices.iter().map(|v| texture_place(material, v.uv, 0.0)).map(|p| if axis == 0 { p.0 } else { p.1 });
-        (values.clone().fold(f32::MAX, f32::min), values.fold(f32::MIN, f32::max))
-    };
-    let (low_v, high_v) = spans(1);
-    let (low_u, high_u) = spans(0);
-    // A mesh that covers more than a frame is not one that looks at a frame.
-    if high_v - low_v > 1.0 / FRAMES as f32 * 1.2 {
-        return 0.0;
+    b
+}
+
+/// The material, the picture and the opening of the eye that an iris mesh lies on. The eye is the mesh that is not
+/// transparent and that covers all the texture positions of the iris. `None` when there is no such mesh.
+fn eye_under<'a>(model: &'a Model, textures: &'a HashMap<String, Texture>, iris: &crate::model::Mesh) -> Option<(&'a crate::model::Material, &'a Texture, Vec<bool>)> {
+    if iris.vertices.is_empty() {
+        return None;
     }
-    let score = |k: usize| -> Option<usize> {
-        let shift = k as f32 / FRAMES as f32;
-        let mut dark = 0;
-        for row in 0..12 {
-            for column in 0..12 {
-                let u = low_u + (high_u - low_u) * (column as f32 + 0.5) / 12.0;
-                let v = low_v + (high_v - low_v) * (row as f32 + 0.5) / 12.0 - shift;
-                let pixel = sample_wrapped(texture, u, v, material.texture_wrap);
-                if is_marker(&pixel) {
-                    return None;
-                }
-                if pixel[3] > 128 && (pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32) < 240 {
-                    dark += 1;
-                }
-            }
+    let area = uv_box(iris);
+    let margin = 0.01;
+    // Of the meshes that cover the iris, the eye is the one with the smallest box of texture positions.
+    model
+        .meshes
+        .iter()
+        .filter_map(|mesh| {
+            let material = model.materials.get(mesh.material).filter(|material| !material.transparent)?;
+            let texture = textures.get(&material.texture)?;
+            let b = uv_box(mesh);
+            (!mesh.vertices.is_empty() && b[0] <= area[0] + margin && b[1] >= area[1] - margin && b[2] <= area[2] + margin && b[3] >= area[3] - margin).then_some(((b[1] - b[0]) * (b[3] - b[2]), material, texture))
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+        .map(|(_, material, texture)| (material, texture, opening(texture)))
+}
+
+/// The places of the picture of an eye that are not skin. The picture of an eye is the skin around the eyes with the eyes
+/// drawn on it, so the colour of the skin is the colour that most of the pixels have.
+fn opening(texture: &Texture) -> Vec<bool> {
+    let pixels = || texture.rgba.chunks_exact(4).filter(|p| p[3] >= 128);
+    let bucket = |p: &[u8]| (p[0] as usize >> 4) << 8 | (p[1] as usize >> 4) << 4 | (p[2] as usize >> 4);
+    let mut counts = vec![0u32; 4096];
+    for p in pixels() {
+        counts[bucket(p)] += 1;
+    }
+    let Some(best) = counts.iter().enumerate().max_by_key(|(_, count)| **count).map(|(bucket, _)| bucket) else { return vec![true; texture.width * texture.height] };
+    let (mut sum, mut n) = ([0u32; 3], 0u32);
+    for p in pixels().filter(|p| bucket(p) == best) {
+        for k in 0..3 {
+            sum[k] += p[k] as u32;
         }
-        Some(dark)
-    };
-    let mut best = (0usize, score(0));
-    for k in 1..FRAMES {
-        let candidate = score(k);
-        if candidate.is_some() && (best.1.is_none() || candidate > best.1) {
-            best = (k, candidate);
-        }
+        n += 1;
     }
-    best.0 as f32 / FRAMES as f32
+    let skin = sum.map(|v| v / n.max(1));
+    // Around a dark eye (a black skin) the iris cannot be told from the skin: nothing is cut.
+    if (skin[0] * 3 + skin[1] * 6 + skin[2]) / 10 < 80 {
+        return vec![true; texture.width * texture.height];
+    }
+    texture.rgba.chunks_exact(4).map(|p| (0..3).map(|k| (p[k] as i32 - skin[k] as i32).abs()).sum::<i32>() > 40).collect()
 }
 
 /// The colour of a picture at a place (u, v) with a kind of wrap for each axis. v goes from the top of the picture.
@@ -224,7 +277,7 @@ mod test {
     fn triangle() -> (Model, HashMap<String, Texture>) {
         let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex { position: [x, y, 0.0], normal: [0.0, 0.0, 1.0], uv: [u, v], ..Vertex::default() };
         let mesh = Mesh { material: 0, vertices: vec![vertex(-1.0, -1.0, 0.0, 0.0), vertex(1.0, -1.0, 1.0, 0.0), vertex(0.0, 1.0, 0.5, 1.0)], triangles: vec![[0, 1, 2]] };
-        let model = Model { bones: Vec::new(), materials: vec![Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_translation: [0.0, 0.0], texture_wrap: [2, 2] }], meshes: vec![mesh] };
+        let model = Model { bones: Vec::new(), materials: vec![Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_translation: [0.0, 0.0], texture_wrap: [2, 2], transparent: false }], meshes: vec![mesh] };
         let texture = Texture { name: "t".into(), width: 8, height: 8, rgba: [255u8, 0, 0, 255].repeat(64) };
         (model, HashMap::from([("t".to_string(), texture)]))
     }
