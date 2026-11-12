@@ -168,6 +168,10 @@ pub(crate) fn pill(painter: &egui::Painter, left_center: egui::Pos2, text: &str,
 
 /// A type as a coloured label. The text is dark on a light colour.
 pub(crate) fn type_pill(painter: &egui::Painter, left_center: egui::Pos2, kind: u8, font_size: f32) -> egui::Rect {
+    // The icon of the game, when the dump has it.
+    if let Some(rect) = crate::battle_icons::paint_type(painter, kind, left_center) {
+        return rect;
+    }
     let fill = type_color(kind);
     let light = fill.r() as u32 * 299 + fill.g() as u32 * 587 + fill.b() as u32 * 114 > 170_000;
     let ink = if light { egui::Color32::from_rgb(40, 40, 50) } else { color::WHITE };
@@ -228,7 +232,11 @@ pub(crate) fn choose(ui: &mut egui::Ui, id: egui::Id, anchor: &egui::Response, o
                     }
                     ui.painter().text(egui::pos2(rect.left() + 8.0, rect.center().y), egui::Align2::LEFT_CENTER, &choice.label, egui::FontId::proportional(13.5), color::TEXT);
                     if let Some(kind) = choice.kind {
-                        let width = ui.painter().layout_no_wrap(names::TYPE.get(kind as usize).copied().unwrap_or("-").to_string(), egui::FontId::proportional(11.5), color::WHITE).size().x + 18.0;
+                        let width = if crate::battle_icons::type_texture(ui.ctx(), kind).is_some() {
+                            crate::battle_icons::ICON_SIZE.x
+                        } else {
+                            ui.painter().layout_no_wrap(names::TYPE.get(kind as usize).copied().unwrap_or("-").to_string(), egui::FontId::proportional(11.5), color::WHITE).size().x + 18.0
+                        };
                         type_pill(ui.painter(), egui::pos2(rect.right() - width - 6.0, rect.center().y), kind, 11.5);
                     }
                     if response.clicked() {
@@ -458,8 +466,16 @@ impl Learnset {
         let y = row.center().y;
         type_pill(painter, egui::pos2(column(row, 2).left(), y), info.kind, 12.0);
         let cell = column(row, 3);
-        painter.circle_filled(egui::pos2(cell.left() + 6.0, y), 4.5, category_color(info.category));
-        painter.text(egui::pos2(cell.left() + 18.0, y), egui::Align2::LEFT_CENTER, info.category.name(), egui::FontId::proportional(13.5), color::TEXT);
+        match crate::battle_icons::category_texture(ui.ctx(), info.category) {
+            // The icon of the game, when the dump has it.
+            Some(texture) => {
+                crate::battle_icons::paint(painter, &texture, egui::pos2(cell.left(), y));
+            }
+            None => {
+                painter.circle_filled(egui::pos2(cell.left() + 6.0, y), 4.5, category_color(info.category));
+                painter.text(egui::pos2(cell.left() + 18.0, y), egui::Align2::LEFT_CENTER, info.category.name(), egui::FontId::proportional(13.5), color::TEXT);
+            }
+        }
         let number = |place: usize, text: String| {
             let ink = if text == "—" { color::MUTED } else { color::TEXT };
             painter.text(egui::pos2(column(row, place).right(), y), egui::Align2::RIGHT_CENTER, text, egui::FontId::proportional(13.5), ink);

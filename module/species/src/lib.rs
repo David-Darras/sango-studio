@@ -14,6 +14,7 @@ mod icons;
 mod learnset;
 mod learnset_csv;
 mod machines;
+mod battle_icons;
 mod model_export;
 mod model_tab;
 mod move_names;
@@ -348,11 +349,18 @@ fn paint_list_row(ui: &egui::Ui, rect: egui::Rect, number: usize, row: Option<&L
     ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
     ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), color::TEXT);
     if let Some(row) = row {
-        let type_1 = names::TYPE.get(row.types[0] as usize).copied().unwrap_or("-");
-        ui.painter().text(egui::pos2(left + 240.0, y), egui::Align2::LEFT_CENTER, type_1, egui::FontId::proportional(12.5), color::TEXT);
+        // The icons of the types; the text when the dump has no icons.
+        if battle_icons::paint_type(ui.painter(), row.types[0], egui::pos2(left + 236.0, y)).is_none() {
+            let type_1 = names::TYPE.get(row.types[0] as usize).copied().unwrap_or("-");
+            ui.painter().text(egui::pos2(left + 240.0, y), egui::Align2::LEFT_CENTER, type_1, egui::FontId::proportional(12.5), color::TEXT);
+        }
         let type_2 = second_type(row);
-        let ink = if type_2 == "-" { color::MUTED } else { color::TEXT };
-        ui.painter().text(egui::pos2(left + 302.0, y), egui::Align2::LEFT_CENTER, type_2, egui::FontId::proportional(12.5), ink);
+        if type_2 != "-" && battle_icons::paint_type(ui.painter(), row.types[1], egui::pos2(left + 292.0, y)).is_some() {
+            // Drawn.
+        } else {
+            let ink = if type_2 == "-" { color::MUTED } else { color::TEXT };
+            ui.painter().text(egui::pos2(left + 302.0, y), egui::Align2::LEFT_CENTER, type_2, egui::FontId::proportional(12.5), ink);
+        }
         for (stat, &value) in row.stats.iter().enumerate() {
             let x = left + 364.0 + 36.0 * stat as f32;
             ui.painter().text(egui::pos2(x + 32.0, y), egui::Align2::RIGHT_CENTER, value.to_string(), egui::FontId::proportional(12.5), widget::stat_color(value as f32));
@@ -1460,6 +1468,123 @@ fn line(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
     line_with_note(ui, label, None, add);
 }
 
+/// The colour of each Pokédex colour, in the order of the game (the palette of Pokémon HOME).
+const POKEDEX_COLORS: [(u8, u8, u8); 10] = [
+    (250, 72, 72),   // Red
+    (125, 146, 250), // Blue
+    (255, 235, 50),  // Yellow
+    (96, 200, 96),   // Green
+    (34, 34, 34),    // Black
+    (205, 150, 74),  // Brown
+    (186, 120, 250), // Purple
+    (186, 186, 186), // Gray
+    (255, 255, 255), // White
+    (255, 160, 200), // Pink
+];
+
+/// A menu of the Pokédex colours: the button and the list show rectangles of colour to click.
+fn color_menu(ui: &mut egui::Ui, id: &str, value: &mut u8) {
+    let swatch = |place: usize| {
+        let (r, g, b) = POKEDEX_COLORS[place.min(POKEDEX_COLORS.len() - 1)];
+        egui::Color32::from_rgb(r, g, b)
+    };
+    let size = egui::vec2(110.0, 22.0);
+    let combo = egui::ComboBox::from_id_salt(id).selected_text("").width(size.x + 12.0).show_ui(ui, |ui| {
+        ui.spacing_mut().item_spacing.y = 3.0;
+        for place in 0..POKEDEX_COLORS.len() {
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+            ui.painter().rect_filled(rect, 4.0, swatch(place));
+            if *value == place as u8 {
+                widget::glow(ui, rect, 5.0);
+            } else if response.hovered() {
+                ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0_f32, color::MUTED));
+            }
+            response.clone().on_hover_text(names::COLOR[place]);
+            if response.clicked() {
+                *value = place as u8;
+                ui.close_menu();
+            }
+        }
+    });
+    let rect = combo.response.rect;
+    let inner = egui::Rect::from_min_max(rect.min + egui::vec2(4.0, 4.0), egui::pos2(rect.right() - 22.0, rect.bottom() - 4.0));
+    ui.painter().rect_filled(inner, 3.0, swatch(*value as usize));
+    let menu_id = combo.response.id;
+    widget::register_focusable(ui, menu_id, rect);
+    if combo.response.clicked() {
+        widget::set_active_id(ui, menu_id);
+    }
+    if widget::is_active(ui, menu_id) && widget::page_has_focus(ui) {
+        widget::glow(ui, rect, 6.0);
+        widget::scroll_active_into_view(ui, &combo.response);
+        ui.input_mut(|i| {
+            let mut step: isize = 0;
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                step += 1;
+            }
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                step -= 1;
+            }
+            if step != 0 {
+                *value = (*value as isize + step).clamp(0, POKEDEX_COLORS.len() as isize - 1) as u8;
+            }
+        });
+    }
+}
+
+/// A menu of the types: the button and the list show the icons of the game. Without the icons it is a menu of names.
+fn type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>) {
+    if battle_icons::type_texture(ui.ctx(), 0).is_none() {
+        return menu(ui, id, value, &names::TYPE, 130.0);
+    }
+    let combo = egui::ComboBox::from_id_salt(id).selected_text("").width(battle_icons::ICON_SIZE.x + 12.0).show_ui(ui, |ui| {
+        let size = battle_icons::ICON_SIZE;
+        for row in 0..names::TYPE.len().div_ceil(3) {
+            ui.horizontal(|ui| {
+                for place in row * 3..(row * 3 + 3).min(names::TYPE.len()) {
+                    let (rect, response) = ui.allocate_exact_size(size + egui::vec2(6.0, 4.0), egui::Sense::click());
+                    if *value == place as u8 {
+                        widget::glow(ui, rect, 5.0);
+                    } else if response.hovered() {
+                        ui.painter().rect_filled(rect, 4.0, color::MUTED.gamma_multiply(0.25));
+                    }
+                    battle_icons::paint_type(ui.painter(), place as u8, rect.left_center() + egui::vec2(3.0, 0.0));
+                    if response.clicked() {
+                        *value = place as u8;
+                        ui.close_menu();
+                    }
+                }
+            });
+        }
+    });
+    let rect = combo.response.rect;
+    // The second type that is the same as the first one is not shown (as the lists do).
+    if first != Some(*value) {
+        battle_icons::paint_type(ui.painter(), *value, egui::pos2(rect.left() + 6.0, rect.center().y));
+    }
+    let menu_id = combo.response.id;
+    widget::register_focusable(ui, menu_id, rect);
+    if combo.response.clicked() {
+        widget::set_active_id(ui, menu_id);
+    }
+    if widget::is_active(ui, menu_id) && widget::page_has_focus(ui) {
+        widget::glow(ui, rect, 6.0);
+        widget::scroll_active_into_view(ui, &combo.response);
+        ui.input_mut(|i| {
+            let mut step: isize = 0;
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                step += 1;
+            }
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                step -= 1;
+            }
+            if step != 0 {
+                *value = (*value as isize + step).clamp(0, names::TYPE.len() as isize - 1) as u8;
+            }
+        });
+    }
+}
+
 /// A menu of names: the value is the place in the list.
 fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f32) {
     let combo = egui::ComboBox::from_id_salt(id).selected_text(name_from(list, *value as usize, 0)).width(width).show_ui(ui, |ui| {
@@ -1582,7 +1707,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::Type1, d.type_1 as u32)),
                 }),
                 |ui| {
-                    menu(ui, "type_1", &mut d.type_1, &names::TYPE, 130.0);
+                    type_menu(ui, "type_1", &mut d.type_1, None);
                     ui.label(widget::hint(&format!("0x{:02X}", d.type_1)));
                 },
             );
@@ -1595,7 +1720,8 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::Type2, d.type_2 as u32)),
                 }),
                 |ui| {
-                    menu(ui, "type_2", &mut d.type_2, &names::TYPE, 130.0);
+                    let first = d.type_1;
+                    type_menu(ui, "type_2", &mut d.type_2, Some(first));
                     ui.label(widget::hint(&format!("0x{:02X}", d.type_2)));
                 },
             );
@@ -1735,7 +1861,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::Color, d.color as u32)),
                 }),
                 |ui| {
-                    menu(ui, "pokedex_color", &mut d.color, &names::COLOR, 130.0);
+                    color_menu(ui, "pokedex_color", &mut d.color);
                     ui.label(widget::hint(&format!("0x{:02X}", d.color)));
                 },
             );
@@ -2033,6 +2159,7 @@ impl Module for Species {
             self.text.open(&dump);
             self.icon_tab.open(&dump);
             self.model_tab.open(&dump);
+            battle_icons::load(&dump);
             self.icon_textures.clear();
             self.list_rows = None;
             self.loaded = None;
