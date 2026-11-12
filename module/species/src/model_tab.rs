@@ -6,7 +6,9 @@
 
 use crate::model_files::MODELS;
 use sango_core::model::{parse_model, parse_textures, Model, Texture};
-use sango_core::render::{render, Camera};
+use sango_core::motion::{Motion, MotionPack};
+use sango_core::posing::posed;
+use sango_core::render::{bounds_of, render, render_framed, Camera};
 use sango_core::{lz, Bundle, Dump, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -18,6 +20,72 @@ const VIEW_SIZE: usize = 440;
 /// The files of a model, from its first file: the model, then the pictures and the pictures of the shiny colours.
 const TEXTURE_OFFSET: usize = 2;
 const SHINY_TEXTURE_OFFSET: usize = 3;
+
+/// The motion files, from the first file of a model: the battle motions and the Pokémon-Amie motions.
+const BATTLE_MOTION_OFFSET: usize = 5;
+const AMIE_MOTION_OFFSET: usize = 6;
+
+/// The names of the battle motions, in the order of the file.
+const BATTLE_MOTIONS: [&str; 18] = [
+    "Idle A",
+    "Idle B",
+    "Idle C",
+    "Entrance 1: jump out",
+    "Entrance 1: falling loop",
+    "Entrance 1: landing",
+    "Entrance 2",
+    "Mega Evolution pose",
+    "Physical attack 1",
+    "Physical attack 2",
+    "Physical attack 3",
+    "Physical attack 4",
+    "Special attack 1",
+    "Special attack 2",
+    "Special attack 3",
+    "Special attack 4",
+    "Damage",
+    "Faint",
+];
+
+/// The names of the Pokémon-Amie motions, in the order of the file.
+const AMIE_MOTIONS: [&str; 26] = [
+    "Idle",
+    "React",
+    "Turn A",
+    "Turn B",
+    "Doze off: start",
+    "Doze off: loop",
+    "Doze off: wake up",
+    "Sleep: loop",
+    "Sleep: wake up",
+    "Dislike",
+    "Confused",
+    "Happy A",
+    "Happy B",
+    "Happy C",
+    "Habit A",
+    "Habit B",
+    "Habit C",
+    "Habit D",
+    "Lonely",
+    "Want to play A",
+    "Want to play B",
+    "Angry",
+    "Bite: start",
+    "Bite: loop",
+    "Bite: end",
+    "Touch",
+];
+
+/// The name of a motion: the files hold more motions than the list of the game (they control the loops and the blinks).
+fn motion_name(battle: bool, index: usize) -> String {
+    let names: &[&str] = if battle { &BATTLE_MOTIONS } else { &AMIE_MOTIONS };
+    let file = if battle { "Battle" } else { "Pokémon-Amie" };
+    match names.get(index) {
+        Some(name) => format!("{file} · {name}"),
+        None => format!("{file} · control motion {index}"),
+    }
+}
 
 /// The forms of a species that have a model: the form numbers of the model files, in order.
 pub fn variants(species: usize) -> Vec<(u8, usize)> {
@@ -44,6 +112,16 @@ struct Loaded {
     textures: Vec<Texture>,
     /// The pictures by their name, for the drawing.
     by_name: HashMap<String, Texture>,
+    /// The battle motions and the Pokémon-Amie motions, when the files have them.
+    battle: Option<MotionPack>,
+    amie: Option<MotionPack>,
+}
+
+/// The motion that plays: which file, which one, and the motion itself.
+struct Playing {
+    battle: bool,
+    index: usize,
+    motion: Motion,
 }
 
 /// The state of the Model tab.
@@ -63,11 +141,18 @@ pub struct ModelTab {
     thumbnails: HashMap<String, egui::TextureHandle>,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
+    /// The motion that the model plays, and its frame (the game plays 30 each second).
+    playing: Option<Playing>,
+    running: bool,
+    frame: f32,
+    last_tick: Option<std::time::Instant>,
+    /// The sphere that the picture shows, from all the poses of the motion: the view does not move while the motion plays.
+    focus: Option<([f32; 3], f32)>,
 }
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None }
+        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None }
     }
 }
 
@@ -77,6 +162,12 @@ fn parts(archive: &Garc, file: usize) -> Result<Vec<Vec<u8>>, String> {
     let bytes = if lz::is_compressed(bytes) { lz::decompress(bytes)? } else { bytes.to_vec() };
     let bundle = Bundle::parse(bytes)?;
     Ok((0..bundle.resource_count()).filter_map(|i| bundle.resource(i).map(|part| part.to_vec())).collect())
+}
+
+/// Reads the motions of a file of the archive, when it has some.
+fn read_motions(archive: &Garc, file: usize) -> Option<MotionPack> {
+    let parts = parts(archive, file).ok()?;
+    MotionPack::parse(parts.first()?).ok()
 }
 
 /// Reads the model of a file and its pictures.
@@ -111,7 +202,19 @@ impl ModelTab {
         match read_model(archive, file, self.shiny) {
             Ok((model, textures)) => {
                 let by_name = textures.iter().map(|texture| (texture.name.clone(), texture.clone())).collect();
-                self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name });
+                let (battle, amie) = (read_motions(archive, file + BATTLE_MOTION_OFFSET), read_motions(archive, file + AMIE_MOTION_OFFSET));
+                // The model starts in its idle motion (the first of the battle file, else the first of Pokémon-Amie),
+                // and the motion goes on without end.
+                self.playing = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
+                    let pack = pack.as_ref()?;
+                    let index = (0..pack.len()).find(|&i| pack.has(i))?;
+                    pack.motion(index).ok().map(|motion| Playing { battle: is_battle, index, motion })
+                });
+                self.running = self.playing.is_some();
+                self.frame = 0.0;
+                self.last_tick = None;
+                self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name, battle, amie });
+                self.refocus();
             }
             Err(message) => self.error = Some(message),
         }
@@ -152,9 +255,29 @@ impl ModelTab {
             }
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
+        // The motion goes on with the time.
+        let now = std::time::Instant::now();
+        if let (true, Some(playing)) = (self.running, &self.playing) {
+            let seconds = self.last_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32().min(0.25));
+            self.frame += seconds * 30.0;
+            let length = playing.motion.frames.max(1) as f32;
+            if self.frame >= length {
+                self.frame %= length;
+            }
+            self.dirty = true;
+            ui.ctx().request_repaint();
+        }
+        self.last_tick = Some(now);
         if self.dirty || self.picture.is_none() {
             if let Some(loaded) = &self.loaded {
-                let pixels = render(&loaded.model, &loaded.by_name, &self.camera, VIEW_SIZE, VIEW_SIZE);
+                let pack = if self.playing.as_ref().is_some_and(|p| p.battle) { &loaded.battle } else { &loaded.amie };
+                let pixels = match (&self.playing, pack) {
+                    (Some(playing), Some(pack)) => {
+                        let moved = posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), self.frame));
+                        render_framed(&moved, &loaded.by_name, &self.camera, self.focus.unwrap_or_else(|| sango_core::render::bounds(&moved)), VIEW_SIZE, VIEW_SIZE)
+                    }
+                    _ => render(&loaded.model, &loaded.by_name, &self.camera, VIEW_SIZE, VIEW_SIZE),
+                };
                 let image = egui::ColorImage::from_rgba_unmultiplied([VIEW_SIZE, VIEW_SIZE], &pixels);
                 self.picture = Some(ui.ctx().load_texture("species_model_view", image, egui::TextureOptions::LINEAR));
             }
@@ -211,7 +334,78 @@ impl ModelTab {
             let _ = species;
         });
         ui.add_space(8.0);
+        self.motions(ui);
+        ui.add_space(8.0);
         self.pictures(ui);
+    }
+
+    /// The motion list and the controls to play it.
+    fn motions(&mut self, ui: &mut egui::Ui) {
+        let Some(loaded) = &self.loaded else { return };
+        let mut entries: Vec<(bool, usize)> = Vec::new();
+        for (battle, pack) in [(true, &loaded.battle), (false, &loaded.amie)] {
+            if let Some(pack) = pack {
+                entries.extend((0..pack.len()).filter(|&i| pack.has(i)).map(|i| (battle, i)));
+            }
+        }
+        let mut chosen: Option<Option<(bool, usize)>> = None;
+        widget::card(ui, |ui| {
+            ui.label(widget::title("Motion"));
+            if entries.is_empty() {
+                ui.label(widget::hint("This model has no motion in the archive."));
+                return;
+            }
+            let selected = self.playing.as_ref().map_or("Rest pose".to_string(), |p| motion_name(p.battle, p.index));
+            egui::ComboBox::from_id_salt("model_motion").selected_text(selected).width(340.0).height(360.0).show_ui(ui, |ui| {
+                if ui.selectable_label(self.playing.is_none(), "Rest pose").clicked() {
+                    chosen = Some(None);
+                }
+                for &(battle, index) in &entries {
+                    let is_selected = self.playing.as_ref().is_some_and(|p| p.battle == battle && p.index == index);
+                    if ui.selectable_label(is_selected, motion_name(battle, index)).clicked() {
+                        chosen = Some(Some((battle, index)));
+                    }
+                }
+            });
+            if let Some(playing) = &self.playing {
+                let last = playing.motion.frames.saturating_sub(1) as f32;
+                ui.horizontal(|ui| {
+                    if widget::button(ui, if self.running { "Pause" } else { "Play" }) {
+                        self.running = !self.running;
+                        self.last_tick = None;
+                    }
+                    let mut frame = self.frame.min(last).floor();
+                    let response = ui.add(egui::Slider::new(&mut frame, 0.0..=last.max(1.0)).integer().text("frame"));
+                    // The slider rounds the frame while the motion plays: only the user stops the motion.
+                    if response.changed() && (response.dragged() || response.has_focus() || response.is_pointer_button_down_on()) {
+                        self.frame = frame;
+                        self.running = false;
+                        self.dirty = true;
+                    }
+                });
+                ui.label(widget::hint(&format!("{} frames, {:.1} seconds", playing.motion.frames, playing.motion.frames as f32 / 30.0)));
+            }
+        });
+        if let Some(choice) = chosen {
+            self.playing = choice.and_then(|(battle, index)| {
+                let pack = if battle { loaded.battle.as_ref() } else { loaded.amie.as_ref() }?;
+                pack.motion(index).ok().map(|motion| Playing { battle, index, motion })
+            });
+            self.running = self.playing.is_some();
+            self.frame = 0.0;
+            self.last_tick = None;
+            self.dirty = true;
+            self.refocus();
+        }
+    }
+
+    /// Chooses the sphere that the picture shows: the one that holds the model in 16 poses of the motion that plays.
+    fn refocus(&mut self) {
+        self.focus = None;
+        let (Some(loaded), Some(playing)) = (&self.loaded, &self.playing) else { return };
+        let Some(pack) = (if playing.battle { &loaded.battle } else { &loaded.amie }) else { return };
+        let poses: Vec<Model> = (0..16).map(|k| posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), playing.motion.frames as f32 * k as f32 / 16.0))).collect();
+        self.focus = Some(bounds_of(&poses));
     }
 
     /// The list of the pictures of the model, with a small view of each.
@@ -305,7 +499,7 @@ mod test {
         }
         // With the variable SANGO_RENDER_OUT, some models are written as PNG files, to look at them.
         if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
-            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0)] {
+            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0)] {
                 let Some(&(_, file)) = variants(species).iter().find(|(number, _)| *number == form) else {
                     eprintln!("{name}: no model for the form {form}");
                     continue;
@@ -320,6 +514,14 @@ mod test {
                     image::save_buffer(format!("{out}/tex_{name}_{}.png", texture.name), &texture.rgba, texture.width as u32, texture.height as u32, image::ColorType::Rgba8).unwrap();
                 }
                 eprintln!("{name}: {:?}", model.materials);
+                // Some poses: the idle motion, an attack and the faint motion of the battle file, and the idle of Pokémon-Amie.
+                for (label, battle, index, fraction) in [("idle", true, 0usize, 0.0f32), ("idle_mid", true, 0, 0.5), ("idle_q1", true, 0, 0.25), ("idle_q3", true, 0, 0.75), ("attack", true, 8, 0.5), ("faint", true, 17, 1.0), ("amie_idle", false, 0, 0.0), ("amie_happy", false, 11, 0.5)] {
+                    let Some(pack) = read_motions(&archive, file + if battle { BATTLE_MOTION_OFFSET } else { AMIE_MOTION_OFFSET }) else { continue };
+                    let Ok(motion) = pack.motion(index) else { continue };
+                    let moved = posed(&model, &pack, &motion.pose(pack.joints.len(), motion.frames as f32 * fraction));
+                    let image = render(&moved, &by_name, &Camera { yaw: std::f32::consts::PI + 0.5, pitch: 0.1, zoom: 1.0 }, 400, 400);
+                    image::save_buffer(format!("{out}/pose_{name}_{label}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
+                }
             }
         }
         // The shiny pictures are read too.

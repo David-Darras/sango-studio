@@ -44,12 +44,26 @@ pub fn bounds(model: &Model) -> ([f32; 3], f32) {
     (centre, radius.max(1e-3))
 }
 
+/// The centre and the radius of a sphere that holds all the vertices of several models (the same model in several poses).
+pub fn bounds_of(models: &[Model]) -> ([f32; 3], f32) {
+    let mut all = Model::default();
+    for model in models {
+        all.meshes.extend(model.meshes.iter().map(|mesh| crate::model::Mesh { material: 0, vertices: mesh.vertices.clone(), triangles: Vec::new() }));
+    }
+    bounds(&all)
+}
+
 /// A picture of a model with `width` × `height` pixels, on a transparent background.
 ///
 /// `textures` are the pictures that the materials ask for by name. A material whose picture is missing is grey.
 /// The model is drawn two times bigger, then each pixel takes the mean of four: the edges are smooth.
 pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, width: usize, height: usize) -> Vec<u8> {
-    let big = draw(model, textures, camera, width * 2, height * 2);
+    render_framed(model, textures, camera, bounds(model), width, height)
+}
+
+/// The same, with the sphere that the picture shows given (`bounds`): a model that moves keeps the same place and size.
+pub fn render_framed(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize) -> Vec<u8> {
+    let big = draw(model, textures, camera, frame, width * 2, height * 2);
     let mut pixels = vec![0u8; width * height * 4];
     for y in 0..height {
         for x in 0..width {
@@ -78,10 +92,10 @@ pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camer
 }
 
 /// The drawing itself, one ray of light, no smoothing.
-fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, width: usize, height: usize) -> Vec<u8> {
+fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize) -> Vec<u8> {
     let mut pixels = vec![0u8; width * height * 4];
     let mut depth = vec![f32::MAX; width * height];
-    let (centre, radius) = bounds(model);
+    let (centre, radius) = frame;
     let scale = width.min(height) as f32 * 0.46 / radius * camera.zoom;
     let (sin_yaw, cos_yaw) = camera.yaw.sin_cos();
     let (sin_pitch, cos_pitch) = camera.pitch.sin_cos();

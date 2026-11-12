@@ -257,6 +257,8 @@ enum Field {
     Color,
     BoneIndex,
     BoneWeight,
+    /// An attribute that the reader does not use.
+    Other,
 }
 
 /// The format of one attribute: the type (0 signed byte, 1 unsigned byte, 2 short, 3 float) and the count.
@@ -276,19 +278,22 @@ impl Format {
     }
 }
 
-/// What each attribute of a mesh is: the four first ones are the position, the normal, the texture position and the
-/// tangent. The attributes of bytes that follow are a colour, then bone numbers and their weights.
-fn fields(formats: &[Format]) -> Vec<Field> {
-    let mut out = vec![Field::Position, Field::Normal, Field::Uv, Field::Tangent];
-    out.truncate(formats.len());
-    match formats.len().saturating_sub(4) {
-        1 if formats[4].count == 4 => out.push(Field::Color),
-        2 => out.extend([Field::BoneIndex, Field::BoneWeight]),
-        3 => out.extend([Field::Color, Field::BoneIndex, Field::BoneWeight]),
-        _ => {}
-    }
-    out.resize(formats.len(), Field::Color);
-    out
+/// What each attribute of a mesh is, from the name that the file gives to each place of the vertex: 0 the position, 1 the
+/// normal, 2 the tangent, 3 the colour, 4 the texture position, 7 the numbers of the bones and 8 their weights.
+fn fields(names: &[u32]) -> Vec<Field> {
+    names
+        .iter()
+        .map(|name| match name {
+            0 => Field::Position,
+            1 => Field::Normal,
+            2 => Field::Tangent,
+            3 => Field::Color,
+            4 => Field::Uv,
+            7 => Field::BoneIndex,
+            8 => Field::BoneWeight,
+            _ => Field::Other,
+        })
+        .collect()
 }
 
 /// Reads the first model of a model file.
@@ -386,7 +391,11 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
         let formats: Vec<Format> = (0..12).map(|k| if k < 8 { (low >> (4 * k)) & 0xf } else { (high >> (4 * (k - 8))) & 0xf }).map(|f| Format { kind: f & 3, count: ((f >> 2) + 1) as usize }).collect();
         let slots: Vec<Format> = (0..(info >> 28) as usize).map(|k| formats[((order >> (4 * k)) & 0xf) as usize]).collect();
         let stride = ((info >> 16) & 0xff) as usize;
-        let kinds = fields(&slots);
+        // The name of each place of the vertex: the registers of the permutation of the attributes give the name of each
+        // attribute, the order of the buffer says which attribute is at each place.
+        let permutation = vertex_registers.get(&0x2bb).map_or(0, |(v, _)| *v as u64) | (vertex_registers.get(&0x2bc).map_or(0, |(v, _)| *v as u64) << 32);
+        let names: Vec<u32> = (0..slots.len()).map(|k| ((permutation >> (4 * ((order >> (4 * k)) & 0xf))) & 0xf) as u32).collect();
+        let kinds = fields(&names);
         for part in 0..parts.clamp(1, 16) {
             let header = content + file.u32(at + 16)? as usize + 0x34 * part;
             let bone_slots = (file.u16(header + 2)? as usize).min(20);
@@ -493,17 +502,25 @@ fn read_vertex(file: &File, start: usize, slots: &[Format], kinds: &[Field], pal
             Field::Position => vertex.position = [values[0], values[1], values[2]],
             Field::Normal => vertex.normal = [values[0], values[1], values[2]],
             Field::Uv => vertex.uv = [values[0], values[1]],
-            Field::Tangent => {}
+            Field::Tangent | Field::Other => {}
             Field::Color => vertex.color = [values[0] as u8, values[1] as u8, values[2] as u8, values[3] as u8],
             Field::BoneIndex => raw_bones = [values[0] as u16, values[1] as u16, values[2] as u16, values[3] as u16],
             Field::BoneWeight => vertex.weights = [values[0] / 100.0, values[1] / 100.0, values[2] / 100.0, values[3] / 100.0],
         }
     }
-    let has_bones = kinds.contains(&Field::BoneWeight);
+    let has_index = kinds.contains(&Field::BoneIndex);
+    let has_weight = kinds.contains(&Field::BoneWeight);
+    match (has_index, has_weight) {
+        // The bones are the bones of the part, in order, and the vertex gives their weights.
+        (false, true) => raw_bones = [0, 1, 2, 3],
+        // The vertex names one bone.
+        (true, false) => vertex.weights = [1.0, 0.0, 0.0, 0.0],
+        _ => {}
+    }
     for k in 0..4 {
         vertex.bones[k] = palette.get(raw_bones[k] as usize).copied().unwrap_or(0);
     }
-    if !has_bones {
+    if !has_index && !has_weight {
         vertex.weights = [1.0, 0.0, 0.0, 0.0];
         vertex.bones = [palette.first().copied().unwrap_or(0), 0, 0, 0];
     }
@@ -696,16 +713,12 @@ mod test {
     use super::*;
 
     #[test]
-    fn the_attributes_of_a_vertex_are_named_from_their_formats() {
+    fn the_attributes_of_a_vertex_are_named_by_the_file() {
         let float3 = Format { kind: 3, count: 3 };
         let bytes4 = Format { kind: 1, count: 4 };
-        let bytes2 = Format { kind: 1, count: 2 };
-        let base = [float3, float3, Format { kind: 3, count: 2 }, float3];
-        assert_eq!(fields(&base), [Field::Position, Field::Normal, Field::Uv, Field::Tangent]);
-        assert_eq!(fields(&[base.as_slice(), &[bytes4]].concat())[4], Field::Color);
-        assert_eq!(fields(&[base.as_slice(), &[bytes2, bytes2]].concat())[4..], [Field::BoneIndex, Field::BoneWeight]);
-        assert_eq!(fields(&[base.as_slice(), &[bytes4, bytes4, bytes4]].concat())[4..], [Field::Color, Field::BoneIndex, Field::BoneWeight]);
-        assert_eq!((float3.size(), bytes4.size(), bytes2.size()), (12, 4, 2));
+        assert_eq!(fields(&[0, 1, 4, 2]), [Field::Position, Field::Normal, Field::Uv, Field::Tangent]);
+        assert_eq!(fields(&[3, 7, 8, 9]), [Field::Color, Field::BoneIndex, Field::BoneWeight, Field::Other]);
+        assert_eq!((float3.size(), bytes4.size()), (12, 4));
     }
 
     #[test]

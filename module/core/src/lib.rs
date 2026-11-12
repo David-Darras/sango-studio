@@ -14,7 +14,9 @@ pub mod garc;
 pub mod learnset;
 pub mod lz;
 pub mod model;
+pub mod motion;
 pub mod moves;
+pub mod posing;
 pub mod render;
 pub mod text;
 
