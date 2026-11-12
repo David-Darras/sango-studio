@@ -83,8 +83,41 @@ pub struct Material {
     /// The steps that mix the pictures, the colour of the vertices and the light into the colour of a pixel.
     /// Empty when the file gives none.
     pub stages: Vec<Stage>,
+    /// How the game draws the material: blending, depth, alpha test and culling.
+    pub state: RenderState,
     /// The colour that the steps can use as a value of their own, from the file (red, green, blue, alpha).
     pub buffer_color: [u8; 4],
+}
+
+/// How the game draws a material, from the data that the file adds to the material (the optional data named "PrivateMod").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RenderState {
+    /// True when the file gives the state (else the values are the ones of an opaque material).
+    pub known: bool,
+    /// True when the colour of a pixel is mixed with the colour behind it (else it replaces it).
+    pub blend: bool,
+    /// The factors of the mix: of the colour and of the opacity, for the new pixel (source) and for the pixel behind
+    /// (destination): 0 zero, 1 one, 2 colour of the source, 3 one minus it, 4 colour of the destination, 5 one minus it,
+    /// 6 opacity of the source, 7 one minus it, 8 opacity of the destination, 9 one minus it.
+    pub color_source: u8,
+    pub color_destination: u8,
+    pub alpha_source: u8,
+    pub alpha_destination: u8,
+    /// True when the pixel changes the depth of the picture.
+    pub depth_write: bool,
+    /// How the depth of a pixel is compared with the depth that is there: 0 never, 1 always, 2 equal, 3 not equal, 4 less,
+    /// 5 less or equal, 6 greater, 7 greater or equal.
+    pub depth_test: u8,
+    /// The test of the opacity: `None` when the material has none, else how to compare (as the depth) and the value (0 to 255).
+    pub alpha_test: Option<(u8, u8)>,
+    /// The faces that are not drawn: 0 the front ones, 1 the back ones, 2 none.
+    pub cull: u8,
+}
+
+impl Default for RenderState {
+    fn default() -> RenderState {
+        RenderState { known: false, blend: false, color_source: 1, color_destination: 0, alpha_source: 1, alpha_destination: 0, depth_write: true, depth_test: 5, alpha_test: None, cull: 2 }
+    }
 }
 
 /// One of the three pictures of a material.
@@ -296,6 +329,16 @@ fn fields(names: &[u32]) -> Vec<Field> {
         .collect()
 }
 
+/// The name of the first bone of the first model of a model file (it tells which model the file holds), without reading the
+/// rest of the file.
+pub fn first_bone_name(data: &[u8]) -> Option<String> {
+    let file = File::new(data).ok()?;
+    let table = file.content + file.u32(file.content).ok()? as usize;
+    let model = file.content + file.u32(table).ok()? as usize;
+    let bones = file.content + file.u32(model + 0x70).ok()? as usize;
+    Some(file.name(file.u32(bones + 0x5c).ok()?))
+}
+
 /// Reads the first model of a model file.
 pub fn parse_model(data: &[u8]) -> Result<Model, String> {
     let file = File::new(data)?;
@@ -358,7 +401,8 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
             (Ok(place), Ok(length)) => file.words(place as usize, length as usize / 4).map(|words| read_stages(&registers(&words))).unwrap_or_default(),
             _ => Default::default(),
         };
-        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent, unlit: flags & 0x0010_0000 == 0, units, stages, buffer_color });
+        let state = read_state(&file, params).unwrap_or_default();
+        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent, unlit: flags & 0x0010_0000 == 0, units, stages, buffer_color, state });
     }
 
     // The skeleton.
@@ -445,6 +489,52 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
         }
     }
     Ok(Model { bones, materials, meshes })
+}
+
+/// The way the game draws a material. The values of the material hold the place of a list of named optional data (at
+/// 0x10c). The one named "PrivateMod" has two numbers. The first has the faces that are not drawn (bits 6 and 7) and the
+/// place of the steps of the mix (bits 8 to 15). The second has four places (8 bits each, 255 means none): the stencil
+/// test, the test of the opacity, the depth and colour mask, and the blend. Each place is a number of words from the
+/// start of the commands of the material, and holds the command of the graphics chip for it.
+fn read_state(file: &File, params: usize) -> Option<RenderState> {
+    let strings = file.data.get(file.strings..)?;
+    let name_at = strings.windows(11).position(|w| w == b"PrivateMod\0")? as u32;
+    let list = file.content + file.u32(params + 0x10c).ok()? as usize;
+    // The entry: the place of the name, then the kind (0 for numbers) and the count, then the place of the numbers.
+    let entry = (0..0x100).map(|k| list + 4 * k).find(|&at| file.u32(at).ok() == Some(name_at) && file.u32(at + 4).is_ok_and(|v| v & 0xffff == 0 && (1..=8).contains(&(v >> 16))))?;
+    let numbers = file.content + file.u32(entry + 8).ok()? as usize;
+    let (first, second) = (file.u32(numbers).ok()?, file.u32(numbers + 4).ok()?);
+    let commands = file.commands + file.u32(params + 0xc8).ok()? as usize;
+    let word = |index: u32, k: usize| file.u32(commands + 4 * (index as usize + k)).ok();
+    let mut state = RenderState { known: true, cull: ((first >> 6) & 3) as u8, ..RenderState::default() };
+    if first & 1 == 0 {
+        return Some(state);
+    }
+    // The command that starts at a place gives the value of one register: the value, then the header with the register.
+    let at = |index: u32, register: u16| -> Option<u32> {
+        if index >= 255 {
+            return None;
+        }
+        (word(index, 1)? & 0xffff == register as u32).then(|| word(index, 0)).flatten()
+    };
+    let (alpha_place, depth_place, blend_place) = ((second >> 8) & 0xff, (second >> 16) & 0xff, (second >> 24) & 0xff);
+    if let Some(operation) = at(blend_place, 0x100) {
+        state.blend = operation & 0x100 != 0;
+        if let Some(function) = word(blend_place, 2).filter(|_| word(blend_place, 3).is_some_and(|h| h & 0xffff == 0x101)) {
+            state.color_source = ((function >> 16) & 0xf) as u8;
+            state.color_destination = ((function >> 20) & 0xf) as u8;
+            state.alpha_source = ((function >> 24) & 0xf) as u8;
+            state.alpha_destination = ((function >> 28) & 0xf) as u8;
+        }
+    }
+    if let Some(test) = at(alpha_place, 0x104).filter(|t| t & 1 != 0) {
+        state.alpha_test = Some((((test >> 4) & 7) as u8, ((test >> 8) & 0xff) as u8));
+    }
+    if let Some(mask) = at(depth_place, 0x107) {
+        state.depth_test = if mask & 1 != 0 { ((mask >> 4) & 7) as u8 } else { 1 };
+        state.depth_write = mask & 0x1000 != 0;
+    }
+    Some(state)
 }
 
 /// The steps of the mix of a material, from the registers of the graphics chip that its commands set. The six steps have

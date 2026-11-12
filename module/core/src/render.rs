@@ -133,10 +133,12 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
     for mesh in &model.meshes {
         let material = model.materials.get(mesh.material);
         let mixed = material.is_some_and(is_mixed);
+        let combined = mixed || material.is_some_and(|m| m.unlit && !m.stages.is_empty());
         if mixed != (pass == 1) {
             continue;
         }
         let texture = material.and_then(|material| textures.get(&material.texture));
+        let state = material.map_or(crate::model::RenderState::default(), |m| m.state);
         // The three pictures of the material, found once for the whole mesh.
         let pictures: [Option<&Texture>; 3] = match material {
             Some(material) => std::array::from_fn(|k| textures.get(&material.units[k].texture)),
@@ -158,6 +160,12 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
             if area.abs() < 1e-6 {
                 continue;
             }
+            // The faces that the material does not draw (the screen turns the faces over: its y axis goes down).
+            match state.cull {
+                0 if area > 0.0 => continue,
+                1 if area < 0.0 => continue,
+                _ => {}
+            }
             let min_x = screen.iter().map(|p| p[0]).fold(f32::MAX, f32::min).floor().max(0.0) as usize;
             let max_x = (screen.iter().map(|p| p[0]).fold(f32::MIN, f32::max).ceil().min(width as f32 - 1.0)).max(0.0) as usize;
             let min_y = screen.iter().map(|p| p[1]).fold(f32::MAX, f32::min).floor().max(0.0) as usize;
@@ -173,7 +181,7 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                     }
                     let z = w0 * screen[0][2] + w1 * screen[1][2] + w2 * screen[2][2];
                     let place = y * width + x;
-                    if z >= depth[place] {
+                    if !depth_passes(state.depth_test, z, depth[place]) {
                         continue;
                     }
                     let uv = |axis: usize| w0 * mesh.vertices[corners[0]].uv[axis] + w1 * mesh.vertices[corners[1]].uv[axis] + w2 * mesh.vertices[corners[2]].uv[axis];
@@ -181,9 +189,10 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                     let normal: [f32; 3] = std::array::from_fn(|axis| w0 * moved[corners[0]].1[axis] + w1 * moved[corners[1]].1[axis] + w2 * moved[corners[2]].1[axis]);
                     let length = (normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]).sqrt().max(1e-6);
                     let light = 0.45 + 0.55 * (-normal[2] / length).abs();
-                    if mixed {
+                    if combined {
                         let Some(material) = material else { continue };
-                        let mut color = combine(material, &pictures, [uv(0), uv(1)], light);
+                        let primary: [f32; 4] = std::array::from_fn(|k| (w0 * mesh.vertices[corners[0]].color[k] as f32 + w1 * mesh.vertices[corners[1]].color[k] as f32 + w2 * mesh.vertices[corners[2]].color[k] as f32) / 255.0);
+                        let mut color = combine(material, &pictures, [uv(0), uv(1)], light, primary);
                         if let Some((eye_material, eye_texture, opening)) = &eye_under {
                             // The mesh of an iris is bigger than the opening of the eye: the picture of the iris is
                             // kept only where the picture of the eye is not the colour of the skin.
@@ -194,19 +203,28 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                                 color[3] = 0.0;
                             }
                         }
-                        if color[3] < 0.02 {
-                            continue;
+                        // The test of the opacity of the material, else a pixel that is nearly clear is not drawn.
+                        match state.alpha_test {
+                            Some((function, reference)) => {
+                                if !depth_passes(function, (color[3] * 255.0).round(), reference as f32) {
+                                    continue;
+                                }
+                            }
+                            None if color[3] < 0.02 => continue,
+                            None => {}
                         }
-                        // Blend with what is behind: the colour of the pixel and its opacity.
+                        // Mix with what is behind: the colour of the pixel and its opacity.
                         let at = place * 4;
                         let behind_alpha = pixels[at + 3] as f32 / 255.0;
-                        let behind = &mut pixels[at..at + 4];
-                        let alpha = color[3] + behind_alpha * (1.0 - color[3]);
+                        let behind_color = [pixels[at] as f32 / 255.0, pixels[at + 1] as f32 / 255.0, pixels[at + 2] as f32 / 255.0];
+                        let (mixed_color, mixed_alpha) = blend(&state, [color[0], color[1], color[2]], color[3], behind_color, behind_alpha);
                         for channel in 0..3 {
-                            let mixed_value = (color[channel] * color[3] + behind[channel] as f32 / 255.0 * behind_alpha * (1.0 - color[3])) / alpha.max(1e-6);
-                            behind[channel] = (mixed_value.clamp(0.0, 1.0) * 255.0) as u8;
+                            pixels[at + channel] = (mixed_color[channel].clamp(0.0, 1.0) * 255.0) as u8;
                         }
-                        behind[3] = (alpha.clamp(0.0, 1.0) * 255.0) as u8;
+                        pixels[at + 3] = (mixed_alpha.clamp(0.0, 1.0) * 255.0) as u8;
+                        if state.depth_write {
+                            depth[place] = z;
+                        }
                         continue;
                     }
                     let color = match (texture, material) {
@@ -240,7 +258,9 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                     if cut {
                         continue;
                     }
-                    depth[place] = z;
+                    if state.depth_write {
+                        depth[place] = z;
+                    }
                     pixels[place * 4..place * 4 + 4].copy_from_slice(&[(color[0] as f32 * light) as u8, (color[1] as f32 * light) as u8, (color[2] as f32 * light) as u8, 255]);
                 }
             }
@@ -312,12 +332,69 @@ fn outline(pixels: &mut [u8], depth: &[f32], width: usize, height: usize, radius
 /// the flames, the gas. The ones that the light does not touch (the file gives them no reflection) and the ones that
 /// the file marks as transparent.
 fn is_mixed(material: &crate::model::Material) -> bool {
+    let state = &material.state;
+    if state.known {
+        // The game gives the way to draw the material: it is mixed when the new colour is blended with the old one.
+        return state.blend && (state.color_source, state.color_destination) != (1, 0);
+    }
     material.transparent || (material.unlit && !material.stages.is_empty())
+}
+
+/// The result of a comparison of the graphics chip (0 never, 1 always, 2 equal, 3 not equal, 4 less, 5 less or equal,
+/// 6 greater, 7 greater or equal) between a new value and the value that is there.
+fn depth_passes(function: u8, new: f32, old: f32) -> bool {
+    match function {
+        0 => false,
+        1 => true,
+        2 => new == old,
+        3 => new != old,
+        4 => new < old,
+        5 => new <= old,
+        6 => new > old,
+        _ => new >= old,
+    }
+}
+
+/// The colour and the opacity of a pixel when a new colour is drawn over the old one, with the factors of the material.
+/// The opacity of a pixel tells how much of it is covered. The colour that is given and returned is not multiplied by it.
+fn blend(state: &crate::model::RenderState, source: [f32; 3], source_alpha: f32, behind: [f32; 3], behind_alpha: f32) -> ([f32; 3], f32) {
+    let factor = |code: u8, channel: usize| -> f32 {
+        match code {
+            0 => 0.0,
+            1 => 1.0,
+            2 => source[channel],
+            3 => 1.0 - source[channel],
+            4 => behind[channel],
+            5 => 1.0 - behind[channel],
+            6 => source_alpha,
+            7 => 1.0 - source_alpha,
+            8 => behind_alpha,
+            9 => 1.0 - behind_alpha,
+            _ => 1.0,
+        }
+    };
+    if !state.blend {
+        return (source, 1.0);
+    }
+    let mut out = [0.0f32; 3];
+    for (channel, value) in out.iter_mut().enumerate() {
+        // The old colour counts with its coverage: a pixel that nothing covered has no colour.
+        *value = source[channel] * factor(state.color_source, channel) + behind[channel] * behind_alpha * factor(state.color_destination, channel);
+    }
+    let coverage = match (state.color_source, state.color_destination) {
+        (_, 7) => source_alpha + behind_alpha * (1.0 - source_alpha),
+        (_, 0) => 1.0,
+        _ => (source_alpha + behind_alpha).min(1.0),
+    };
+    if coverage <= 1e-6 {
+        return (behind, behind_alpha);
+    }
+    (out.map(|v| v / coverage), coverage)
 }
 
 /// The colour and the opacity of a pixel (from 0 to 1) that a material gives at a texture position, with the steps of
 /// the mix that the file gives. `light` is the light of the surface, from 0 to 1.
-fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], uv: [f32; 2], light: f32) -> [f32; 4] {
+fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], uv: [f32; 2], light: f32, primary: [f32; 4]) -> [f32; 4] {
     use crate::model::Stage;
     // The three pictures, at this place. A unit with no picture gives white.
     let mut pictures = [[1.0f32; 4]; 3];
@@ -334,7 +411,7 @@ fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], 
         let constant = to_float(stage.constant);
         let source = |code: u8, previous: [f32; 4], buffer: [f32; 4]| -> [f32; 4] {
             match code {
-                0 => [1.0; 4],
+                0 => primary,
                 1 => [light, light, light, 1.0],
                 2 => [0.0; 4],
                 3..=5 => pictures[(code - 3) as usize],
@@ -408,6 +485,7 @@ fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], 
             buffer[3] = previous[3];
         }
         previous = [rgb[0], rgb[1], rgb[2], alpha];
+        
         let _: &Stage = stage;
     }
     previous
@@ -522,6 +600,32 @@ fn sample_wrapped(texture: &Texture, u: f32, v: f32, kinds: [u8; 2]) -> [u8; 4] 
 
 #[cfg(test)]
 mod test {
+    #[test]
+    fn trace_fire() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = crate::Dump::open(&root).unwrap();
+        let archive = crate::Garc::open(&dump.archive(8)).unwrap();
+        let get = |file: usize| -> Vec<u8> {
+            let bytes = archive.first_file(file).unwrap();
+            let bytes = if crate::lz::is_compressed(bytes) { crate::lz::decompress(bytes).unwrap() } else { bytes.to_vec() };
+            crate::Bundle::parse(bytes).unwrap().resource(0).unwrap().to_vec()
+        };
+        let model = crate::model::parse_model(&get(59)).unwrap();
+        let textures: HashMap<String, Texture> = crate::model::parse_textures(&get(59 + 2)).unwrap().into_iter().map(|t| (t.name.clone(), t)).collect();
+        for mesh in &model.meshes {
+            let material = &model.materials[mesh.material];
+            if !material.name.starts_with("Fire") { continue; }
+            let pictures: [Option<&Texture>; 3] = std::array::from_fn(|k| textures.get(&material.units[k].texture));
+            eprintln!("TRACE material {} units {:?} state {:?}", material.name, material.units.iter().map(|u| (&u.texture, u.scale, u.translation, u.wrap)).collect::<Vec<_>>(), material.state);
+            for v in mesh.vertices.iter().step_by(40).take(3) {
+                eprintln!("TRACE vertex uv {:?} color {:?}", v.uv, v.color);
+                let out = combine(material, &pictures, v.uv, 1.0, v.color.map(|c| c as f32 / 255.0));
+                eprintln!("TRACE final {:?}", out);
+            }
+            break;
+        }
+    }
+
     use super::*;
     use crate::model::{Material, Mesh, Vertex};
 

@@ -14,7 +14,6 @@ mod icons;
 mod learnset;
 mod learnset_csv;
 mod machines;
-mod model_files;
 mod model_tab;
 mod move_names;
 mod pokedex_data;

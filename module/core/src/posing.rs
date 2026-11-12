@@ -47,11 +47,12 @@ impl Affine {
         Affine(m)
     }
 
-    pub fn inverse(&self) -> Affine {
+    /// The matrix that undoes this one, or `None` when it flattens space (a scale of 0).
+    pub fn inverse(&self) -> Option<Affine> {
         let m = &self.0;
         let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
-        if det.abs() < 1e-12 {
-            return Affine::IDENTITY;
+        if det.abs() < 1e-9 {
+            return None;
         }
         let d = 1.0 / det;
         let mut inv = [[0.0; 4]; 3];
@@ -67,7 +68,7 @@ impl Affine {
         for row in 0..3 {
             inv[row][3] = -(inv[row][0] * m[0][3] + inv[row][1] * m[1][3] + inv[row][2] * m[2][3]);
         }
-        Affine(inv)
+        Some(Affine(inv))
     }
 
     pub fn point(&self, p: [f32; 3]) -> [f32; 3] {
@@ -127,7 +128,8 @@ fn worlds(bones: &[Bone], locals: &[Affine]) -> Vec<Affine> {
 
 /// The matrix of each bone in the rest pose of the file.
 fn rest_locals(bones: &[Bone]) -> Vec<Affine> {
-    bones.iter().map(|b| Affine::new(b.translation, rotation_zyx(b.rotation), b.scale)).collect()
+    // A bone does not take the scale of its parent (see `posed`): the rest pose follows the same rule.
+    bones.iter().map(|b| Affine::with_parent_scale(b.translation, rotation_zyx(b.rotation), b.scale, b.parent.and_then(|p| bones.get(p)).map_or([1.0; 3], |parent| parent.scale))).collect()
 }
 
 /// The model in a pose of a motion pack. The bones are matched by their names, and the first bone with the first joint.
@@ -144,7 +146,10 @@ pub fn posed(model: &Model, pack: &MotionPack, pose: &Pose) -> Model {
         .map(|(i, bone)| {
             let Some(joint) = joint_of[i].filter(|&j| j < pack.joints.len() && j < pose.joints.len()) else { return rest[i] };
             let (rest_joint, state) = (&pack.joints[joint], &pose.joints[joint]);
-            let translation = state.translation.unwrap_or(rest_joint.translation);
+            // Some joints that the game moves with a simulation (hair, vines) have values that are not meant to be used: a
+            // translation far bigger than the joint itself keeps the translation of the rest pose.
+            let reach = rest_joint.translation.iter().fold(1.0f32, |m, c| m.max(c.abs())) * 100.0;
+            let translation = state.translation.filter(|t| t.iter().all(|c| c.is_finite() && c.abs() <= reach)).unwrap_or(rest_joint.translation);
             let rotation = match state.rotation {
                 Some(angles) => rotation_zyx(angles),
                 None => {
@@ -157,12 +162,13 @@ pub fn posed(model: &Model, pack: &MotionPack, pose: &Pose) -> Model {
                 }
             };
             // The scale of the parent is not inherited by the bone.
-            let parent_scale = bone.parent.and_then(|p| joint_of[p]).and_then(|j| pose.joints.get(j)).and_then(|s| s.scale).unwrap_or([1.0; 3]);
+            let parent_scale = bone.parent.map_or([1.0; 3], |p| bone.parent.and_then(|_| joint_of[p]).and_then(|j| pose.joints.get(j)).and_then(|s| s.scale).unwrap_or(bones[p].scale));
             Affine::with_parent_scale(translation, rotation, state.scale.unwrap_or(bone.scale), parent_scale)
         })
         .collect();
     let (rest_worlds, now) = (worlds(bones, &rest), worlds(bones, &locals));
-    let skin: Vec<Affine> = now.iter().zip(&rest_worlds).map(|(now, rest)| now.then(&rest.inverse())).collect();
+    // A bone that is flat in the rest pose (a scale of 0) cannot move vertices: they stay where they are.
+    let skin: Vec<Affine> = now.iter().zip(&rest_worlds).map(|(now, rest)| rest.inverse().map_or(Affine::IDENTITY, |inverse| now.then(&inverse))).collect();
     let mut out = model.clone();
     for mesh in &mut out.meshes {
         for vertex in &mut mesh.vertices {
@@ -196,7 +202,7 @@ mod test {
     #[test]
     fn a_matrix_and_its_inverse_give_the_identity() {
         let a = Affine::new([1.0, 2.0, 3.0], rotation_zyx([0.3, -0.5, 1.1]), [1.0, 2.0, 0.5]);
-        let product = a.then(&a.inverse());
+        let product = a.then(&a.inverse().unwrap());
         for row in 0..3 {
             for column in 0..4 {
                 let expected = Affine::IDENTITY.0[row][column];

@@ -1,11 +1,10 @@
 //! The Model tab: the 3D model of a species and its pictures (textures).
 //!
-//! The model files are in the archive 8 (see `model_files`). The tab draws the model in the pose of its file, with
+//! The model files are in the archive 8 (the file 0 lists them, see `variants`). The tab draws the model in the pose of its file, with
 //! a point of view that the user turns with the mouse and zooms with the wheel, and lists the pictures that paint it.
 //! The drawing is made on the processor (see `sango_core::render`): the window shows its result as one picture.
 
-use crate::model_files::MODELS;
-use sango_core::model::{parse_model, parse_textures, Model, Texture};
+use sango_core::model::{first_bone_name, parse_model, parse_textures, Model, Texture};
 use sango_core::motion::{Motion, MotionPack};
 use sango_core::posing::posed;
 use sango_core::render::{bounds_of, render, render_framed_at, Camera};
@@ -87,19 +86,52 @@ fn motion_name(battle: bool, index: usize) -> String {
     }
 }
 
-/// The forms of a species that have a model: the form numbers of the model files, in order.
-pub fn variants(species: usize) -> Vec<(u8, usize)> {
-    MODELS.iter().filter(|(number, _, _)| *number as usize == species).map(|&(_, form, file)| (form, file as usize)).collect()
+/// A model of a species: the normal one, the female one or a form.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Variant {
+    /// The place of the model among the models of the species: 0 is the normal model.
+    pub slot: u8,
+    /// The first of the 8 files of the model in the archive 8.
+    pub file: usize,
+    /// The name that the tab shows.
+    pub label: String,
 }
 
-/// The name of a model form, as the tab shows it.
-pub fn variant_name(form: u8) -> String {
-    match form {
-        0 => "Normal".to_string(),
-        51 => "Mega Evolution or Primal Reversion".to_string(),
-        52 => "Mega Evolution Y".to_string(),
-        other => format!("Form {other}"),
-    }
+/// The list of the models of the game is the file 0 of the archive 8: for each species (by its number in the Pokédex),
+/// 4 bytes: the place of its first model (u16, the models take 8 files each, after the 3 first files), the number of
+/// models (u8), and flags (u8: 2 the species has a female model, 4 it has forms).
+fn model_list(archive: &Garc, species: usize) -> Option<(usize, usize, u8)> {
+    let bytes = archive.first_file(0)?;
+    let at = species.checked_sub(1)? * 4;
+    let entry = bytes.get(at..at + 4)?;
+    let (first, count, flags) = (u16::from_le_bytes([entry[0], entry[1]]) as usize, entry[2] as usize, entry[3]);
+    (count > 0).then_some((first, count, flags))
+}
+
+/// The models of a species, from the list of the game. The names come from the file of each model: the number after the
+/// name of the species is the form (51 and 52 are the Mega Evolutions and the Primal Reversions).
+pub fn variants(archive: &Garc, species: usize) -> Vec<Variant> {
+    let Some((first, count, flags)) = model_list(archive, species) else { return Vec::new() };
+    (0..count)
+        .map(|slot| {
+            let mut file = (first + slot) * 8 + 3;
+            let name = parts(archive, file).ok().and_then(|p| first_bone_name(p.first()?));
+            // A form that shares the model of the species (the sizes of Pumpkaboo and Gourgeist) has no model of its own.
+            if name.is_none() {
+                file = first * 8 + 3;
+            }
+            let form: Option<u32> = name.and_then(|name| name.split('_').nth(1)?.get(..2)?.parse().ok());
+            let label = match (slot, form) {
+                (0, _) => "Normal".to_string(),
+                (1, _) if flags & 2 != 0 => "Female".to_string(),
+                (_, Some(51)) => "Mega Evolution or Primal Reversion".to_string(),
+                (_, Some(52)) => "Mega Evolution Y".to_string(),
+                (_, Some(number)) if number > 0 => format!("Form {number}"),
+                _ => format!("Form {slot}"),
+            };
+            Variant { slot: slot as u8, file, label }
+        })
+        .collect()
 }
 
 /// What is loaded: the model of a species and a form, and its pictures.
@@ -150,11 +182,14 @@ pub struct ModelTab {
     focus: Option<([f32; 3], f32)>,
     /// True when the last picture took too long: the pictures are then drawn without the smoothing of the edges.
     slow: bool,
+    /// The models of the species that the tab shows, and the species.
+    variants: Vec<Variant>,
+    variants_of: Option<usize>,
 }
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false }
+        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, variants: Vec::new(), variants_of: None }
     }
 }
 
@@ -184,6 +219,7 @@ impl ModelTab {
     /// Opens the archive of a dump.
     pub fn open(&mut self, dump: &Dump) {
         self.archive = Garc::open(&dump.archive(8)).ok();
+        self.variants_of = None;
         self.loaded = None;
         self.picture = None;
         self.thumbnails.clear();
@@ -199,8 +235,8 @@ impl ModelTab {
         self.dirty = true;
         self.loaded = None;
         self.error = None;
-        let Some(&(_, file)) = variants(species).iter().find(|(number, _)| *number == form) else { return };
         let Some(archive) = &self.archive else { return };
+        let Some(file) = variants(archive, species).iter().find(|v| v.slot == form).map(|v| v.file) else { return };
         match read_model(archive, file, self.shiny) {
             Ok((model, textures)) => {
                 let by_name = textures.iter().map(|texture| (texture.name.clone(), texture.clone())).collect();
@@ -225,13 +261,18 @@ impl ModelTab {
 
     /// Draws the tab. `form` is the form of the species that the page shows: the model of that form is shown first.
     pub fn ui(&mut self, ui: &mut egui::Ui, species: usize, form: usize) {
-        let available = variants(species);
+        let Some(archive) = &self.archive else { return };
+        if self.variants_of != Some(species) {
+            self.variants = variants(archive, species);
+            self.variants_of = Some(species);
+        }
+        let available = self.variants.clone();
         if available.is_empty() {
             ui.label(widget::hint("This species has no model in the archive."));
             return;
         }
-        if !available.iter().any(|(number, _)| *number == self.form) {
-            self.form = available.iter().find(|(number, _)| *number as usize == form).or(available.first()).map_or(0, |(number, _)| *number);
+        if !available.iter().any(|v| v.slot == self.form) {
+            self.form = available.iter().find(|v| v.slot as usize == form).or(available.first()).map_or(0, |v| v.slot);
         }
         self.load(species, self.form);
         ui.horizontal_top(|ui| {
@@ -307,16 +348,17 @@ impl ModelTab {
     }
 
     /// The form, the colours, the numbers, and the list of pictures.
-    fn side(&mut self, ui: &mut egui::Ui, species: usize, available: &[(u8, usize)]) {
+    fn side(&mut self, ui: &mut egui::Ui, species: usize, available: &[Variant]) {
         ui.set_width(380.0);
         widget::card(ui, |ui| {
             ui.label(widget::title("Model"));
             ui.horizontal_wrapped(|ui| {
                 ui.label(widget::hint("Form"));
-                egui::ComboBox::from_id_salt("model_form").selected_text(variant_name(self.form)).width(260.0).show_ui(ui, |ui| {
-                    for &(number, _) in available {
-                        if ui.selectable_label(self.form == number, variant_name(number)).clicked() {
-                            self.form = number;
+                let selected = available.iter().find(|v| v.slot == self.form).map_or(String::new(), |v| v.label.clone());
+                egui::ComboBox::from_id_salt("model_form").selected_text(selected).width(260.0).show_ui(ui, |ui| {
+                    for variant in available {
+                        if ui.selectable_label(self.form == variant.slot, &variant.label).clicked() {
+                            self.form = variant.slot;
                         }
                     }
                 });
@@ -336,7 +378,7 @@ impl ModelTab {
             if let Some(loaded) = &self.loaded {
                 let triangles: usize = loaded.model.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
                 ui.label(widget::hint(&format!("{} bones · {} meshes · {triangles} triangles · {} pictures", loaded.model.bones.len(), loaded.model.meshes.len(), loaded.textures.len())));
-                if let Some(file) = available.iter().find(|(number, _)| *number == self.form).map(|(_, file)| *file) {
+                if let Some(file) = available.iter().find(|v| v.slot == self.form).map(|v| v.file) {
                     ui.label(widget::hint(&format!("Files {file} to {} of the archive 8", file + 7)));
                 }
             }
@@ -452,47 +494,38 @@ impl ModelTab {
 mod test {
     use super::*;
 
+    /// With the dump of the game: the models of a species come from the list of the game, and the first bone of each model
+    /// is named after the model (the number of the model is not always the number in the Pokédex: the models of the
+    /// species after the 649th have other numbers).
     #[test]
-    fn the_forms_of_a_species_are_listed() {
-        let venusaur: Vec<u8> = variants(3).iter().map(|(form, _)| *form).collect();
-        assert_eq!(venusaur, [0, 1, 51]);
-        assert_eq!(variants(1), [(0, 3)]);
-        assert!(variants(9999).is_empty());
-        assert_eq!(variant_name(0), "Normal");
-        assert_eq!(variant_name(52), "Mega Evolution Y");
-        assert_eq!(variant_name(2), "Form 2");
-        // The files are 8 apart and in order.
-        assert!(MODELS.windows(2).all(|pair| pair[1].2 == pair[0].2 + 8));
-    }
-
-    /// With the dump of the game: the file of every model has the name that the table says (the first bone is
-    /// named like the model), every model is read, and the tab draws one.
-    #[test]
-    fn the_models_of_the_dump_are_the_ones_of_the_table() {
+    fn the_models_of_the_dump_are_the_ones_of_the_list() {
         let Ok(root) = std::env::var("SANGO_DUMP") else { return };
         let dump = Dump::open(&root).unwrap();
         let archive = Garc::open(&dump.archive(8)).unwrap();
-        let (mut read, mut without_pictures, mut failed, mut misnamed) = (0, 0, Vec::new(), Vec::new());
-        for &(species, form, file) in &MODELS {
-            match read_model(&archive, file as usize, false) {
-                Ok((model, textures)) => {
-                    // The first bone is named after the species (some models add a romaji suffix, and the female
-                    // form of a species keeps the name of the normal form).
-                    if !model.bones.first().is_some_and(|b| b.name.starts_with(&format!("pm{species:04}_"))) {
-                        misnamed.push((species, form, model.bones.first().map(|b| b.name.clone())));
+        let labels = |species: usize| variants(&archive, species).iter().map(|v| v.label.clone()).collect::<Vec<_>>();
+        assert_eq!(variants(&archive, 1).iter().map(|v| (v.slot, v.file)).collect::<Vec<_>>(), [(0, 3)]);
+        assert_eq!(labels(3), ["Normal", "Female", "Mega Evolution or Primal Reversion"]);
+        assert_eq!(labels(6), ["Normal", "Mega Evolution or Primal Reversion", "Mega Evolution Y"]);
+        assert!(variants(&archive, 9999).is_empty());
+        // Yveltal, Hawlucha, Furfrou and Fennekin have their own models (the files are not in the order of the Pokédex).
+        let file = |species: usize| variants(&archive, species)[0].file;
+        assert_eq!((file(717), file(701), file(676), file(653)), (8003, 7827, 7539, 7091));
+        let (mut read, mut without_pictures, mut failed) = (0, 0, Vec::new());
+        for species in 1..=721usize {
+            for variant in variants(&archive, species) {
+                match read_model(&archive, variant.file, false) {
+                    Ok((model, textures)) => {
+                        assert!(!model.meshes.is_empty(), "the file {} has no mesh", variant.file);
+                        without_pictures += textures.is_empty() as usize;
+                        read += 1;
                     }
-                    assert!(!model.meshes.is_empty(), "the file {file} has no mesh");
-                    without_pictures += textures.is_empty() as usize;
-                    read += 1;
+                    Err(message) => failed.push((species, variant.slot, message)),
                 }
-                Err(message) => failed.push((species, form, message)),
             }
         }
         eprintln!("models read: {read}, without pictures: {without_pictures}, failed: {} {:?}", failed.len(), failed.iter().take(5).collect::<Vec<_>>());
-        // Only four files, of the species 735 and 736 (not Pokémon of the game: after the last species), are not models.
-        assert!(failed.iter().all(|(species, _, _)| *species > 721), "{failed:?}");
-        assert!(misnamed.is_empty(), "{misnamed:?}");
-        assert!(read >= 1004);
+        assert!(failed.is_empty(), "{failed:?}");
+        assert!(read >= 1000);
 
         let mut tab = ModelTab::default();
         tab.open(&dump);
@@ -508,8 +541,8 @@ mod test {
         }
         // With the variable SANGO_RENDER_OUT, some models are written as PNG files, to look at them.
         if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
-            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0), ("haunter", 93, 0), ("weezing", 110, 0)] {
-                let Some(&(_, file)) = variants(species).iter().find(|(number, _)| *number == form) else {
+            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 1), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("hawlucha", 701, 0), ("solosis", 577, 0), ("cofagrigus", 563, 0), ("munna", 517, 0), ("vivillon", 666, 0), ("jumpluff", 189, 0), ("ampharos", 181, 0), ("spiritomb", 442, 0), ("torkoal", 324, 0), ("moltres", 146, 0), ("muk", 89, 0), ("ponyta", 77, 0), ("snivy", 495, 0), ("malamar", 687, 0), ("inkay", 686, 0), ("spewpa", 665, 0), ("yveltal", 717, 0), ("furfrou", 676, 0), ("fennekin", 653, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0), ("haunter", 93, 0), ("weezing", 110, 0)] {
+                let Some(file) = variants(&archive, species).iter().find(|v| v.slot == form).map(|v| v.file) else {
                     eprintln!("{name}: no model for the form {form}");
                     continue;
                 };
