@@ -126,10 +126,52 @@ fn worlds(bones: &[Bone], locals: &[Affine]) -> Vec<Affine> {
     done.into_iter().map(|w| w.unwrap_or(Affine::IDENTITY)).collect()
 }
 
+/// The world matrix of every bone in the rest pose of the file.
+pub fn rest_worlds(bones: &[Bone]) -> Vec<Affine> {
+    worlds(bones, &rest_locals(bones))
+}
+
 /// The matrix of each bone in the rest pose of the file.
 fn rest_locals(bones: &[Bone]) -> Vec<Affine> {
     // A bone does not take the scale of its parent (see `posed`): the rest pose follows the same rule.
     bones.iter().map(|b| Affine::with_parent_scale(b.translation, rotation_zyx(b.rotation), b.scale, b.parent.and_then(|p| bones.get(p)).map_or([1.0; 3], |parent| parent.scale))).collect()
+}
+
+/// What a pose gives to one bone: its translation, rotation and scale in the space of its parent bone.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BoneValues {
+    pub translation: [f32; 3],
+    pub rotation: [[f32; 3]; 3],
+    pub scale: [f32; 3],
+}
+
+/// The values that a pose gives to each bone of a model: `None` for a bone that no joint of the motion moves.
+pub fn bone_values(model: &Model, pack: &MotionPack, pose: &Pose) -> Vec<Option<BoneValues>> {
+    let bones = &model.bones;
+    let by_name: HashMap<&str, usize> = pack.joints.iter().enumerate().filter(|(_, j)| !j.name.is_empty()).map(|(i, j)| (j.name.as_str(), i)).collect();
+    let origin = pack.joints.get(1).and_then(|j| bones.iter().find(|b| b.name == j.name)).and_then(|b| b.parent);
+    bones
+        .iter()
+        .enumerate()
+        .map(|(i, bone)| {
+            let joint = if Some(i) == origin { Some(0) } else { by_name.get(bone.name.as_str()).copied() };
+            let joint = joint.filter(|&j| j < pack.joints.len() && j < pose.joints.len())?;
+            let (rest_joint, state) = (&pack.joints[joint], &pose.joints[joint]);
+            let reach = rest_joint.translation.iter().fold(1.0f32, |m, c| m.max(c.abs())) * 100.0;
+            let translation = state.translation.filter(|t| t.iter().all(|c| c.is_finite() && c.abs() <= reach)).unwrap_or(rest_joint.translation);
+            let rotation = match state.rotation {
+                Some(angles) => rotation_zyx(angles),
+                None => {
+                    let own = rotation_quaternion(rest_joint.rotation);
+                    match rest_joint.parent.and_then(|p| pack.joints.get(p)) {
+                        Some(parent) => multiply(transpose(rotation_quaternion(parent.rotation)), own),
+                        None => own,
+                    }
+                }
+            };
+            Some(BoneValues { translation, rotation, scale: state.scale.unwrap_or(bone.scale) })
+        })
+        .collect()
 }
 
 /// The model in a pose of a motion pack. The bones are matched by their names, and the first bone with the first joint.

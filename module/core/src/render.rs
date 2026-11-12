@@ -600,31 +600,6 @@ fn sample_wrapped(texture: &Texture, u: f32, v: f32, kinds: [u8; 2]) -> [u8; 4] 
 
 #[cfg(test)]
 mod test {
-    #[test]
-    fn trace_fire() {
-        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
-        let dump = crate::Dump::open(&root).unwrap();
-        let archive = crate::Garc::open(&dump.archive(8)).unwrap();
-        let get = |file: usize| -> Vec<u8> {
-            let bytes = archive.first_file(file).unwrap();
-            let bytes = if crate::lz::is_compressed(bytes) { crate::lz::decompress(bytes).unwrap() } else { bytes.to_vec() };
-            crate::Bundle::parse(bytes).unwrap().resource(0).unwrap().to_vec()
-        };
-        let model = crate::model::parse_model(&get(59)).unwrap();
-        let textures: HashMap<String, Texture> = crate::model::parse_textures(&get(59 + 2)).unwrap().into_iter().map(|t| (t.name.clone(), t)).collect();
-        for mesh in &model.meshes {
-            let material = &model.materials[mesh.material];
-            if !material.name.starts_with("Fire") { continue; }
-            let pictures: [Option<&Texture>; 3] = std::array::from_fn(|k| textures.get(&material.units[k].texture));
-            eprintln!("TRACE material {} units {:?} state {:?}", material.name, material.units.iter().map(|u| (&u.texture, u.scale, u.translation, u.wrap)).collect::<Vec<_>>(), material.state);
-            for v in mesh.vertices.iter().step_by(40).take(3) {
-                eprintln!("TRACE vertex uv {:?} color {:?}", v.uv, v.color);
-                let out = combine(material, &pictures, v.uv, 1.0, v.color.map(|c| c as f32 / 255.0));
-                eprintln!("TRACE final {:?}", out);
-            }
-            break;
-        }
-    }
 
     use super::*;
     use crate::model::{Material, Mesh, Vertex};

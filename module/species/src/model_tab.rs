@@ -375,6 +375,17 @@ impl ModelTab {
                     self.dirty = true;
                 }
             });
+            if ui.checkbox(&mut self.camera.outline, "Outline").changed() {
+                self.dirty = true;
+            }
+            ui.horizontal(|ui| {
+                if widget::button(ui, "Export…") {
+                    self.export_model();
+                }
+                if widget::button(ui, "Import pictures…") {
+                    self.import_pictures();
+                }
+            });
             if let Some(loaded) = &self.loaded {
                 let triangles: usize = loaded.model.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
                 ui.label(widget::hint(&format!("{} bones · {} meshes · {triangles} triangles · {} pictures", loaded.model.bones.len(), loaded.model.meshes.len(), loaded.textures.len())));
@@ -388,6 +399,68 @@ impl ModelTab {
         self.motions(ui);
         ui.add_space(8.0);
         self.pictures(ui);
+    }
+
+    /// Writes the model as a .glb file and its pictures as PNG files, in a folder that the user chooses.
+    fn export_model(&mut self) {
+        let Some(loaded) = &self.loaded else { return };
+        let Some(folder) = rfd::FileDialog::new().set_title("Folder for the exported model").pick_folder() else { return };
+        let base = format!("pm{:04}_{}", loaded.species, loaded.form);
+        let result = (|| -> Result<usize, String> {
+            let mut clips = Vec::new();
+            for (battle, pack) in [(true, &loaded.battle), (false, &loaded.amie)] {
+                let Some(pack) = pack else { continue };
+                for index in (0..pack.len()).filter(|&i| pack.has(i)) {
+                    let Ok(motion) = pack.motion(index) else { continue };
+                    let frames = (0..motion.frames.max(1)).map(|f| sango_core::posing::bone_values(&loaded.model, pack, &motion.pose(pack.joints.len(), f as f32))).collect();
+                    clips.push(crate::model_export::Clip { name: motion_name(battle, index), frames });
+                }
+            }
+            let file = crate::model_export::glb(&loaded.model, &loaded.by_name, &clips)?;
+            std::fs::write(folder.join(format!("{base}.glb")), file).map_err(|e| e.to_string())?;
+            let pictures = folder.join("textures");
+            std::fs::create_dir_all(&pictures).map_err(|e| format!("{}: {e}", pictures.display()))?;
+            for texture in &loaded.textures {
+                std::fs::write(pictures.join(format!("{}.png", texture.name)), crate::model_export::png(texture)?).map_err(|e| e.to_string())?;
+            }
+            Ok(loaded.textures.len())
+        })();
+        self.status = Some(match result {
+            Ok(count) => (true, format!("Exported {base}.glb and {count} pictures to {}.", folder.display())),
+            Err(message) => (false, message),
+        });
+    }
+
+    /// Reads PNG files that the user chooses (a folder with a PNG file named like each picture to change, or its
+    /// `textures` folder) and shows them on the model. Nothing is written to the game files or the SD card.
+    fn import_pictures(&mut self) {
+        let Some(folder) = rfd::FileDialog::new().set_title("Folder of the changed pictures").pick_folder() else { return };
+        let Some(loaded) = &mut self.loaded else { return };
+        let mut changed = Vec::new();
+        for texture in loaded.textures.iter_mut() {
+            let candidates = [folder.join(format!("{}.png", texture.name)), folder.join("textures").join(format!("{}.png", texture.name))];
+            let Some(path) = candidates.iter().find(|p| p.is_file()) else { continue };
+            match std::fs::read(path).map_err(|e| format!("{}: {e}", path.display())).and_then(|bytes| crate::model_export::texture_from_png(&texture.name, &bytes)) {
+                Ok(picture) => {
+                    *texture = picture;
+                    changed.push(texture.name.clone());
+                }
+                Err(message) => {
+                    self.status = Some((false, message));
+                    return;
+                }
+            }
+        }
+        for texture in &loaded.textures {
+            loaded.by_name.insert(texture.name.clone(), texture.clone());
+        }
+        self.thumbnails.clear();
+        self.dirty = true;
+        self.status = Some(if changed.is_empty() {
+            (false, format!("No PNG file named like a picture of the model in {}.", folder.display()))
+        } else {
+            (true, format!("{} picture(s) replaced in the view (the game files are not changed): {}.", changed.len(), changed.join(", ")))
+        });
     }
 
     /// The motion list and the controls to play it.
@@ -541,13 +614,22 @@ mod test {
         }
         // With the variable SANGO_RENDER_OUT, some models are written as PNG files, to look at them.
         if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
-            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 1), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("hawlucha", 701, 0), ("solosis", 577, 0), ("cofagrigus", 563, 0), ("munna", 517, 0), ("vivillon", 666, 0), ("jumpluff", 189, 0), ("ampharos", 181, 0), ("spiritomb", 442, 0), ("torkoal", 324, 0), ("moltres", 146, 0), ("muk", 89, 0), ("ponyta", 77, 0), ("snivy", 495, 0), ("malamar", 687, 0), ("inkay", 686, 0), ("spewpa", 665, 0), ("yveltal", 717, 0), ("furfrou", 676, 0), ("fennekin", 653, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0), ("haunter", 93, 0), ("weezing", 110, 0)] {
+            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 1), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("hawlucha", 701, 0), ("sandshrew", 27, 0), ("sandslash", 28, 0), ("solosis", 577, 0), ("cofagrigus", 563, 0), ("munna", 517, 0), ("vivillon", 666, 0), ("jumpluff", 189, 0), ("ampharos", 181, 0), ("spiritomb", 442, 0), ("torkoal", 324, 0), ("moltres", 146, 0), ("muk", 89, 0), ("ponyta", 77, 0), ("snivy", 495, 0), ("malamar", 687, 0), ("inkay", 686, 0), ("spewpa", 665, 0), ("yveltal", 717, 0), ("furfrou", 676, 0), ("fennekin", 653, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0), ("haunter", 93, 0), ("weezing", 110, 0)] {
                 let Some(file) = variants(&archive, species).iter().find(|v| v.slot == form).map(|v| v.file) else {
                     eprintln!("{name}: no model for the form {form}");
                     continue;
                 };
                 let (model, textures) = read_model(&archive, file, false).unwrap();
                 let by_name: HashMap<String, Texture> = textures.into_iter().map(|t| (t.name.clone(), t)).collect();
+                std::fs::write(format!("{out}/{name}.glb"), crate::model_export::glb(&model, &by_name, &[]).unwrap()).unwrap();
+                if let Some(pack) = read_motions(&archive, file + BATTLE_MOTION_OFFSET) {
+                    if let Some(index) = (0..pack.len()).find(|&i| pack.has(i)) {
+                        let motion = pack.motion(index).unwrap();
+                        let frames = (0..motion.frames.max(1)).map(|f| sango_core::posing::bone_values(&model, &pack, &motion.pose(pack.joints.len(), f as f32))).collect();
+                        let clip = crate::model_export::Clip { name: "idle".into(), frames };
+                        std::fs::write(format!("{out}/{name}_anim.glb"), crate::model_export::glb(&model, &by_name, &[clip]).unwrap()).unwrap();
+                    }
+                }
                 let image = render(&model, &by_name, &Camera::default(), 400, 400);
                 image::save_buffer(format!("{out}/{name}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
                 let front = render(&model, &by_name, &Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0, outline: true }, 800, 800);
