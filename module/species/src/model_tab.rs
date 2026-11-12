@@ -8,7 +8,7 @@ use crate::model_files::MODELS;
 use sango_core::model::{parse_model, parse_textures, Model, Texture};
 use sango_core::motion::{Motion, MotionPack};
 use sango_core::posing::posed;
-use sango_core::render::{bounds_of, render, render_framed, Camera};
+use sango_core::render::{bounds_of, render, render_framed_at, Camera};
 use sango_core::{lz, Bundle, Dump, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -148,11 +148,13 @@ pub struct ModelTab {
     last_tick: Option<std::time::Instant>,
     /// The sphere that the picture shows, from all the poses of the motion: the view does not move while the motion plays.
     focus: Option<([f32; 3], f32)>,
+    /// True when the last picture took too long: the pictures are then drawn without the smoothing of the edges.
+    slow: bool,
 }
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None }
+        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false }
     }
 }
 
@@ -205,6 +207,7 @@ impl ModelTab {
                 let (battle, amie) = (read_motions(archive, file + BATTLE_MOTION_OFFSET), read_motions(archive, file + AMIE_MOTION_OFFSET));
                 // The model starts in its idle motion (the first of the battle file, else the first of Pokémon-Amie),
                 // and the motion goes on without end.
+                self.slow = false;
                 self.playing = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
                     let pack = pack.as_ref()?;
                     let index = (0..pack.len()).find(|&i| pack.has(i))?;
@@ -274,7 +277,13 @@ impl ModelTab {
                 let pixels = match (&self.playing, pack) {
                     (Some(playing), Some(pack)) => {
                         let moved = posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), self.frame));
-                        render_framed(&moved, &loaded.by_name, &self.camera, self.focus.unwrap_or_else(|| sango_core::render::bounds(&moved)), VIEW_SIZE, VIEW_SIZE)
+                        let start = std::time::Instant::now();
+                        let frame = self.focus.unwrap_or_else(|| sango_core::render::bounds(&moved));
+                        let pixels = render_framed_at(&moved, &loaded.by_name, &self.camera, frame, VIEW_SIZE, VIEW_SIZE, if self.slow { 1 } else { 2 });
+                        // A picture that takes more than 90 ms (the gas of Gastly and Koffing) is drawn without smoothing.
+                        let took = start.elapsed();
+                        self.slow = self.slow || took.as_millis() > 90;
+                        pixels
                     }
                     _ => render(&loaded.model, &loaded.by_name, &self.camera, VIEW_SIZE, VIEW_SIZE),
                 };
@@ -499,7 +508,7 @@ mod test {
         }
         // With the variable SANGO_RENDER_OUT, some models are written as PNG files, to look at them.
         if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
-            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0)] {
+            for (name, species, form) in [("pikachu", 25usize, 0u8), ("mewtwo", 150, 0), ("charizard", 6, 0), ("mega_charizard_x", 6, 51), ("gyarados", 130, 0), ("lugia", 249, 0), ("bulbasaur", 1, 0), ("charmander", 4, 0), ("squirtle", 7, 0), ("eevee", 133, 0), ("jigglypuff", 39, 0), ("gengar", 94, 0), ("snorlax", 143, 0), ("lucario", 448, 0), ("sylveon", 700, 0), ("greninja", 658, 0), ("gardevoir", 282, 0), ("nidorina", 30, 0), ("machop", 66, 0), ("tangela", 114, 0), ("turtwig", 387, 0), ("glameow", 431, 0), ("charmander2", 4, 0), ("ponyta", 77, 0), ("gastly", 92, 0), ("grimer", 88, 0), ("koffing", 109, 0), ("charmeleon", 5, 0), ("caterpie", 10, 0), ("weedle", 13, 0), ("kakuna", 14, 0), ("beedrill", 15, 0), ("raichu", 26, 0), ("wigglytuff", 40, 0), ("diglett", 50, 0), ("primeape", 57, 0), ("onix", 95, 0), ("pinsir", 127, 0), ("weedle2", 13, 0), ("pikachu2", 25, 0), ("eevee2", 133, 0), ("haunter", 93, 0), ("weezing", 110, 0)] {
                 let Some(&(_, file)) = variants(species).iter().find(|(number, _)| *number == form) else {
                     eprintln!("{name}: no model for the form {form}");
                     continue;
@@ -508,7 +517,7 @@ mod test {
                 let by_name: HashMap<String, Texture> = textures.into_iter().map(|t| (t.name.clone(), t)).collect();
                 let image = render(&model, &by_name, &Camera::default(), 400, 400);
                 image::save_buffer(format!("{out}/{name}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
-                let front = render(&model, &by_name, &Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0 }, 800, 800);
+                let front = render(&model, &by_name, &Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0, outline: true }, 800, 800);
                 image::save_buffer(format!("{out}/front_{name}.png"), &front, 800, 800, image::ColorType::Rgba8).unwrap();
                 for texture in by_name.values() {
                     image::save_buffer(format!("{out}/tex_{name}_{}.png", texture.name), &texture.rgba, texture.width as u32, texture.height as u32, image::ColorType::Rgba8).unwrap();
@@ -519,7 +528,7 @@ mod test {
                     let Some(pack) = read_motions(&archive, file + if battle { BATTLE_MOTION_OFFSET } else { AMIE_MOTION_OFFSET }) else { continue };
                     let Ok(motion) = pack.motion(index) else { continue };
                     let moved = posed(&model, &pack, &motion.pose(pack.joints.len(), motion.frames as f32 * fraction));
-                    let image = render(&moved, &by_name, &Camera { yaw: std::f32::consts::PI + 0.5, pitch: 0.1, zoom: 1.0 }, 400, 400);
+                    let image = render(&moved, &by_name, &Camera { yaw: std::f32::consts::PI + 0.5, pitch: 0.1, zoom: 1.0, outline: true }, 400, 400);
                     image::save_buffer(format!("{out}/pose_{name}_{label}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
                 }
             }

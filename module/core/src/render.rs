@@ -16,11 +16,13 @@ pub struct Camera {
     pub pitch: f32,
     /// 1 shows the whole model. More shows it bigger.
     pub zoom: f32,
+    /// True to draw a dark line around the model and where a part of the model passes in front of another one.
+    pub outline: bool,
 }
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera { yaw: std::f32::consts::PI + 0.55, pitch: 0.15, zoom: 1.0 }
+        Camera { yaw: std::f32::consts::PI + 0.55, pitch: 0.15, zoom: 1.0, outline: true }
     }
 }
 
@@ -63,7 +65,15 @@ pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camer
 
 /// The same, with the sphere that the picture shows given (`bounds`): a model that moves keeps the same place and size.
 pub fn render_framed(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize) -> Vec<u8> {
-    let big = draw(model, textures, camera, frame, width * 2, height * 2);
+    render_framed_at(model, textures, camera, frame, width, height, 2)
+}
+
+/// The same, drawn `factor` times bigger before the pixels take the mean: 2 smooths the edges, 1 is four times faster.
+pub fn render_framed_at(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize, factor: usize) -> Vec<u8> {
+    if factor <= 1 {
+        return draw(model, textures, camera, frame, width, height, OUTLINE_PIXELS as usize);
+    }
+    let big = draw(model, textures, camera, frame, width * 2, height * 2, OUTLINE_PIXELS as usize * 2);
     let mut pixels = vec![0u8; width * height * 4];
     for y in 0..height {
         for x in 0..width {
@@ -92,7 +102,11 @@ pub fn render_framed(model: &Model, textures: &HashMap<String, Texture>, camera:
 }
 
 /// The drawing itself, one ray of light, no smoothing.
-fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize) -> Vec<u8> {
+/// The width of the outline in the final picture, in pixels. The picture that is drawn bigger has a wider outline, so the
+/// width does not change with the smoothing.
+const OUTLINE_PIXELS: f32 = 3.0;
+
+fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize, outline_width: usize) -> Vec<u8> {
     let mut pixels = vec![0u8; width * height * 4];
     let mut depth = vec![f32::MAX; width * height];
     let (centre, radius) = frame;
@@ -123,6 +137,11 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
             continue;
         }
         let texture = material.and_then(|material| textures.get(&material.texture));
+        // The three pictures of the material, found once for the whole mesh.
+        let pictures: [Option<&Texture>; 3] = match material {
+            Some(material) => std::array::from_fn(|k| textures.get(&material.units[k].texture)),
+            None => [None; 3],
+        };
         // The iris: the eye that lies under it. The iris is not seen on the skin around the eye.
         let eye_under = match material {
             Some(material) if material.transparent => eye_under(model, textures, mesh),
@@ -164,7 +183,7 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                     let light = 0.45 + 0.55 * (-normal[2] / length).abs();
                     if mixed {
                         let Some(material) = material else { continue };
-                        let mut color = combine(material, textures, [uv(0), uv(1)], light);
+                        let mut color = combine(material, &pictures, [uv(0), uv(1)], light);
                         if let Some((eye_material, eye_texture, opening)) = &eye_under {
                             // The mesh of an iris is bigger than the opening of the eye: the picture of the iris is
                             // kept only where the picture of the eye is not the colour of the skin.
@@ -227,8 +246,66 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
             }
         }
     }
+    // The line around the model: after the opaque meshes, before the flames and the gas.
+    if pass == 0 && camera.outline {
+        outline(&mut pixels, &depth, width, height, radius, outline_width);
+    }
     }
     pixels
+}
+
+/// A dark line of `thickness` pixels around the shape of the model and where a part of the model is in front of another one
+/// (the outline that the game draws). `depth` holds the depth of each pixel that an opaque mesh covers.
+fn outline(pixels: &mut [u8], depth: &[f32], width: usize, height: usize, radius: f32, thickness: usize) {
+    let jump = radius * 0.05;
+    let covered: Vec<bool> = depth.iter().map(|&d| d < f32::MAX).collect();
+    let mut dark = vec![false; width * height];
+    // Inside the shape, behind a part that is much nearer: the line is drawn in the pixel that is farther, as wide as the
+    // outline of the shape.
+    for y in 0..height {
+        for x in 0..width {
+            let at = y * width + x;
+            if !covered[at] {
+                continue;
+            }
+            'near: for step in 1..=thickness {
+                for (dx, dy) in [(step as isize, 0isize), (0, step as isize), (-(step as isize), 0), (0, -(step as isize))] {
+                    let (nx, ny) = (x as isize + dx, y as isize + dy);
+                    if nx < 0 || ny < 0 || nx >= width as isize || ny >= height as isize {
+                        continue;
+                    }
+                    let other = ny as usize * width + nx as usize;
+                    if covered[other] && depth[other] + jump < depth[at] {
+                        dark[at] = true;
+                        break 'near;
+                    }
+                }
+            }
+        }
+    }
+    // Around the shape: the empty pixels that are at most `thickness` pixels from the shape (a round line).
+    let mut reached = covered.clone();
+    for _ in 0..thickness {
+        let before = reached.clone();
+        for y in 0..height {
+            for x in 0..width {
+                let at = y * width + x;
+                if before[at] {
+                    continue;
+                }
+                let near = (x > 0 && before[at - 1]) || (x + 1 < width && before[at + 1]) || (y > 0 && before[at - width]) || (y + 1 < height && before[at + width]);
+                if near {
+                    reached[at] = true;
+                    dark[at] = true;
+                }
+            }
+        }
+    }
+    for (at, &mark) in dark.iter().enumerate() {
+        if mark {
+            pixels[at * 4..at * 4 + 4].copy_from_slice(&[20, 14, 24, 255]);
+        }
+    }
 }
 
 /// True for a material that the game draws with several steps and the opacity of its pictures: the iris of the eyes,
@@ -240,12 +317,12 @@ fn is_mixed(material: &crate::model::Material) -> bool {
 
 /// The colour and the opacity of a pixel (from 0 to 1) that a material gives at a texture position, with the steps of
 /// the mix that the file gives. `light` is the light of the surface, from 0 to 1.
-fn combine(material: &crate::model::Material, textures: &HashMap<String, Texture>, uv: [f32; 2], light: f32) -> [f32; 4] {
+fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], uv: [f32; 2], light: f32) -> [f32; 4] {
     use crate::model::Stage;
     // The three pictures, at this place. A unit with no picture gives white.
     let mut pictures = [[1.0f32; 4]; 3];
-    for (unit, picture) in material.units.iter().zip(pictures.iter_mut()) {
-        if let Some(texture) = textures.get(&unit.texture) {
+    for ((unit, picture), texture) in material.units.iter().zip(pictures.iter_mut()).zip(textures) {
+        if let Some(texture) = texture {
             let (u, v) = (unit.scale[0] * (uv[0] - unit.translation[0]), unit.scale[1] * (uv[1] - unit.translation[1]));
             *picture = sample_wrapped(texture, u, v, unit.wrap).map(|c| c as f32 / 255.0);
         }
@@ -316,6 +393,11 @@ fn combine(material: &crate::model::Material, textures: &HashMap<String, Texture
             9 => (x + y).min(1.0) * z,
             _ => x,
         };
+        // A step that sets the opacity from its own colour only (mode 0, source 14) gives full opacity: for the materials that
+        // the light does not touch (flames, gas) the opacity that the steps before computed is kept.
+        if material.unlit && stage.alpha_mode == 0 && stage.alpha_source[0] == 14 && stage.alpha_operand[0] == 0 {
+            alpha = previous[3];
+        }
         let (rgb_scale, alpha_scale) = ((1 << stage.color_scale) as f32, (1 << stage.alpha_scale) as f32);
         rgb = rgb.map(|v| (v * rgb_scale).min(1.0));
         alpha = (alpha * alpha_scale).min(1.0);
@@ -364,7 +446,7 @@ fn uv_box(mesh: &crate::model::Mesh) -> [f32; 4] {
 
 /// The material, the picture and the opening of the eye that an iris mesh lies on. The eye is the mesh that is not
 /// transparent and that covers all the texture positions of the iris. `None` when there is no such mesh.
-fn eye_under<'a>(model: &'a Model, textures: &'a HashMap<String, Texture>, iris: &crate::model::Mesh) -> Option<(&'a crate::model::Material, &'a Texture, Vec<bool>)> {
+fn eye_under<'a>(model: &'a Model, textures: &'a HashMap<String, Texture>, iris: &crate::model::Mesh) -> Option<(&'a crate::model::Material, &'a Texture, std::rc::Rc<Vec<bool>>)> {
     if iris.vertices.is_empty() {
         return None;
     }
@@ -381,7 +463,27 @@ fn eye_under<'a>(model: &'a Model, textures: &'a HashMap<String, Texture>, iris:
             (!mesh.vertices.is_empty() && b[0] <= area[0] + margin && b[1] >= area[1] - margin && b[2] <= area[2] + margin && b[3] >= area[3] - margin).then_some(((b[1] - b[0]) * (b[3] - b[2]), material, texture))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, material, texture)| (material, texture, opening(texture)))
+        .map(|(_, material, texture)| (material, texture, cached_opening(texture)))
+}
+
+thread_local! {
+    /// The openings that were found, by picture: the search reads the whole picture, and the drawing is made many times.
+    static OPENINGS: std::cell::RefCell<HashMap<(usize, usize, usize, u64), std::rc::Rc<Vec<bool>>>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// `opening`, but found only once for each picture.
+fn cached_opening(texture: &Texture) -> std::rc::Rc<Vec<bool>> {
+    // A few bytes of the picture tell two pictures apart when a new one takes the place of an old one in memory.
+    let step = (texture.rgba.len() / 64).max(1);
+    let checksum = texture.rgba.iter().step_by(step).fold(1469598103934665603u64, |hash, &byte| (hash ^ byte as u64).wrapping_mul(1099511628211));
+    let key = (texture.rgba.as_ptr() as usize, texture.width, texture.height, checksum);
+    OPENINGS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() > 64 {
+            cache.clear();
+        }
+        cache.entry(key).or_insert_with(|| std::rc::Rc::new(opening(texture))).clone()
+    })
 }
 
 /// The places of the picture of an eye that are not skin. The picture of an eye is the skin around the eyes with the eyes
@@ -435,7 +537,7 @@ mod test {
     #[test]
     fn a_triangle_is_drawn_with_its_picture_and_the_rest_is_transparent() {
         let (model, textures) = triangle();
-        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0 }, 64, 64);
+        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, outline: false }, 64, 64);
         assert_eq!(image.len(), 64 * 64 * 4);
         let centre = &image[(32 * 64 + 32) * 4..][..4];
         assert!(centre[0] > 200 && centre[1] == 0 && centre[3] == 255, "{centre:?}");
@@ -455,7 +557,7 @@ mod test {
             vertex.position[2] = -0.5;
         }
         model.meshes.push(front);
-        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0 }, 64, 64);
+        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, outline: false }, 64, 64);
         let centre = &image[(32 * 64 + 32) * 4..][..4];
         assert_eq!(centre[0], centre[1], "the grey triangle is in front: {centre:?}");
     }
@@ -480,7 +582,7 @@ mod test {
             assert!(model.meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > 100);
             if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
                 for (side, yaw) in [("front", 0.0f32), ("side", 1.57), ("back", 3.14), ("three_quarters", 0.6)] {
-                    let image = render(&model, &textures, &Camera { yaw, pitch: 0.15, zoom: 1.0 }, 400, 400);
+                    let image = render(&model, &textures, &Camera { yaw, pitch: 0.15, zoom: 1.0, outline: false }, 400, 400);
                     image::save_buffer(format!("{out}/{name}_{side}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
                 }
             }
