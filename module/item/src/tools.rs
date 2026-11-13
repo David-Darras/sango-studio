@@ -240,7 +240,7 @@ impl Item {
         }
     }
 
-    /// The card of the picture of the item in the General tab: the picture, and the buttons to export or import it.
+    /// The card of the icon of the item in the General tab: the picture, and the buttons to export or import it.
     pub fn icon_card(&mut self, ui: &mut egui::Ui, session: &Session) {
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -251,12 +251,12 @@ impl Item {
                     ui.painter().image(texture.id(), rect.shrink(3.0), full, egui::Color32::WHITE);
                 }
                 ui.vertical(|ui| {
-                    ui.label(widget::title("Picture"));
+                    ui.label(widget::title("Icon"));
                     let own = crate::icons::ItemIcons::has_own(self.item);
                     if own {
                         ui.label(widget::hint("30 × 30 pixels, in the Bag and the shops."));
                     } else {
-                        ui.label(widget::hint("This item has no picture of its own."));
+                        ui.label(widget::hint("This item has no icon of its own."));
                     }
                     ui.add_space(6.0);
                     ui.horizontal(|ui| {
@@ -269,7 +269,7 @@ impl Item {
                             }
                         });
                         ui.add_enabled_ui(own && session.sd.is_some(), |ui| {
-                            if widget::button(ui, "Reset picture") {
+                            if widget::button(ui, "Reset icon") {
                                 self.run_reset(session, Scope::Item, &[Part::Icons]);
                             }
                         });
@@ -279,20 +279,20 @@ impl Item {
         });
     }
 
-    /// Writes the picture of the item as a PNG file that the user chooses.
+    /// Writes the icon of the item as a PNG file that the user chooses.
     fn export_icon(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).set_file_name(format!("item_{}.png", self.item)).save_file() else { return };
         self.status = Some(match self.icons.export(self.item, &path) {
-            Ok(()) => (true, format!("Exported the picture to {}.", path.display())),
+            Ok(()) => (true, format!("Exported the icon to {}.", path.display())),
             Err(message) => (false, message),
         });
     }
 
-    /// Reads a PNG file of 30 × 30 pixels that the user chooses as the picture of the item. Save writes it.
+    /// Reads a PNG file of 30 × 30 pixels that the user chooses as the icon of the item. Save writes it.
     fn import_icon(&mut self) {
         let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() else { return };
         self.status = Some(match self.icons.import(self.item, &path) {
-            Ok(()) => (true, "Picture imported. Save writes it on the SD card.".to_string()),
+            Ok(()) => (true, "Icon imported. Save writes it on the SD card.".to_string()),
             Err(message) => (false, message),
         });
     }

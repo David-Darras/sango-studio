@@ -20,10 +20,16 @@ use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
 /// The tabs of the page.
-const TABS: [&str; 3] = ["General", "Text", "Reactions"];
+const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
+
+/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
+const CSV_TAB: usize = 3;
 
 /// The place of the tab "Reactions" in [`TABS`]: only a new item has reactions.
-const REACTIONS_TAB: usize = 2;
+const REACTIONS_TAB: usize = 1;
+
+/// The place of the Text tab.
+const TEXT_TAB: usize = 2;
 
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
@@ -181,7 +187,7 @@ impl Item {
             Ok(id) => {
                 self.item = id;
                 self.loaded = None;
-                self.status = Some((true, format!("The new item {id} starts like the item that was open. Change its name in the Text tab, and its picture in the General tab.")));
+                self.status = Some((true, format!("The new item {id} starts like the item that was open. Change its name in the Text tab, and its icon in the General tab.")));
                 let _ = session;
             }
             Err(message) => self.status = Some((false, message)),
@@ -296,14 +302,12 @@ impl Item {
                 let mut chosen = self.item;
                 sango_ui::item_menu::item_menu(ui, "item_menu", &mut chosen, 260.0, &rows, &mut |ctx, n| icons.texture(ctx, n), false);
                 self.item = chosen.clamp(1, self.last_item());
-                if self.garc.is_some() && !self.is_custom() {
-                    ui.label(widget::hint(&format!("archive {}, file {}", data::ARCHIVE, self.item)));
-                } else if self.is_custom() {
+                if self.is_custom() {
                     ui.label(widget::hint("new item"));
                 }
                 let has_card = session.sd.is_some() && self.garc.is_some();
                 ui.add_enabled_ui(has_card, |ui| {
-                    add = widget::button(ui, "+ New item");
+                    add = widget::button_styled(ui, egui::RichText::new("+ New item").color(color::WHITE), Some(color::ACCENT));
                 })
                 .response
                 .on_hover_text("Adds an item that starts like this one (the same data). Then you change it like the other items.");
@@ -352,12 +356,12 @@ impl Item {
             self.loaded = None;
         }
         if reset_tab {
-            let part = if self.tab == 1 { tools::Part::Texts } else { tools::Part::Data };
+            let part = if self.tab == TEXT_TAB { tools::Part::Texts } else { tools::Part::Data };
             self.run_reset(session, tools::Scope::Item, &[part]);
         }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [self.tab == 0, self.tab == 1, false];
+            self.tools.parts = [self.tab == 0, self.tab == TEXT_TAB, false];
         }
         if undo {
             self.undo(session);
@@ -710,8 +714,6 @@ impl Item {
         egui::ScrollArea::vertical().id_salt("item_general").auto_shrink([false, false]).show(ui, |ui| {
             self.icon_card(ui, session);
             ui.add_space(10.0);
-            self.csv_card(ui, session);
-            ui.add_space(10.0);
             let columns = (((ui.available_width() + 10.0) / (COLUMN_WIDTH + 10.0)).floor() as usize).clamp(1, 2);
             let layout: Vec<Vec<Group>> = if columns == 2 {
                 vec![vec![Group::Shop, Group::Use, Group::Friendship], vec![Group::Held, Group::Effects, Group::Evs]]
@@ -877,6 +879,9 @@ impl Module for Item {
         }
         match self.tab {
             0 => self.general_tab(ui, session),
+            CSV_TAB => {
+                egui::ScrollArea::vertical().id_salt("item_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
+            }
             REACTIONS_TAB => {
                 let item = self.item;
                 match self.store.find_mut(item) {

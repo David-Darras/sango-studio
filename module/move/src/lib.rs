@@ -20,10 +20,16 @@ use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
 /// The tabs of the page.
-const TABS: [&str; 3] = ["General", "Text", "Reactions"];
+const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
+
+/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
+const CSV_TAB: usize = 3;
 
 /// The place of the tab "Reactions" in [`TABS`]: only a new move has reactions.
-const REACTIONS_TAB: usize = 2;
+const REACTIONS_TAB: usize = 1;
+
+/// The place of the Text tab.
+const TEXT_TAB: usize = 2;
 
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
@@ -262,14 +268,12 @@ impl Move {
                 let mut chosen = self.id;
                 picker::move_menu(ui, "move_menu", &mut chosen, 280.0, &rows);
                 self.id = chosen.clamp(1, self.last_move());
-                if self.bundle.is_some() && !self.is_custom() {
-                    ui.label(widget::hint(&format!("archive {}, move {}", data::ARCHIVE, self.id)));
-                } else if self.is_custom() {
+                if self.is_custom() {
                     ui.label(widget::hint("new move"));
                 }
                 let has_card = session.sd.is_some() && self.bundle.is_some();
                 ui.add_enabled_ui(has_card, |ui| {
-                    add = widget::button(ui, "+ New move");
+                    add = widget::button_styled(ui, egui::RichText::new("+ New move").color(color::WHITE), Some(color::ACCENT));
                 })
                 .response
                 .on_hover_text("Adds a move that starts like this one (the same data). Then you change it like the other moves.");
@@ -318,12 +322,12 @@ impl Move {
             self.loaded = None;
         }
         if reset_tab {
-            let part = if self.tab == 1 { tools::Part::Texts } else { tools::Part::Data };
+            let part = if self.tab == TEXT_TAB { tools::Part::Texts } else { tools::Part::Data };
             self.run_reset(session, tools::Scope::Move, &[part]);
         }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [self.tab == 0, self.tab == 1];
+            self.tools.parts = [self.tab == 0, self.tab == TEXT_TAB];
         }
         if undo {
             self.undo(session);
@@ -613,11 +617,9 @@ impl Move {
     }
 
     /// The General tab.
-    fn general_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
+    fn general_tab(&mut self, ui: &mut egui::Ui) {
         let Some(mut data) = self.data.take() else { return };
         egui::ScrollArea::vertical().id_salt("move_general").auto_shrink([false, false]).show(ui, |ui| {
-            self.csv_card(ui, session);
-            ui.add_space(10.0);
             let columns = (((ui.available_width() + 10.0) / (COLUMN_WIDTH + 10.0)).floor() as usize).clamp(1, 2);
             let layout: Vec<Vec<Group>> = if columns == 2 { vec![vec![Group::Basics, Group::Damage, Group::Target], vec![Group::Status, Group::Stats, Group::Properties]] } else { vec![Group::ALL.to_vec()] };
             ui.horizontal_top(|ui| {
@@ -727,7 +729,10 @@ impl Module for Move {
             return;
         }
         match self.tab {
-            0 => self.general_tab(ui, session),
+            0 => self.general_tab(ui),
+            CSV_TAB => {
+                egui::ScrollArea::vertical().id_salt("move_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
+            }
             REACTIONS_TAB => {
                 let id = self.id;
                 match self.store.find_mut(id) {

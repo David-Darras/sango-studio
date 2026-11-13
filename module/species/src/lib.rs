@@ -98,7 +98,7 @@ pub fn leveling_rates(session: &Session) -> Result<Vec<Option<u8>>, String> {
 }
 
 /// The tabs of the page. Only the first one works for now.
-const TABS: [&str; 6] = ["General", "Learnset", "Evolution", "Text", "Icon", "Model"];
+const TABS: [&str; 6] = ["General", "Model", "Learnset", "Evolution", "Text", "CSV"];
 
 /// The data and the shape of all the species of the romfs, form 0: the source of the examples in the help.
 fn build_index(garc: &Garc, pokedex: &PokedexData) -> examples::Index {
@@ -187,7 +187,7 @@ pub struct Species {
     evolution: evolution::EvolutionTab,
     /// The state of the Text tab.
     text: text_tab::TextTab,
-    /// The state of the Icon tab.
+    /// The state of the icon card of the General tab.
     icon_tab: icon_tab::IconTab,
     /// The state of the Model tab.
     model_tab: model_tab::ModelTab,
@@ -755,11 +755,6 @@ impl Species {
                             self.form = (self.form as isize + step).clamp(0, forms as isize - 1) as usize;
                         }
                     });
-                }
-                if let Some(garc) = &self.garc {
-                    let id = file_index(garc, self.species, self.form);
-                    ui.label(widget::hint(&format!("archive {ARCHIVE}, file {id}")))
-                        .on_hover_text("The place of the file of this species and form in the archive of the species data.");
                 }
                 let has_card = session.sd.is_some() && self.garc.is_some();
                 let tab_part = data_tools::tab_part(self.tab);
@@ -2332,24 +2327,26 @@ impl Module for Species {
         }
         match (self.tab, self.data.as_mut()) {
             (0, Some(_)) => {
-                // The data leaves the page while the tab is drawn: the CSV card can read the files again.
+                // The data leaves the page while the tab is drawn: the icon card can read the files again.
                 if let Some(mut data) = self.data.take() {
                     let mut shape = self.shape;
-                    general_tab(ui, &mut data, &mut shape, |ui| self.csv_card(ui, session));
+                    general_tab(ui, &mut data, &mut shape, |ui| self.icon_tab.ui(ui, session, self.species, self.form));
                     if self.loaded.is_some() {
                         self.data = Some(data);
                         self.shape = shape;
                     }
                 }
             }
-            (1, Some(data)) => self.learnset.ui(ui, data),
-            (4, Some(_)) => self.icon_tab.ui(ui, session, self.species, self.form),
-            (5, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
-            (3, Some(_)) => {
+            (2, Some(data)) => self.learnset.ui(ui, data),
+            (1, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
+            (5, Some(_)) => {
+                egui::ScrollArea::vertical().id_salt("species_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
+            }
+            (4, Some(_)) => {
                 let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                 self.text.ui(ui, session, self.species, self.form, place);
             }
-            (2, Some(_)) => self.evolution.ui(ui),
+            (3, Some(_)) => self.evolution.ui(ui),
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));

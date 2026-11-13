@@ -734,9 +734,9 @@ impl Module for LevelingRate {
         if self.table.is_none() {
             return;
         }
-        self.rate_tabs(ui);
-        ui.add_space(8.0);
         let (reset, save, export, import) = self.tool_bar(ui, session.sd.is_some());
+        ui.add_space(8.0);
+        self.rate_tabs(ui);
         if reset {
             self.reset();
         }

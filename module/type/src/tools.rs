@@ -43,8 +43,8 @@ impl Part {
 
     fn hint(self) -> &'static str {
         match self {
-            Part::Chart => "Chart tab: the effect of each type against each type.",
-            Part::Types => "Types tab: the new types and the icons.",
+            Part::Chart => "General tab: the effect of each type against each type.",
+            Part::Types => "Icons tab: the new types and the icons.",
             Part::Names => "Text tab: the names of the types of the game, in every language.",
         }
     }
@@ -207,7 +207,7 @@ impl Type {
         }
     }
 
-    /// The card of the CSV files in the Chart tab.
+    /// The card of the CSV files in the General tab.
     pub fn csv_card(&mut self, ui: &mut egui::Ui, session: &Session) {
         widget::card(ui, |ui| {
             ui.label(widget::title("CSV files"));

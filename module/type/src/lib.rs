@@ -22,7 +22,10 @@ use std::path::PathBuf;
 use types::TypeList;
 
 /// The tabs of the page.
-const TABS: [&str; 3] = ["Chart", "Types", "Text"];
+const TABS: [&str; 4] = ["General", "Icons", "Text", "CSV"];
+
+/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the types.
+const CSV_TAB: usize = 3;
 
 /// The size of a cell of the chart, and of the headers.
 const CELL_W: f32 = 30.0;
@@ -128,7 +131,7 @@ impl Type {
         match self.list.add("New type", colour) {
             Some(id) => {
                 self.chart.clear_type(id);
-                self.status = Some((true, format!("The type {id} was added. Change its name here and in the Text tab, its picture with \"Import PNG…\", its effects in the Chart tab, then Save.")));
+                self.status = Some((true, format!("The type {id} was added. Change its name in the Text tab, its icon in the Icons tab, its effects in the General tab, then Save.")));
             }
             None => self.status = Some((false, "The list of the new types is full.".into())),
         }
@@ -183,9 +186,15 @@ impl Type {
         let mut reset_tab = false;
         let mut reset_more = false;
         let mut undo = false;
+        let mut add = false;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let has_card = session.sd.is_some();
+                ui.add_enabled_ui(has_card && self.list.custom.len() < MAX_CUSTOM, |ui| {
+                    add = widget::button_styled(ui, egui::RichText::new("+ New type").color(color::WHITE), Some(color::ACCENT));
+                })
+                .response
+                .on_hover_text("Adds a type with the effects ×1 against every type. Then you change it like the other types.");
                 ui.add_enabled_ui(has_card, |ui| {
                     reset_tab = widget::button(ui, "Reset tab");
                 })
@@ -217,6 +226,9 @@ impl Type {
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
             }
         });
+        if add {
+            self.add_type();
+        }
         if reset_tab {
             self.run_reset(session, &[tools::tab_part(self.tab)]);
         }
@@ -242,11 +254,9 @@ impl Type {
         }
     }
 
-    /// The Chart tab: the CSV card, then the grid of the types.
-    fn chart_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
+    /// The General tab: the grid of the types.
+    fn chart_tab(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::both().id_salt("type_chart_scroll").auto_shrink([false, false]).show(ui, |ui| {
-            self.csv_card(ui, session);
-            ui.add_space(10.0);
             let ids = self.list.ids();
             let n = ids.len();
             let names: Vec<String> = ids.iter().map(|&id| self.type_name(id)).collect();
@@ -356,19 +366,18 @@ impl Type {
         });
     }
 
-    /// The Types tab: the icon, the number and the name of each type, the colour of the new types, and the buttons.
+    /// The Icons tab: the icon, the number and the name of each type, the colour of the new types, and the buttons.
     fn types_tab(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().id_salt("type_types_scroll").auto_shrink([false, false]).show(ui, |ui| {
             widget::card(ui, |ui| {
                 ui.set_min_width(760.0);
-                ui.label(widget::title("Types"));
+                ui.label(widget::title("Icons"));
                 ui.label(widget::hint(&format!("The game has the types 0 to 17. A new type has a number from {FIRST_CUSTOM} to {} ({MAX_CUSTOM} at most). The icon is a PNG of {} × {} pixels; without one, a new type shows a pill with its name.", chart::MAX_TYPES - 1, icons::WIDTH, icons::HEIGHT)));
                 ui.label(widget::hint("The names of the types of the game are in the Text tab."));
                 ui.add_space(8.0);
                 let ids = self.list.ids();
                 let mut remove = None;
                 let mut import = None;
-                let mut add = false;
                 let mut export = None;
                 let mut reset = None;
                 for id in ids {
@@ -413,21 +422,8 @@ impl Type {
                     ui.add_space(2.0);
                 }
                 ui.add_space(10.0);
-                let room = self.list.custom.len() < MAX_CUSTOM;
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(room, |ui| {
-                        if widget::button_styled(ui, egui::RichText::new("+ Add a type").color(color::WHITE), Some(color::ACCENT)) {
-                            add = true;
-                        }
-                    });
-                    if !room {
-                        ui.label(widget::hint("The list is full."));
-                    } else {
-                        ui.label(widget::hint("The new type has ×1 against every type: change the chart in the Chart tab, its name here and in the Text tab, its picture with \"Import PNG…\"."));
-                    }
-                });
-                if add {
-                    self.add_type();
+                if self.list.custom.len() >= MAX_CUSTOM {
+                    ui.label(widget::hint("The list of the new types is full."));
                 }
                 if let Some(id) = remove {
                     self.list.remove(id);
@@ -514,8 +510,11 @@ impl Module for Type {
         }
         ui.add_space(6.0);
         match self.tab {
-            0 => self.chart_tab(ui, session),
+            0 => self.chart_tab(ui),
             1 => self.types_tab(ui),
+            CSV_TAB => {
+                egui::ScrollArea::vertical().id_salt("type_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
+            }
             _ => {
                 let sd: Option<&SdCard> = session.sd.as_ref();
                 let shown: Vec<(String, u8)> = (0..chart::MAX_TYPES).map(|id| (self.type_name(id), self.colour_of(id))).collect();

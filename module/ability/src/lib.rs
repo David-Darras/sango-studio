@@ -22,10 +22,13 @@ use std::path::PathBuf;
 pub const COUNT: usize = 191;
 
 /// The tabs of the page.
-const TABS: [&str; 3] = ["General", "Text", "Reactions"];
+const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
+
+/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
+const CSV_TAB: usize = 3;
 
 /// The place of the tab "Reactions" in [`TABS`]: only a new ability has reactions.
-const REACTIONS_TAB: usize = 2;
+const REACTIONS_TAB: usize = 1;
 
 /// The names of the three ability slots of a species.
 const SLOTS: [&str; 3] = ["Ability 1", "Ability 2", "Hidden ability"];
@@ -184,7 +187,7 @@ impl Ability {
                 self.id = chosen.clamp(1, self.last_ability());
                 let has_card = session.sd.is_some();
                 ui.add_enabled_ui(has_card, |ui| {
-                    add = widget::button(ui, "+ New ability");
+                    add = widget::button_styled(ui, egui::RichText::new("+ New ability").color(color::WHITE), Some(color::ACCENT));
                 })
                 .response
                 .on_hover_text("Adds an ability. Then you change its name in the Text tab and its reactions in the Reactions tab.");
@@ -243,7 +246,7 @@ impl Ability {
         }
     }
 
-    /// The General tab: the name and the description, what an ability is, who has it, and the CSV card.
+    /// The General tab: the name and the description, what an ability is and who has it.
     fn general_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
         let sd = session.sd.as_ref();
         let (name, description) = match self.store.find(self.id) {
@@ -265,8 +268,6 @@ impl Ability {
             });
             ui.add_space(10.0);
             self.users_card(ui, session);
-            ui.add_space(10.0);
-            self.csv_card(ui, session);
             ui.add_space(10.0);
         });
     }
@@ -364,6 +365,9 @@ impl Module for Ability {
         ui.add_space(6.0);
         match self.tab {
             0 => self.general_tab(ui, session),
+            CSV_TAB => {
+                egui::ScrollArea::vertical().id_salt("ability_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
+            }
             REACTIONS_TAB => {
                 let id = self.id;
                 match self.store.find_mut(id) {

@@ -58,7 +58,7 @@ impl Part {
             Part::Moves => "Learnset tab: level-up moves and egg moves.",
             Part::Evolutions => "Evolution tab.",
             Part::Texts => "Text tab: name, category, entry, form name, height and weight, in every language.",
-            Part::Icons => "Icon tab: the pictures of the species in the lists.",
+            Part::Icons => "The icon card of the General tab: the pictures of the species in the lists.",
         }
     }
 
@@ -86,10 +86,9 @@ impl Part {
 pub fn tab_part(tab: usize) -> Option<Part> {
     match tab {
         0 => Some(Part::Data),
-        1 => Some(Part::Moves),
-        2 => Some(Part::Evolutions),
-        3 => Some(Part::Texts),
-        4 => Some(Part::Icons),
+        2 => Some(Part::Moves),
+        3 => Some(Part::Evolutions),
+        4 => Some(Part::Texts),
         _ => None,
     }
 }

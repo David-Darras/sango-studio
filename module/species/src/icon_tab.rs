@@ -1,4 +1,4 @@
-//! The Icon tab: the small picture of a species or a form that the game shows in the boxes and the lists.
+//! The icon card of the General tab: the small picture of a species or a form that the game shows in the boxes and the lists.
 //!
 //! The icons are the files of the archive 91: images of 40 × 30 pixels, with at most 256 colours of 15 bits and
 //! one bit of transparency, compressed with LZ11. The file of a species, of a form and of a female is given by
@@ -46,7 +46,7 @@ pub fn sd_path(file: usize) -> String {
     format!("pokemon/icon/{file}.bin")
 }
 
-/// The state of the Icon tab.
+/// The state of the icon card.
 #[derive(Default)]
 pub struct IconTab {
     garc: Option<Garc>,
@@ -158,75 +158,84 @@ impl IconTab {
             self.shown = bytes.clone().map(|bytes| (file, bytes));
         }
         widget::card(ui, |ui| {
-            ui.set_width(520.0);
-            if has_female_icon(species) {
-                ui.horizontal(|ui| {
-                    ui.label(widget::hint("Icon of the"));
-                    if ui.selectable_label(!self.female, "Males").clicked() {
-                        self.female = false;
-                    }
-                    if ui.selectable_label(self.female, "Females").clicked() {
-                        self.female = true;
-                    }
-                });
-                ui.add_space(6.0);
-            }
             ui.horizontal(|ui| {
-                self.picture(ui);
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(96.0, 96.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, egui::Rounding::same(10.0), color::SURFACE_STRONG);
+                if let Some(texture) = &self.texture {
+                    let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    let image = egui::Rect::from_center_size(rect.center(), egui::vec2(WIDTH as f32 * 2.0, HEIGHT as f32 * 2.0));
+                    ui.painter().image(texture.id(), image, full, egui::Color32::WHITE);
+                }
                 ui.vertical(|ui| {
-                    ui.label(egui::RichText::new(format!("File {file} of the archive {ICON_ARCHIVE}")).strong());
-                    ui.label(widget::hint(&format!("{WIDTH} × {HEIGHT} pixels")));
-                    if let Some(count) = bytes.as_deref().and_then(|b| lz::decompress(b).ok()).and_then(|b| Clim::parse(&b).ok()).and_then(|image| image.palette_size()) {
-                        ui.label(widget::hint(&format!("{count} colours")));
-                    }
-                    if self.pending.contains_key(&file) {
-                        widget::badge(ui, "Not saved", color::AMBER);
-                    } else if self.from_card.contains(&file) {
-                        widget::badge(ui, "From the SD card", color::TEAL);
-                    }
-                    ui.add_space(8.0);
-                    if widget::button_styled(ui, egui::RichText::new("Import an image").color(color::WHITE), Some(color::ACCENT)) {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() {
-                            self.status = Some(match self.import(&path, file) {
-                                Ok(()) => (true, "The icon is changed. Save to write it on the SD card.".to_string()),
-                                Err(message) => (false, message),
-                            });
+                    ui.horizontal(|ui| {
+                        ui.label(widget::title("Icon"));
+                        if self.pending.contains_key(&file) {
+                            widget::badge(ui, "Not saved", color::AMBER);
+                        } else if self.from_card.contains(&file) {
+                            widget::badge(ui, "From the SD card", color::TEAL);
                         }
+                    });
+                    ui.label(widget::hint(&format!("{WIDTH} × {HEIGHT} pixels, in the party and the boxes. Some forms share their icon: a change shows for all of them.")));
+                    if has_female_icon(species) {
+                        ui.horizontal(|ui| {
+                            ui.label(widget::hint("Icon of the"));
+                            if ui.selectable_label(!self.female, "Males").clicked() {
+                                self.female = false;
+                            }
+                            if ui.selectable_label(self.female, "Females").clicked() {
+                                self.female = true;
+                            }
+                        });
                     }
-                    if widget::button(ui, "Export as PNG") {
-                        self.status = Some(self.export(file, bytes.as_deref()));
-                    }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if widget::button(ui, "Export PNG…") {
+                            self.status = Some(self.export(file, bytes.as_deref()));
+                        }
+                        if widget::button(ui, "Import PNG…") {
+                            if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() {
+                                self.status = Some(match self.import(&path, file) {
+                                    Ok(()) => (true, "The icon is changed. Save to write it on the SD card.".to_string()),
+                                    Err(message) => (false, message),
+                                });
+                            }
+                        }
+                        let has_change = self.pending.contains_key(&file) || self.from_card.contains(&file);
+                        ui.add_enabled_ui(has_change, |ui| {
+                            if widget::button(ui, "Reset icon") {
+                                self.status = Some(self.reset(file, sd));
+                            }
+                        })
+                        .response
+                        .on_hover_text("Puts the icon of the game back: the change and the file of the SD card are removed.");
+                    });
                 });
             });
             if let Some((ok, message)) = &self.status {
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
             }
-            ui.add_space(8.0);
-            ui.label(widget::hint("Some forms share their icon file: a change shows for all of them. The icon of the eggs and the flipped icons are not listed here."));
         });
     }
 
-    /// The icon, four times its size, on a checkerboard that shows the transparent pixels.
-    fn picture(&self, ui: &mut egui::Ui) {
-        let scale = 5.0;
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(WIDTH as f32 * scale, HEIGHT as f32 * scale), egui::Sense::hover());
-        let painter = ui.painter();
-        painter.rect_filled(rect, egui::Rounding::same(8.0), color::SURFACE);
-        let cell = 10.0;
-        for row in 0..(rect.height() / cell) as usize {
-            for column in 0..(rect.width() / cell) as usize {
-                if (row + column) % 2 == 0 {
-                    let square = egui::Rect::from_min_size(rect.min + egui::vec2(column as f32 * cell, row as f32 * cell), egui::vec2(cell, cell));
-                    painter.rect_filled(square, egui::Rounding::ZERO, color::SURFACE_STRONG);
+    /// Puts the icon of the game back: forgets the change and removes the file of the SD card.
+    fn reset(&mut self, file: usize, sd: Option<&SdCard>) -> (bool, String) {
+        self.pending.remove(&file);
+        self.from_card.remove(&file);
+        self.shown = None;
+        if let Some(sd) = sd {
+            let path = sd_path(file);
+            match sd.remove(&path) {
+                Ok(true) => {
+                    if let Err(message) = sd.mark_changed(&path) {
+                        return (false, message);
+                    }
                 }
+                Ok(false) => {}
+                Err(message) => return (false, message),
             }
         }
-        if let Some(texture) = &self.texture {
-            let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            painter.image(texture.id(), rect, full, egui::Color32::WHITE);
-        }
-        painter.rect_stroke(rect, egui::Rounding::same(8.0), egui::Stroke::new(1.0_f32, color::BORDER));
+        (true, "The icon of the game is back.".to_string())
     }
 
     /// Writes the icon as a PNG file that the user chooses.
