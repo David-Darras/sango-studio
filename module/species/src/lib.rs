@@ -56,6 +56,32 @@ pub fn open_species(ctx: &egui::Context, species: usize) {
     widget::open_page(ctx, "Species");
 }
 
+/// The abilities of a species or of a form.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SpeciesAbilities {
+    pub species: usize,
+    pub form: usize,
+    /// Ability 1, ability 2 and the hidden ability (0 is none).
+    pub abilities: [u8; 3],
+}
+
+/// The abilities of every species and form: the SD card first, then the romfs.
+pub fn species_abilities(session: &Session) -> Result<Vec<SpeciesAbilities>, String> {
+    let dump = session.dump.as_ref().ok_or("The dump is not open.")?;
+    let garc = Garc::open(&dump.archive(ARCHIVE))?;
+    let mut all = Vec::new();
+    for species in 1..=SPECIES_COUNT {
+        for form in 0..csv::form_count(&garc, species) {
+            let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, form))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+            let data = on_card.or_else(|| garc.first_file(file_index(&garc, species, form)).and_then(|b| SpeciesData::from_bytes(b).ok()));
+            if let Some(data) = data {
+                all.push(SpeciesAbilities { species, form, abilities: [data.ability_1, data.ability_2, data.ability_hidden] });
+            }
+        }
+    }
+    Ok(all)
+}
+
 /// The Leveling rate of each species, from the species 1 on (form 0).
 ///
 /// The SD card comes first, then the romfs. A species whose file cannot be read gives `None`.

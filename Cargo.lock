@@ -2346,6 +2346,9 @@ dependencies = [
 name = "sango-ability"
 version = "0.1.0"
 dependencies = [
+ "rfd",
+ "sango-core",
+ "sango-species",
  "sango-ui",
 ]
 
