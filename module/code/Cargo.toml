@@ -1,0 +1,11 @@
+[package]
+name = "sango-code"
+version.workspace = true
+edition.workspace = true
+description = "The code editor of Sango Studio: write a function, compile it, keep it on the SD card."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true
+egui_code_editor = "=0.2.10"

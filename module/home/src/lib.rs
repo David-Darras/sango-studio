@@ -1,7 +1,8 @@
-//! The start page: the user gives the two folders that Sango Studio needs.
+//! The start page: the user gives the folders that Sango Studio needs.
 //!
 //! 1. The dump of the romfs of the game. Sango Studio only reads it.
 //! 2. The folder of the SD card. Sango Studio puts here the files that it changed.
+//! 3. The folder of devkitPro and 4. the folder of the Sango plugin: the code editor needs them to compile a function.
 
 use sango_core::SD_FOLDER_NAME;
 use sango_ui::theme::color;
@@ -30,6 +31,8 @@ struct Field {
 pub struct Home {
     dump: Field,
     sd: Field,
+    devkitpro: Field,
+    plugin: Field,
     /// True once the fields took the folders of the session.
     filled: bool,
 }
@@ -95,6 +98,15 @@ impl Module for Home {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
+        egui::ScrollArea::vertical().id_salt("home_scroll").auto_shrink([false, false]).show(ui, |ui| {
+            self.content(ui, session);
+        });
+    }
+}
+
+impl Home {
+    /// The cards of the page.
+    fn content(&mut self, ui: &mut egui::Ui, session: &mut Session) {
         if !self.filled {
             self.filled = true;
             if let Some(dump) = &session.dump {
@@ -103,10 +115,16 @@ impl Module for Home {
             if let Some(sd) = &session.sd {
                 self.sd.text = sd.root().to_string_lossy().to_string();
             }
+            if let Some(devkitpro) = &session.devkitpro {
+                self.devkitpro.text = devkitpro.to_string_lossy().to_string();
+            }
+            if let Some(plugin) = &session.plugin {
+                self.plugin.text = plugin.to_string_lossy().to_string();
+            }
         }
         ui.add_space(8.0);
         ui.heading(sango_core::NAME);
-        ui.label(widget::hint(&format!("For {}, version {}. Give the two folders below.", sango_core::GAME, sango_core::GAME_VERSION)));
+        ui.label(widget::hint(&format!("For {}, version {}. The first two folders are needed by the editors; the last two are for the code editor.", sango_core::GAME, sango_core::GAME_VERSION)));
         ui.add_space(16.0);
 
         let dump_path = session.dump.as_ref().map(|d| d.root().to_string_lossy().to_string());
@@ -138,6 +156,38 @@ impl Module for Home {
         );
         if apply {
             self.sd.error = session.set_sd(&self.sd.text).err();
+        }
+
+        ui.add_space(12.0);
+        let devkitpro_path = session.devkitpro.as_ref().map(|p| p.to_string_lossy().to_string());
+        let devkitpro_error = self.devkitpro.error.clone();
+        let apply = folder_card(
+            ui,
+            "devkitPro (optional)",
+            "The folder of devkitPro, with devkitARM inside: the code editor uses its compiler (arm-none-eabi-g++) to compile a function.",
+            "C:/devkitPro",
+            "Folder of devkitPro",
+            &mut self.devkitpro,
+            state_of(&devkitpro_error, &devkitpro_path),
+        );
+        if apply {
+            self.devkitpro.error = session.set_devkitpro(&self.devkitpro.text).err();
+        }
+
+        ui.add_space(12.0);
+        let plugin_path = session.plugin.as_ref().map(|p| p.to_string_lossy().to_string());
+        let plugin_error = self.plugin.error.clone();
+        let apply = folder_card(
+            ui,
+            "Sango plugin (optional)",
+            "The folder of the Sango plugin, the one with the Makefile: the code editor completes the names of lib/include and compiles with its headers.",
+            "C:/.../sango_plugin",
+            "Folder of the Sango plugin",
+            &mut self.plugin,
+            state_of(&plugin_error, &plugin_path),
+        );
+        if apply {
+            self.plugin.error = session.set_plugin(&self.plugin.text).err();
         }
     }
 }

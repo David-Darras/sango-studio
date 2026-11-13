@@ -21,6 +21,7 @@ sango-item = { path = "module/item" }
 sango-move = { path = "module/move" }
 sango-ability = { path = "module/ability" }
 sango-type = { path = "module/type" }
+sango-code = { path = "module/code" }
 
 [profile.dev]
 opt-level = 2

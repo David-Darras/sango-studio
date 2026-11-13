@@ -49,8 +49,17 @@ pub struct Session {
     pub dump: Option<Dump>,
     /// The folder of the SD card. Sango Studio puts here the files that it changed.
     pub sd: Option<SdCard>,
+    /// The folder of devkitPro, which has the compiler of the code editor.
+    pub devkitpro: Option<std::path::PathBuf>,
+    /// The folder of the Sango plugin: the headers of the code editor are in `lib/include`.
+    pub plugin: Option<std::path::PathBuf>,
     /// True when the arrow keys belong to the page. False when they change the page of the side bar.
     pub focus_page: bool,
+}
+
+/// The compiler of devkitARM in a folder of devkitPro (the program has `.exe` on Windows).
+pub fn compiler_in(devkitpro: &std::path::Path) -> Option<std::path::PathBuf> {
+    ["arm-none-eabi-g++.exe", "arm-none-eabi-g++"].iter().map(|name| devkitpro.join("devkitARM").join("bin").join(name)).find(|path| path.is_file())
 }
 
 impl Session {
@@ -60,6 +69,8 @@ impl Session {
         Session {
             dump: settings.dump.and_then(|path| Dump::open(&path).ok()),
             sd: settings.sd.and_then(|path| SdCard::open(&path).ok()),
+            devkitpro: settings.devkitpro.map(std::path::PathBuf::from).filter(|path| compiler_in(path).is_some()),
+            plugin: settings.plugin.map(std::path::PathBuf::from).filter(|path| path.join("lib").join("include").is_dir()),
             focus_page: false,
         }
     }
@@ -80,6 +91,34 @@ impl Session {
         Ok(())
     }
 
+    /// Takes a folder as devkitPro, and keeps it for the next run. The folder is the one of devkitPro (with `devkitARM`
+    /// inside) or the folder `devkitARM` itself.
+    pub fn set_devkitpro(&mut self, path: &str) -> Result<(), String> {
+        let given = std::path::PathBuf::from(path.trim().trim_matches('"'));
+        let root = if given.join("bin").join("arm-none-eabi-g++.exe").is_file() || given.join("bin").join("arm-none-eabi-g++").is_file() {
+            given.parent().map(|p| p.to_path_buf()).unwrap_or(given.clone())
+        } else {
+            given.clone()
+        };
+        if compiler_in(&root).is_none() {
+            return Err("This folder has no devkitARM/bin/arm-none-eabi-g++. Give the folder of devkitPro (for example C:/devkitPro).".into());
+        }
+        self.devkitpro = Some(root);
+        self.save();
+        Ok(())
+    }
+
+    /// Takes a folder as the Sango plugin, and keeps it for the next run.
+    pub fn set_plugin(&mut self, path: &str) -> Result<(), String> {
+        let folder = std::path::PathBuf::from(path.trim().trim_matches('"'));
+        if !folder.join("lib").join("include").is_dir() {
+            return Err("This folder has no lib/include. Give the folder of the Sango plugin (the one with the Makefile).".into());
+        }
+        self.plugin = Some(folder);
+        self.save();
+        Ok(())
+    }
+
     /// Says what is missing before the editors can work: the two folders are needed.
     pub fn missing(&self) -> Option<&'static str> {
         match (&self.dump, &self.sd) {
@@ -94,6 +133,8 @@ impl Session {
         setting::write(&setting::Settings {
             dump: self.dump.as_ref().map(|d| d.root().to_string_lossy().to_string()),
             sd: self.sd.as_ref().map(|s| s.root().to_string_lossy().to_string()),
+            devkitpro: self.devkitpro.as_ref().map(|p| p.to_string_lossy().to_string()),
+            plugin: self.plugin.as_ref().map(|p| p.to_string_lossy().to_string()),
         });
     }
 }

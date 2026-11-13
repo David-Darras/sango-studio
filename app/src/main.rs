@@ -29,6 +29,7 @@ impl App {
             Box::new(sango_move::Move::default()),
             Box::new(sango_ability::Ability::default()),
             Box::new(sango_type::Type::default()),
+            Box::new(sango_code::Code::default()),
         ];
         // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
         let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).unwrap_or(0);

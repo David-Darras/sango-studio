@@ -13,6 +13,7 @@ sango-archive.workspace = true
 sango-species.workspace = true
 sango-leveling-rate.workspace = true
 sango-item.workspace = true
+sango-code.workspace = true
 sango-move.workspace = true
 sango-ability.workspace = true
 sango-type.workspace = true

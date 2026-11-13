@@ -7,6 +7,10 @@ pub struct Settings {
     pub dump: Option<String>,
     /// The folder of the SD card.
     pub sd: Option<String>,
+    /// The folder of devkitPro (the compiler of the code editor).
+    pub devkitpro: Option<String>,
+    /// The folder of the Sango plugin (its headers).
+    pub plugin: Option<String>,
 }
 
 fn base() -> Option<PathBuf> {
@@ -40,6 +44,8 @@ pub fn parse(text: &str) -> Settings {
         match key.trim() {
             "dump" => settings.dump = Some(value.to_string()),
             "sd" => settings.sd = Some(value.to_string()),
+            "devkitpro" => settings.devkitpro = Some(value.to_string()),
+            "plugin" => settings.plugin = Some(value.to_string()),
             _ => {}
         }
     }
@@ -55,6 +61,12 @@ pub fn format(settings: &Settings) -> String {
     if let Some(sd) = &settings.sd {
         text.push_str(&format!("sd={sd}\n"));
     }
+    if let Some(devkitpro) = &settings.devkitpro {
+        text.push_str(&format!("devkitpro={devkitpro}\n"));
+    }
+    if let Some(plugin) = &settings.plugin {
+        text.push_str(&format!("plugin={plugin}\n"));
+    }
     text
 }
 
@@ -69,7 +81,7 @@ pub fn read() -> Settings {
         .find_map(|path| std::fs::read_to_string(path).ok())
         .and_then(|text| text.lines().next().map(|line| line.trim().to_string()))
         .filter(|line| !line.is_empty());
-    Settings { dump, sd: None }
+    Settings { dump, ..Settings::default() }
 }
 
 /// Keeps the settings for the next run. A failure is not an error: Sango Studio works without it.
@@ -88,7 +100,7 @@ mod test {
 
     #[test]
     fn the_settings_are_read_back() {
-        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()) };
+        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), devkitpro: Some("C:/devkitPro".into()), plugin: Some("C:/work/sango_plugin".into()) };
         assert_eq!(parse(&format(&settings)), settings);
     }
 

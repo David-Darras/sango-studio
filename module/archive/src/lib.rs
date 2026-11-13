@@ -590,7 +590,7 @@ mod test {
         let mut page = Archive::default();
         let ctx = egui::Context::default();
         let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0)));
-        let mut frame = |page: &mut Archive, session: &mut Session, events: Vec<egui::Event>| {
+        let frame = |page: &mut Archive, session: &mut Session, events: Vec<egui::Event>| {
             let _ = ctx.run(egui::RawInput { screen_rect: screen, events, ..Default::default() }, |ctx| {
                 // The application chooses the active widget of the page before it draws the page.
                 egui::CentralPanel::default().show(ctx, |ui| {
