@@ -60,6 +60,9 @@ impl Custom {
 
     /// Makes an ability with the texts of the boxes. Gives an error text when it is not possible.
     fn add(&mut self) -> Result<(), String> {
+        if self.list.len() >= rules::MAX_ABILITIES {
+            return Err(format!("The plugin keeps {} new abilities at most: delete one first.", rules::MAX_ABILITIES));
+        }
         let used: Vec<u8> = self.list.iter().map(|a| a.id).collect();
         let id = CustomAbility::free_id(&used).ok_or("All the ids from 192 to 255 are used.")?;
         if self.new_name.trim().is_empty() {

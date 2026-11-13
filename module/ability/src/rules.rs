@@ -34,6 +34,8 @@ pub const LAST_ID: u8 = 255;
 pub const MAGIC: &[u8; 4] = b"SABR";
 /// The version of the layout of the file.
 pub const VERSION: u8 = 1;
+/// The most new abilities: the plugin keeps this number of abilities of the studio at the same time.
+pub const MAX_ABILITIES: usize = 32;
 /// The most rules in one ability, the most conditions in one rule and the most actions in one rule.
 pub const MAX_RULES: usize = 8;
 pub const MAX_CONDITIONS: usize = 6;

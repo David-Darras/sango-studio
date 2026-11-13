@@ -58,7 +58,9 @@ pub struct SpeciesData {
     /// The alternate forms are one after the other: with the value 1000, the form 1 is in the file 1000,
     /// the form 2 is in the file 1001, and so on. The form 0 is the file of the species.
     pub alternate_form_file: u16,
-    pub unused_3: u16,
+    /// The number of the first model of the alternate forms. 0 when the species has none. The plugin keeps it next to the
+    /// number of the first alternate form, so a species file of the SD card does not change it.
+    pub alternate_form_model: u16,
     /// The number of total forms.
     pub total_form_count: u8,
     /// The Pokédex color.
