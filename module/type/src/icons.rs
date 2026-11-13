@@ -33,6 +33,8 @@ pub struct TypeIcons {
     /// The icons that were reset and whose file must go.
     removed: HashSet<usize>,
     textures: HashMap<usize, Option<egui::TextureHandle>>,
+    /// The textures that were forgotten: they live on a few frames, because the frame may still draw them.
+    retired: sango_ui::retired::Retired,
 }
 
 impl TypeIcons {
@@ -41,7 +43,7 @@ impl TypeIcons {
         self.overrides.clear();
         self.pending.clear();
         self.removed.clear();
-        self.textures.clear();
+        self.retired.forget_all(&mut self.textures);
         let Some(sd) = sd else { return };
         for path in sd.files_in(SD_FOLDER) {
             let id = path.rsplit('/').next().and_then(|name| name.strip_suffix(".bclim")).and_then(|n| n.parse::<usize>().ok());
@@ -78,6 +80,7 @@ impl TypeIcons {
 
     /// The texture of the icon of a type, when it has one.
     pub fn texture(&mut self, ctx: &egui::Context, id: usize) -> Option<egui::TextureHandle> {
+        self.retired.tick(ctx);
         if let Some(found) = self.textures.get(&id) {
             return found.clone();
         }
@@ -88,15 +91,12 @@ impl TypeIcons {
 
     /// Gives a type an icon: a PNG file of 50 × 20 pixels. The change is kept until it is saved.
     pub fn import(&mut self, id: usize, path: &std::path::Path) -> Result<(), String> {
-        let image = image::open(path).map_err(|error| format!("{}: {error}", path.display()))?.to_rgba8();
-        if image.width() as usize != WIDTH || image.height() as usize != HEIGHT {
-            return Err(format!("The icon must have {WIDTH} × {HEIGHT} pixels. This image has {} × {}.", image.width(), image.height()));
-        }
-        let clim = Clim::from_rgba4(WIDTH, HEIGHT, image.as_raw())?;
+        let pixels = read_png(path)?;
+        let clim = Clim::from_rgba4(WIDTH, HEIGHT, &pixels)?;
         self.overrides.insert(id, clim.to_bytes());
         self.pending.insert(id);
         self.removed.remove(&id);
-        self.textures.remove(&id);
+        self.retired.forget(&mut self.textures, &id);
         Ok(())
     }
 
@@ -111,7 +111,7 @@ impl TypeIcons {
         if self.overrides.remove(&id).is_some() {
             self.pending.remove(&id);
             self.removed.insert(id);
-            self.textures.remove(&id);
+            self.retired.forget(&mut self.textures, &id);
         }
     }
 
@@ -195,6 +195,15 @@ impl TypeIcons {
             ui.painter().add(egui::epaint::TextShape::new(at, galley, egui::Color32::WHITE).with_angle(-std::f32::consts::FRAC_PI_2));
         }
     }
+}
+
+/// The RGBA pixels of a PNG file of an icon. The picture must have the size of an icon.
+fn read_png(path: &std::path::Path) -> Result<Vec<u8>, String> {
+    let image = image::open(path).map_err(|error| format!("{}: {error}", path.display()))?.to_rgba8();
+    if image.width() as usize != WIDTH || image.height() as usize != HEIGHT {
+        return Err(format!("The icon must have {WIDTH} × {HEIGHT} pixels. This image has {} × {}.", image.width(), image.height()));
+    }
+    Ok(image.into_raw())
 }
 
 /// The RGBA pixels of an icon file.

@@ -16,6 +16,7 @@ mod learnset;
 mod learnset_csv;
 mod machines;
 pub mod battle_icons;
+pub mod custom_moves;
 mod model_export;
 mod model_tab;
 mod move_names;
@@ -1587,25 +1588,54 @@ fn color_menu(ui: &mut egui::Ui, id: &str, value: &mut u8) {
     }
 }
 
-/// A menu of the types: the button and the list show the icons of the game. Without the icons it is a menu of names.
+/// The numbers that a menu of types lists: the 18 types of the game, then the new types of the user.
+fn type_entries(with_custom: bool) -> Vec<u8> {
+    let custom = if with_custom { battle_icons::custom_type_ids() } else { Vec::new() };
+    (0..names::TYPE.len() as u8).chain(custom).collect()
+}
+
+/// Draws the icon of a type at a place: the picture, or the name of a new type that has no picture.
+fn paint_type_or_name(ui: &egui::Ui, kind: u8, left_center: egui::Pos2) {
+    if battle_icons::paint_type(ui.painter(), kind, left_center).is_some() {
+        return;
+    }
+    if let Some(name) = battle_icons::custom_type_name(kind) {
+        let rect = egui::Rect::from_min_size(egui::pos2(left_center.x, left_center.y - battle_icons::ICON_SIZE.y / 2.0), battle_icons::ICON_SIZE);
+        ui.painter().rect_filled(rect, 6.0, color::MUTED.gamma_multiply(0.6));
+        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, name, egui::FontId::proportional(11.0), color::WHITE);
+    }
+}
+
+/// A menu of the types: the button and the list show the icons of the game. Without the icons it is a menu of names. The new
+/// types of the user (see [`battle_icons::refresh_custom_types`]) come after the types of the game.
 pub fn type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>) {
+    type_menu_of(ui, id, value, first, true);
+}
+
+/// The same menu with the 18 types of the game only: for a choice that must be a type of the game.
+pub fn game_type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8) {
+    type_menu_of(ui, id, value, None, false);
+}
+
+fn type_menu_of(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>, with_custom: bool) {
     if battle_icons::type_texture(ui.ctx(), 0).is_none() {
         return menu(ui, id, value, &names::TYPE, 130.0);
     }
+    let entries = type_entries(with_custom);
     let combo = egui::ComboBox::from_id_salt(id).selected_text("").width(battle_icons::ICON_SIZE.x + 12.0).show_ui(ui, |ui| {
         let size = battle_icons::ICON_SIZE;
-        for row in 0..names::TYPE.len().div_ceil(3) {
+        for row in entries.chunks(3) {
             ui.horizontal(|ui| {
-                for place in row * 3..(row * 3 + 3).min(names::TYPE.len()) {
+                for &place in row {
                     let (rect, response) = ui.allocate_exact_size(size + egui::vec2(6.0, 4.0), egui::Sense::click());
-                    if *value == place as u8 {
+                    if *value == place {
                         widget::glow(ui, rect, 5.0);
                     } else if response.hovered() {
                         ui.painter().rect_filled(rect, 4.0, color::MUTED.gamma_multiply(0.25));
                     }
-                    battle_icons::paint_type(ui.painter(), place as u8, rect.left_center() + egui::vec2(3.0, 0.0));
+                    paint_type_or_name(ui, place, rect.left_center() + egui::vec2(3.0, 0.0));
                     if response.clicked() {
-                        *value = place as u8;
+                        *value = place;
                         ui.close_menu();
                     }
                 }
@@ -1615,7 +1645,7 @@ pub fn type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>)
     let rect = combo.response.rect;
     // The second type that is the same as the first one is not shown (as the lists do).
     if first != Some(*value) {
-        battle_icons::paint_type(ui.painter(), *value, egui::pos2(rect.left() + 6.0, rect.center().y));
+        paint_type_or_name(ui, *value, egui::pos2(rect.left() + 6.0, rect.center().y));
     }
     let menu_id = combo.response.id;
     widget::register_focusable(ui, menu_id, rect);
@@ -1634,7 +1664,8 @@ pub fn type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>)
                 step -= 1;
             }
             if step != 0 {
-                *value = (*value as isize + step).clamp(0, names::TYPE.len() as isize - 1) as u8;
+                let at = entries.iter().position(|e| e == value).unwrap_or(0) as isize;
+                *value = entries[(at + step).clamp(0, entries.len() as isize - 1) as usize];
             }
         });
     }
@@ -2234,6 +2265,11 @@ impl Module for Species {
         }
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ITEM_LIST_ID), self.item_list.clone()));
         ability_names(ui.ctx(), session.sd.as_ref());
+        custom_moves::refresh(session.sd.as_ref());
+        if let Ok(mut list) = self.item_list.lock() {
+            list.refresh_custom(session.sd.as_ref());
+        }
+        battle_icons::refresh_custom_types(session.sd.as_ref());
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);

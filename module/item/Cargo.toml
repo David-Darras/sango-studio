@@ -10,3 +10,4 @@ sango-species.workspace = true
 rfd.workspace = true
 sango-ui.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
+sango-rules.workspace = true

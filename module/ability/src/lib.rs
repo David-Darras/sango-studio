@@ -22,10 +22,10 @@ use std::path::PathBuf;
 pub const COUNT: usize = 191;
 
 /// The tabs of the page.
-const TABS: [&str; 3] = ["General", "Text", "New abilities"];
+const TABS: [&str; 3] = ["General", "Text", "Reactions"];
 
-/// The place of the tab "New abilities" in [`TABS`].
-const NEW_ABILITIES_TAB: usize = 2;
+/// The place of the tab "Reactions" in [`TABS`]: only a new ability has reactions.
+const REACTIONS_TAB: usize = 2;
 
 /// The names of the three ability slots of a species.
 const SLOTS: [&str; 3] = ["Ability 1", "Ability 2", "Hidden ability"];
@@ -47,12 +47,14 @@ pub struct Ability {
     usage_ready: bool,
     texts: texts::AbilityTexts,
     tools: tools::Tools,
-    custom: custom::Custom,
+    store: custom::Store,
+    /// The language of the texts of a new ability.
+    custom_language: usize,
 }
 
 impl Default for Ability {
     fn default() -> Self {
-        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), custom: custom::Custom::default() }
+        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2 }
     }
 }
 
@@ -67,7 +69,7 @@ impl Ability {
 
     /// Reads the abilities of all the species again.
     fn read_usage(&mut self, session: &Session) {
-        self.usage = (0..=COUNT).map(|_| [Vec::new(), Vec::new(), Vec::new()]).collect();
+        self.usage = (0..=rules::LAST_ID as usize).map(|_| [Vec::new(), Vec::new(), Vec::new()]).collect();
         match sango_species::species_abilities(session) {
             Ok(all) => {
                 for SpeciesAbilities { species, form, abilities } in all {
@@ -100,14 +102,65 @@ impl Ability {
             self.list_names = Some(names);
         }
         let names = self.list_names.clone().unwrap_or_default();
-        (0..=COUNT).map(|n| picker::Row { name: names.get(n).cloned().unwrap_or_default(), species: self.user_count(n) }).collect()
+        let mut rows: Vec<picker::Row> = (0..=COUNT).map(|n| picker::Row { name: names.get(n).cloned().unwrap_or_default(), species: self.user_count(n) }).collect();
+        // The new abilities come after the abilities of the game, at their numbers: a number between is a row without a name that the list skips.
+        if let Some(last) = self.store.ids().into_iter().max() {
+            rows.resize(last + 1, picker::Row::default());
+            for id in self.store.ids() {
+                if let Some(entry) = self.store.find(id) {
+                    rows[id] = picker::Row { name: entry.names[rules::ENGLISH].clone(), species: self.user_count(id) };
+                }
+            }
+        }
+        rows
+    }
+
+    /// True when the open ability is a new ability of the user (not an ability of the game).
+    fn is_custom(&self) -> bool {
+        self.id > COUNT
+    }
+
+    /// The highest number that the list shows: the last ability of the game, or the last new ability.
+    fn last_ability(&self) -> usize {
+        self.store.ids().into_iter().max().unwrap_or(COUNT).max(COUNT)
+    }
+
+    /// Makes a new ability. When a new ability is open, the new one starts like it (the same texts and reactions).
+    fn add_ability(&mut self) {
+        let template = self.is_custom().then_some(self.id);
+        match self.store.add(template) {
+            Ok(id) => {
+                self.id = id;
+                self.status = Some((true, format!("The new ability {id} is made. Change its name in the Text tab and its reactions in the Reactions tab.")));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// Deletes the open ability when it is a new ability.
+    fn delete_ability(&mut self, session: &Session) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        if !self.is_custom() {
+            return;
+        }
+        let id = self.id;
+        match self.store.delete(sd, id) {
+            Ok(()) => {
+                self.id = 1;
+                self.list_names = None;
+                self.usage_ready = false;
+                self.status = Some((true, format!("The new ability {id} was deleted.")));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
     }
 
     /// Writes the texts on the SD card, and tells the plugin.
     fn save(&mut self, session: &Session) {
         let Some(sd) = session.sd.as_ref() else { return };
-        match self.texts.save(sd) {
-            Ok(_) => {
+        let result = self.store.save(sd).map(|_| ()).and_then(|_| self.texts.save(sd).map(|_| ()));
+        match result {
+            Ok(()) => {
                 self.list_names = None;
                 self.status = Some((true, "Saved. The files are on the SD card.".into()));
             }
@@ -121,19 +174,31 @@ impl Ability {
         let mut reset_tab = false;
         let mut reset_more = false;
         let mut undo = false;
+        let mut add = false;
+        let mut delete = false;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let rows = self.menu_rows(session);
                 let mut chosen = self.id;
                 picker::ability_menu(ui, "ability_menu", &mut chosen, 300.0, &rows);
-                self.id = chosen.clamp(1, COUNT);
+                self.id = chosen.clamp(1, self.last_ability());
                 let has_card = session.sd.is_some();
                 ui.add_enabled_ui(has_card, |ui| {
+                    add = widget::button(ui, "+ New ability");
+                })
+                .response
+                .on_hover_text("Adds an ability. Then you change its name in the Text tab and its reactions in the Reactions tab.");
+                ui.add_enabled_ui(has_card && self.is_custom(), |ui| {
+                    delete = widget::button(ui, "Delete");
+                })
+                .response
+                .on_hover_text("Deletes this new ability.");
+                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_tab = widget::button(ui, "Reset texts");
                 })
                 .response
                 .on_hover_text("Puts the name and the description of this ability back to the romfs. Undo gives them back.");
-                ui.add_enabled_ui(has_card, |ui| {
+                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
@@ -145,7 +210,7 @@ impl Ability {
                 .response
                 .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = has_card && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
-                if self.texts.changed() {
+                if self.texts.changed() || self.store.changed() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.texts.from_card() {
                     widget::badge(ui, "From the SD card", color::TEAL);
@@ -158,6 +223,12 @@ impl Ability {
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
             }
         });
+        if add {
+            self.add_ability();
+        }
+        if delete {
+            self.delete_ability(session);
+        }
         if reset_tab {
             self.run_reset(session, tools::Scope::Ability);
         }
@@ -175,8 +246,10 @@ impl Ability {
     /// The General tab: the name and the description, what an ability is, who has it, and the CSV card.
     fn general_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
         let sd = session.sd.as_ref();
-        let name = self.texts.text(sd, texts::ENGLISH, 0, self.id);
-        let description = self.texts.text(sd, texts::ENGLISH, 1, self.id);
+        let (name, description) = match self.store.find(self.id) {
+            Some(entry) => (entry.names[rules::ENGLISH].clone(), entry.descriptions[rules::ENGLISH].clone()),
+            None => (self.texts.text(sd, texts::ENGLISH, 0, self.id), self.texts.text(sd, texts::ENGLISH, 1, self.id)),
+        };
         egui::ScrollArea::vertical().id_salt("ability_general").auto_shrink([false, false]).show(ui, |ui| {
             widget::card(ui, |ui| {
                 ui.set_min_width(700.0);
@@ -258,14 +331,12 @@ impl Module for Ability {
         if self.root.as_deref() != Some(dump.root()) {
             self.open(&dump);
         }
-        let session: &Session = session;
+        self.store.ensure(session.sd.as_ref());
         if !self.usage_ready {
             self.read_usage(session);
         }
-        if self.tab != NEW_ABILITIES_TAB {
-            self.top_bar(ui, session);
-            self.reset_window(ui.ctx(), session);
-        }
+        self.top_bar(ui, session);
+        self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);
         let mut clicked = None;
         egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(12.0)).inner_margin(egui::Margin::same(6.0)).show(ui, |ui| {
@@ -293,10 +364,24 @@ impl Module for Ability {
         ui.add_space(6.0);
         match self.tab {
             0 => self.general_tab(ui, session),
-            NEW_ABILITIES_TAB => self.custom.ui(ui, session.sd.as_ref()),
+            REACTIONS_TAB => {
+                let id = self.id;
+                match self.store.find_mut(id) {
+                    Some(entry) => egui::ScrollArea::vertical().id_salt("ability_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
+                    None => widget::card(ui, |ui| {
+                        ui.label(widget::hint("The abilities of the game have their reactions in the code of the game. A new ability (the button \"+ New ability\") has its own reactions here."));
+                    }),
+                }
+            }
             _ => {
-                let sd: Option<&SdCard> = session.sd.as_ref();
-                self.texts.ui(ui, sd, self.id);
+                if let Some(entry) = self.store.find_mut(self.id) {
+                    let mut language = self.custom_language;
+                    egui::ScrollArea::vertical().id_salt("ability_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
+                    self.custom_language = language;
+                } else {
+                    let sd: Option<&SdCard> = session.sd.as_ref();
+                    self.texts.ui(ui, sd, self.id);
+                }
             }
         }
     }
@@ -332,6 +417,49 @@ mod test {
         assert!(page.user_count(65) > 10);
         assert!(page.usage[34].iter().any(|slot| slot.iter().any(|&(species, _)| species == 1)), "Chlorophyll is an ability of Bulbasaur");
         assert_eq!(page.texts.name(session.sd.as_ref(), 65), "Overgrow");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod add_test {
+    use super::*;
+
+    /// With the dump of the game: a new ability is added in the page, edited in the same tabs, saved, and found by another page; it
+    /// is deleted.
+    #[test]
+    fn a_new_ability_is_made_and_edited_like_the_others() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_ability_add_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(SdCard::open(folder.to_str().unwrap()).unwrap()), ..Session::default() };
+        let mut page = Ability::default();
+        let ctx = egui::Context::default();
+        let frame = |page: &mut Ability, session: &mut Session| {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        frame(&mut page, &mut session);
+        page.add_ability();
+        assert_eq!(page.id, 192);
+        for tab in [0, 1, 2] {
+            page.tab = tab;
+            frame(&mut page, &mut session);
+            frame(&mut page, &mut session);
+        }
+        page.store.find_mut(192).unwrap().names[rules::ENGLISH] = "Quick Start".into();
+        page.save(&session);
+        assert!(matches!(page.status, Some((true, _))), "{:?}", page.status);
+        let mut other = Ability::default();
+        other.id = 192;
+        frame(&mut other, &mut session);
+        frame(&mut other, &mut session);
+        let rows = other.menu_rows(&session);
+        assert_eq!(rows[192].name, "Quick Start");
+        assert_eq!(rows.len(), 193);
+        other.delete_ability(&session);
+        assert!(other.store.find(192).is_none() && session.sd.as_ref().unwrap().read("ability/192.bin").is_none());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

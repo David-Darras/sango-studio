@@ -25,6 +25,14 @@ pub struct ItemIcons {
     /// The files that changed and were not saved.
     pending: HashSet<usize>,
     textures: HashMap<usize, Option<egui::TextureHandle>>,
+    /// The textures that were forgotten: they live on a few frames, because the frame may still draw them.
+    retired: sango_ui::retired::Retired,
+    /// The pictures of the new items (the files `item/custom/<id>.bclim`: an image of the game, not compressed), and the ones
+    /// that were not saved.
+    custom: HashMap<usize, Vec<u8>>,
+    custom_pending: HashSet<usize>,
+    /// The item of the game whose picture a new item shows while it has no picture of its own.
+    fallbacks: HashMap<usize, usize>,
 }
 
 impl ItemIcons {
@@ -33,15 +41,44 @@ impl ItemIcons {
         self.garc = Garc::open(&dump.archive(sango_core::item_icons::ARCHIVE)).ok();
         self.overrides.clear();
         self.pending.clear();
-        self.textures.clear();
+        self.custom.clear();
+        self.custom_pending.clear();
+        self.retired.forget_all(&mut self.textures);
+    }
+
+    /// True for a new item: it has a picture of its own, or shows the one of an item of the game.
+    pub fn is_custom(item: usize) -> bool {
+        item >= sango_core::custom_item::FIRST_ID
+    }
+
+    /// True when the item has a picture of its own that the user can export and import.
+    pub fn has_own(item: usize) -> bool {
+        Self::is_custom(item) || Self::file_of(item).is_some()
+    }
+
+    /// Tells which item of the game a new item shows while it has no picture.
+    pub fn set_fallback(&mut self, item: usize, shown: usize) {
+        if self.fallbacks.insert(item, shown) != Some(shown) {
+            self.retired.forget(&mut self.textures, &item);
+        }
     }
 
     /// Reads the pictures of the SD card again, and forgets the changes that were not saved.
     pub fn load_card(&mut self, sd: Option<&SdCard>) {
         self.overrides.clear();
         self.pending.clear();
-        self.textures.clear();
+        self.custom.clear();
+        self.custom_pending.clear();
+        self.retired.forget_all(&mut self.textures);
         let Some(sd) = sd else { return };
+        for path in sd.files_in("item/custom") {
+            let id = path.rsplit('/').next().and_then(|name| name.strip_suffix(".bclim")).and_then(|n| n.parse::<usize>().ok());
+            if let (Some(id), Some(bytes)) = (id, sd.read(&path)) {
+                if Clim::parse(&bytes).is_ok() {
+                    self.custom.insert(id, bytes);
+                }
+            }
+        }
         for path in sd.files_in(SD_FOLDER) {
             let file = path.rsplit('/').next().and_then(|name| name.strip_suffix(".bin")).and_then(|n| n.parse::<usize>().ok());
             if let (Some(file), Some(bytes)) = (file, sd.read(&path)) {
@@ -54,12 +91,12 @@ impl ItemIcons {
 
     /// True when a picture changed and was not saved.
     pub fn changed(&self) -> bool {
-        !self.pending.is_empty()
+        !self.pending.is_empty() || !self.custom_pending.is_empty()
     }
 
     /// True when a picture comes from the SD card.
     pub fn from_card(&self) -> bool {
-        self.overrides.keys().any(|file| !self.pending.contains(file))
+        self.overrides.keys().any(|file| !self.pending.contains(file)) || self.custom.keys().any(|id| !self.custom_pending.contains(id))
     }
 
     /// The file of the picture of an item, when it has one of its own.
@@ -74,11 +111,16 @@ impl ItemIcons {
 
     /// The decoded picture of an item (30 × 30 pixels of RGBA), when it has one.
     pub fn rgba(&self, item: usize) -> Option<Vec<u8>> {
+        if Self::is_custom(item) {
+            let own = self.custom.get(&item).and_then(|bytes| Clim::parse(bytes).ok()).and_then(|clim| clim.to_rgba().ok());
+            return own.or_else(|| self.fallbacks.get(&item).and_then(|shown| self.rgba(*shown)));
+        }
         decode(&self.compressed(Self::file_of(item)?)?).ok()
     }
 
     /// The texture of an item picture.
     pub fn texture(&mut self, ctx: &egui::Context, item: usize) -> Option<egui::TextureHandle> {
+        self.retired.tick(ctx);
         if let Some(found) = self.textures.get(&item) {
             return found.clone();
         }
@@ -89,15 +131,24 @@ impl ItemIcons {
 
     /// Gives the picture of an item a new look: a PNG file of 30 × 30 pixels. The change is kept until it is saved.
     pub fn import(&mut self, item: usize, path: &std::path::Path) -> Result<(), String> {
-        let file = Self::file_of(item).ok_or("This item has no picture of its own.")?;
+        if !Self::has_own(item) {
+            return Err("This item has no picture of its own.".into());
+        }
         let image = image::open(path).map_err(|error| format!("{}: {error}", path.display()))?.to_rgba8();
         if image.width() as usize != SIZE || image.height() as usize != SIZE {
             return Err(format!("The picture must have {SIZE} × {SIZE} pixels. This image has {} × {}.", image.width(), image.height()));
         }
         let clim = Clim::from_rgba(SIZE, SIZE, image.as_raw())?;
+        if Self::is_custom(item) {
+            self.custom.insert(item, clim.to_bytes());
+            self.custom_pending.insert(item);
+            self.retired.forget(&mut self.textures, &item);
+            return Ok(());
+        }
+        let file = Self::file_of(item).ok_or("This item has no picture of its own.")?;
         self.overrides.insert(file, sango_core::lz::compress_lz11(&clim.to_bytes()));
         self.pending.insert(file);
-        self.textures.clear();
+        self.retired.forget_all(&mut self.textures);
         Ok(())
     }
 
@@ -116,7 +167,23 @@ impl ItemIcons {
             sd.write(&path, &self.overrides[&file]).and_then(|_| sd.mark_changed(&path))?;
             self.pending.remove(&file);
         }
+        // The pictures of the new items.
+        let mut custom: Vec<usize> = self.custom_pending.iter().copied().collect();
+        custom.sort_unstable();
+        for id in custom {
+            let path = format!("item/custom/{id}.bclim");
+            sd.write(&path, &self.custom[&id]).and_then(|_| sd.mark_changed(&path))?;
+            self.custom_pending.remove(&id);
+        }
         Ok(())
+    }
+
+    /// Forgets the picture of a new item that was deleted.
+    pub fn forget_custom(&mut self, item: usize) {
+        self.custom.remove(&item);
+        self.custom_pending.remove(&item);
+        self.fallbacks.remove(&item);
+        self.retired.forget(&mut self.textures, &item);
     }
 }
 

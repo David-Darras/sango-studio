@@ -1,0 +1,10 @@
+[package]
+name = "sango-rules"
+version.workspace = true
+edition.workspace = true
+description = "The rules of the new abilities, moves and items of Sango Studio."
+
+[dependencies]
+sango-core.workspace = true
+sango-species.workspace = true
+sango-ui.workspace = true

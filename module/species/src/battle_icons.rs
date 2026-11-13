@@ -93,8 +93,62 @@ fn texture(ctx: &egui::Context, kind: &str, number: usize, pick: impl Fn(&Icons)
     Some(handle)
 }
 
-/// The icon of a type (0 Normal to 17 Fairy), when the dump has it.
+/// The new types of the user, with their icons, and a number that changes when the list changes.
+struct CustomTypes {
+    list: Vec<sango_core::custom_type::CustomType>,
+    generation: u32,
+    /// When the SD card was read for the last time.
+    read_at: Option<std::time::Instant>,
+}
+
+static CUSTOM: RwLock<CustomTypes> = RwLock::new(CustomTypes { list: Vec::new(), generation: 0, read_at: None });
+
+/// Reads the new types of the SD card again (the list `type/types.csv` and the icons), at most one time each second. The
+/// menus of the types then show the new types after the 18 types of the game. Call it at the start of a page that has a menu
+/// of types.
+pub fn refresh_custom_types(sd: Option<&sango_core::SdCard>) {
+    let due = CUSTOM.read().map_or(false, |c| c.read_at.map_or(true, |at| at.elapsed() >= std::time::Duration::from_secs(1)));
+    if !due {
+        return;
+    }
+    let list = sd.map(sango_core::custom_type::load).unwrap_or_default();
+    if let Ok(mut custom) = CUSTOM.write() {
+        custom.read_at = Some(std::time::Instant::now());
+        if custom.list != list {
+            custom.list = list;
+            custom.generation += 1;
+        }
+    }
+}
+
+/// The numbers of the new types, in order.
+pub fn custom_type_ids() -> Vec<u8> {
+    CUSTOM.read().map(|c| c.list.iter().map(|t| t.id as u8).collect()).unwrap_or_default()
+}
+
+/// The English name of a new type, or nothing for a number that is not a new type.
+pub fn custom_type_name(kind: u8) -> Option<String> {
+    CUSTOM.read().ok()?.list.iter().find(|t| t.id == kind as usize).map(|t| t.name.clone())
+}
+
+/// The icon of a new type as a texture, when the SD card has its file.
+fn custom_type_texture(ctx: &egui::Context, kind: u8) -> Option<egui::TextureHandle> {
+    let custom = CUSTOM.read().ok()?;
+    let id = egui::Id::new(("custom_type_icon", kind, custom.generation));
+    if let Some(handle) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(handle);
+    }
+    let rgba = custom.list.iter().find(|t| t.id == kind as usize)?.icon.as_ref()?;
+    let handle = ctx.load_texture(format!("custom_type_{kind}"), egui::ColorImage::from_rgba_unmultiplied([sango_core::custom_type::ICON_WIDTH, sango_core::custom_type::ICON_HEIGHT], rgba), egui::TextureOptions::NEAREST);
+    ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
+    Some(handle)
+}
+
+/// The icon of a type (0 Normal to 17 Fairy, or the number of a new type), when it exists.
 pub fn type_texture(ctx: &egui::Context, kind: u8) -> Option<egui::TextureHandle> {
+    if kind as usize >= sango_core::custom_type::FIRST_ID {
+        return custom_type_texture(ctx, kind);
+    }
     texture(ctx, "type", kind as usize, |icons| icons.types.get(kind as usize).cloned().flatten())
 }
 

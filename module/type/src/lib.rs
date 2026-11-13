@@ -1,7 +1,7 @@
 //! The type editor.
 //!
 //! The page shows the type chart of the game (the effect of each attacking type against each defending type), and lets the
-//! user change any cell, add new types (numbers 19 to 31), give a new type a name and a colour, and give any type another
+//! user change any cell, add new types (numbers 19 to 31), give a new type a name and an image, and give any type another
 //! icon. The files that the user changes go on the SD card, in the folders `type` and `text`: the romfs is never changed.
 //!
 //! The game keeps its type chart in its code, not in a file of the romfs: the page starts from the chart of Omega Ruby and
@@ -119,6 +119,19 @@ impl Type {
     /// The colour type of a type: the type itself for a type of the game.
     fn colour_of(&self, id: usize) -> u8 {
         self.list.find(id).map_or(id.min(17) as u8, |c| c.colour)
+    }
+
+    /// Adds a type with the next free number. It starts with the effects ×1 against every type, the name "New type" in every
+    /// language, and the colour of the buttons of the type that is selected in the chart. The type is then edited like the others.
+    fn add_type(&mut self) {
+        let colour = self.colour_of(self.selected.0).min(17);
+        match self.list.add("New type", colour) {
+            Some(id) => {
+                self.chart.clear_type(id);
+                self.status = Some((true, format!("The type {id} was added. Change its name here and in the Text tab, its picture with \"Import PNG…\", its effects in the Chart tab, then Save.")));
+            }
+            None => self.status = Some((false, "The list of the new types is full.".into())),
+        }
     }
 
     /// True when something changed and was not saved.
@@ -355,6 +368,7 @@ impl Type {
                 let ids = self.list.ids();
                 let mut remove = None;
                 let mut import = None;
+                let mut add = false;
                 let mut export = None;
                 let mut reset = None;
                 for id in ids {
@@ -367,10 +381,15 @@ impl Type {
                         if id < GAME_TYPES {
                             ui.add_sized([180.0, 22.0], egui::Label::new(name));
                         } else if let Some(custom) = self.list.custom.iter_mut().find(|c| c.id == id) {
-                            ui.add(egui::TextEdit::singleline(&mut custom.name).id_salt(("type_name", id)).desired_width(150.0).char_limit(types::MAX_NAME));
+                            let mut name = custom.name.clone();
+                            ui.add(egui::TextEdit::singleline(&mut name).id_salt(("type_name", id)).desired_width(150.0).char_limit(types::MAX_NAME));
+                            if name != custom.name {
+                                // The languages that follow English follow the new name; the others keep their own.
+                                custom.rename(&name);
+                            }
                             let mut colour = custom.colour;
-                            ui.label(widget::hint("buttons like"));
-                            sango_species::type_menu(ui, &format!("type_colour_{id}"), &mut colour, None);
+                            ui.label(widget::hint("Colour of the buttons in battle:"));
+                            sango_species::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
                             custom.colour = colour;
                             if let Some(problem) = types::name_problem(&custom.name) {
                                 ui.label(egui::RichText::new(problem).color(color::ROSE).size(12.5));
@@ -393,17 +412,22 @@ impl Type {
                     });
                     ui.add_space(2.0);
                 }
-                ui.add_space(6.0);
+                ui.add_space(10.0);
                 let room = self.list.custom.len() < MAX_CUSTOM;
-                ui.add_enabled_ui(room, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("+ Add a type").color(color::WHITE), Some(color::ACCENT)) {
-                        if let Some(id) = self.list.free_id() {
-                            self.list.add(&format!("Type {id}"), 0);
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(room, |ui| {
+                        if widget::button_styled(ui, egui::RichText::new("+ Add a type").color(color::WHITE), Some(color::ACCENT)) {
+                            add = true;
                         }
+                    });
+                    if !room {
+                        ui.label(widget::hint("The list is full."));
+                    } else {
+                        ui.label(widget::hint("The new type has ×1 against every type: change the chart in the Chart tab, its name here and in the Text tab, its picture with \"Import PNG…\"."));
                     }
                 });
-                if !room {
-                    ui.label(widget::hint("The list is full."));
+                if add {
+                    self.add_type();
                 }
                 if let Some(id) = remove {
                     self.list.remove(id);
@@ -494,10 +518,12 @@ impl Module for Type {
             1 => self.types_tab(ui),
             _ => {
                 let sd: Option<&SdCard> = session.sd.as_ref();
+                let shown: Vec<(String, u8)> = (0..chart::MAX_TYPES).map(|id| (self.type_name(id), self.colour_of(id))).collect();
                 let icons = &mut self.icons;
-                self.texts.ui(ui, sd, &mut |ui, kind| {
+                self.texts.ui(ui, sd, &mut self.list, &mut |ui, kind| {
                     let (rect, _) = ui.allocate_exact_size(egui::vec2(icons::WIDTH as f32, icons::HEIGHT as f32), egui::Sense::hover());
-                    icons.paint(ui, kind, rect, "", kind as u8);
+                    let (name, colour) = shown.get(kind).cloned().unwrap_or_default();
+                    icons.paint(ui, kind, rect, if kind < GAME_TYPES { "" } else { &name }, colour);
                 });
             }
         }
@@ -554,6 +580,41 @@ mod test {
         page.save(&session);
         let sd = session.sd.as_ref().unwrap();
         assert!(sd.read(tools::CHART_PATH).is_none() && sd.read(types::SD_PATH).is_none());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod add_test {
+    use super::*;
+
+    /// A new type is added with one click: the effects are ×1, the name is "New type" in every language, and it is edited like the
+    /// others (its name, its picture).
+    #[test]
+    fn a_type_is_added_with_one_click_and_edited_like_the_others() {
+        let folder = std::env::temp_dir().join(format!("sango_type_add_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let png = folder.join("cosmic.png");
+        let mut picture = image::RgbaImage::new(icons::WIDTH as u32, icons::HEIGHT as u32);
+        for pixel in picture.pixels_mut() {
+            *pixel = image::Rgba([40, 30, 140, 255]);
+        }
+        picture.save(&png).unwrap();
+
+        let mut page = Type::default();
+        page.chart.set(19, 3, chart::DOUBLE);
+        page.selected = (9, 11);
+        page.add_type();
+        let added = page.list.find(19).expect("the type has the first new number");
+        assert_eq!(added.name, "New type");
+        assert!((0..8).all(|language| added.name_in(language) == "New type"));
+        assert!((0..chart::MAX_TYPES).all(|other| page.chart.get(19, other) == chart::NORMAL && page.chart.get(other, 19) == chart::NORMAL));
+        assert!(matches!(page.status, Some((true, _))));
+        // The type is edited like the others: its name, and its picture.
+        page.list.custom[0].rename("Cosmic");
+        page.icons.import(19, &png).unwrap();
+        assert!(page.icons.has_override(19));
+        assert!((0..8).all(|language| page.list.find(19).unwrap().name_in(language) == "Cosmic"));
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

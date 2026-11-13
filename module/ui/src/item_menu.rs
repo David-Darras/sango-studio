@@ -8,7 +8,7 @@ use crate::theme::color;
 use crate::widget;
 use eframe::egui;
 use sango_core::item_icons;
-use sango_core::{Dump, Garc};
+use sango_core::{Dump, Garc, SdCard};
 use std::collections::HashMap;
 
 /// The pockets of the Bag, in the order of their number.
@@ -29,19 +29,38 @@ pub struct Row {
 pub struct IconCache {
     garc: Option<Garc>,
     textures: HashMap<usize, Option<egui::TextureHandle>>,
+    /// The pictures of the new items of the user: RGBA pixels of 30 × 30.
+    custom: HashMap<usize, Vec<u8>>,
+    /// The textures that were forgotten: they live on a few frames, because the frame may still draw them.
+    retired: crate::retired::Retired,
 }
 
 impl IconCache {
     /// Opens the archive of the pictures of a dump.
     pub fn open(&mut self, dump: &Dump) {
         self.garc = Garc::open(&dump.archive(item_icons::ARCHIVE)).ok();
-        self.textures.clear();
+        self.retired.forget_all(&mut self.textures);
+    }
+
+    /// Gives the pictures of the new items. The textures that were made for them are forgotten.
+    pub fn set_custom(&mut self, custom: HashMap<usize, Vec<u8>>) {
+        self.custom = custom;
+        let forgotten: Vec<usize> = self.textures.keys().copied().filter(|item| *item >= sango_core::custom_item::FIRST_ID).collect();
+        for item in forgotten {
+            self.retired.forget(&mut self.textures, &item);
+        }
     }
 
     /// The texture of the picture of an item, when it has one.
     pub fn texture(&mut self, ctx: &egui::Context, item: usize) -> Option<egui::TextureHandle> {
+        self.retired.tick(ctx);
         if let Some(found) = self.textures.get(&item) {
             return found.clone();
+        }
+        if item >= sango_core::custom_item::FIRST_ID {
+            let made = self.custom.get(&item).map(|rgba| ctx.load_texture(format!("custom_item_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], rgba), egui::TextureOptions::NEAREST));
+            self.textures.insert(item, made.clone());
+            return made;
         }
         let made = item_icons::file_of(item)
             .and_then(|file| self.garc.as_ref()?.first_file(file))
@@ -70,20 +89,51 @@ pub fn rows_from_dump(dump: &Dump) -> Vec<Row> {
 pub struct ItemList {
     pub rows: Vec<Row>,
     pub icons: IconCache,
+    /// The number of rows of the items of the game.
+    base: usize,
+    /// The new items that the rows have, and when the SD card was read for the last time.
+    custom: Vec<sango_core::custom_item::Custom>,
+    read_at: Option<std::time::Instant>,
 }
 
 impl ItemList {
     /// Reads the rows and opens the pictures of a dump.
     pub fn open(&mut self, dump: &Dump) {
         self.rows = rows_from_dump(dump);
+        self.base = self.rows.len();
+        self.custom.clear();
+        self.read_at = None;
         self.icons.open(dump);
+    }
+
+    /// Reads the new items of the SD card again (at most one time each second) and puts them at the end of the rows, at their
+    /// numbers (900 to 931). The numbers between are rows without a name: the menu does not list them.
+    pub fn refresh_custom(&mut self, sd: Option<&SdCard>) {
+        if self.base == 0 || self.read_at.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1)) {
+            return;
+        }
+        self.read_at = Some(std::time::Instant::now());
+        let found = sd.map(sango_core::custom_item::items).unwrap_or_default();
+        if found == self.custom {
+            return;
+        }
+        self.rows.truncate(self.base);
+        if let Some(last) = found.iter().map(|c| c.id).max() {
+            self.rows.resize(last + 1, Row::default());
+            for item in &found {
+                let (price, pocket) = item_icons::price_and_pocket(&item.data);
+                self.rows[item.id] = Row { name: item.name.clone(), pocket, price };
+            }
+        }
+        self.icons.set_custom(found.iter().filter_map(|c| c.picture.clone().map(|rgba| (c.id, rgba))).collect());
+        self.custom = found;
     }
 }
 
 /// The list of items of a shared [`ItemList`]. See [`item_menu`].
 pub fn shared_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32, list: &std::sync::Arc<std::sync::Mutex<ItemList>>, none: bool) -> bool {
     let Ok(mut list) = list.lock() else { return false };
-    let ItemList { rows, icons } = &mut *list;
+    let ItemList { rows, icons, .. } = &mut *list;
     item_menu(ui, id_salt, value, width, rows, &mut |ctx, n| icons.texture(ctx, n), none)
 }
 
@@ -155,7 +205,19 @@ pub fn item_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
         ui.input_mut(|i| {
             let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
             if step != 0 {
-                *value = (*value as isize + step).clamp(first as isize, last as isize) as usize;
+                // A row without a name (a number between the new items) is skipped.
+                let mut next = *value as isize;
+                loop {
+                    let candidate = (next + step).clamp(first as isize, last as isize);
+                    if candidate == next {
+                        break;
+                    }
+                    next = candidate;
+                    if next == 0 || !rows[next as usize].name.is_empty() {
+                        *value = next as usize;
+                        break;
+                    }
+                }
             }
         });
     }
@@ -180,7 +242,7 @@ pub fn item_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
         let clean = |s: &str| s.to_lowercase().replace(['é', 'è'], "e");
         let query = clean(state.search.trim());
         let number_query = query.trim_start_matches('#').trim_start_matches('0').to_string();
-        let mut matches: Vec<usize> = (first..=last).filter(|&n| query.is_empty() || (n == 0 && "none".starts_with(&query)) || clean(&rows[n].name).contains(&query) || (!number_query.is_empty() && n.to_string() == number_query)).collect();
+        let mut matches: Vec<usize> = (first..=last).filter(|&n| n == 0 || !rows[n].name.is_empty()).filter(|&n| query.is_empty() || (n == 0 && "none".starts_with(&query)) || clean(&rows[n].name).contains(&query) || (!number_query.is_empty() && n.to_string() == number_query)).collect();
 
         header(ui, &mut state);
         ui.separator();

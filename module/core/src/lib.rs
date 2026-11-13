@@ -11,6 +11,8 @@ pub mod bundle;
 pub mod clim;
 pub mod csv_text;
 pub mod custom_ability;
+pub mod custom_item;
+pub mod custom_type;
 pub mod evolution;
 pub mod experience;
 pub mod garc;

@@ -6,6 +6,7 @@
 //! Bulbapedia when one fits. A field that no code reads shows only the word "unused".
 
 mod csv;
+mod custom;
 pub mod data;
 mod picker;
 mod texts;
@@ -19,7 +20,10 @@ use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
 /// The tabs of the page.
-const TABS: [&str; 2] = ["General", "Text"];
+const TABS: [&str; 3] = ["General", "Text", "Reactions"];
+
+/// The place of the tab "Reactions" in [`TABS`]: only a new move has reactions.
+const REACTIONS_TAB: usize = 2;
 
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
@@ -65,6 +69,9 @@ pub struct Move {
     index: Option<Index>,
     texts: texts::MoveTexts,
     tools: tools::Tools,
+    store: custom::Store,
+    /// The language of the texts of a new move.
+    custom_language: usize,
 }
 
 impl Default for Move {
@@ -84,6 +91,8 @@ impl Default for Move {
             index: None,
             texts: texts::MoveTexts::default(),
             tools: tools::Tools::default(),
+            store: custom::Store::default(),
+            custom_language: 2,
         }
     }
 }
@@ -117,7 +126,7 @@ impl Move {
     fn load(&mut self, session: &Session) {
         self.loaded = Some(self.id);
         let found = self.current(session.sd.as_ref(), self.id);
-        self.from_sd = session.sd.as_ref().is_some_and(|sd| sd.read(&data::sd_path(self.id)).is_some());
+        self.from_sd = self.is_custom() || session.sd.as_ref().is_some_and(|sd| sd.read(&data::sd_path(self.id)).is_some());
         match found {
             Some(data) => {
                 self.baseline = Some(data.clone());
@@ -134,6 +143,9 @@ impl Move {
 
     /// The data of a move as the user has it: the SD card first, then the romfs.
     fn current(&self, sd: Option<&sango_core::SdCard>, id: usize) -> Option<MoveData> {
+        if id >= sango_core::custom_item::FIRST_ID {
+            return self.store.find(id).map(|c| c.data.clone());
+        }
         let on_card = sd.and_then(|sd| sd.read(&data::sd_path(id))).and_then(|b| MoveData::from_bytes(&b).ok());
         on_card.or_else(|| self.bundle.as_ref().and_then(|b| b.resource(id)).and_then(|b| MoveData::from_bytes(b).ok()))
     }
@@ -146,14 +158,71 @@ impl Move {
             self.list_names = Some(names);
         }
         let names = self.list_names.clone().unwrap_or_default();
-        (0..=COUNT).map(|n| Self::row(self.current(sd, n).as_ref(), names.get(n).cloned().unwrap_or_default())).collect()
+        let mut rows: Vec<picker::Row> = (0..=COUNT).map(|n| Self::row(self.current(sd, n).as_ref(), names.get(n).cloned().unwrap_or_default())).collect();
+        // The new moves come after the moves of the game, at their numbers: a number between is a row without a name that the list skips.
+        if let Some(last) = self.store.ids().into_iter().max() {
+            rows.resize(last + 1, picker::Row::default());
+            for id in self.store.ids() {
+                if let Some(entry) = self.store.find(id) {
+                    rows[id] = Self::row(Some(&entry.data), entry.names[custom::ENGLISH].clone());
+                }
+            }
+        }
+        rows
+    }
+
+    /// True when the open move is a new move of the user (not a move of the game).
+    fn is_custom(&self) -> bool {
+        self.id >= sango_core::custom_item::FIRST_ID
+    }
+
+    /// The highest number that the list shows: the last move of the game, or the last new move.
+    fn last_move(&self) -> usize {
+        self.store.ids().into_iter().max().unwrap_or(COUNT).max(COUNT)
+    }
+
+    /// Makes a new move that starts with the data of the open move. The move is then edited like the other moves.
+    fn add_move(&mut self) {
+        let template = self.data.clone();
+        match self.store.add(template.as_ref()) {
+            Ok(id) => {
+                self.id = id;
+                self.loaded = None;
+                self.status = Some((true, format!("The new move {id} starts like the move that was open. Change its name in the Text tab.")));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// Deletes the open move when it is a new move.
+    fn delete_move(&mut self, session: &Session) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        if !self.is_custom() {
+            return;
+        }
+        let id = self.id;
+        match self.store.delete(sd, id) {
+            Ok(()) => {
+                self.id = 1;
+                self.loaded = None;
+                self.list_names = None;
+                self.status = Some((true, format!("The new move {id} was deleted.")));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
     }
 
     /// Writes the data and the texts on the SD card, and tells the plugin.
     fn save(&mut self, session: &Session) {
         let Some(sd) = session.sd.as_ref() else { return };
         let mut result: Result<(), String> = Ok(());
-        if let Some(data) = &self.data {
+        if self.is_custom() {
+            // A new move keeps its data in its own file, with its texts and its reactions.
+            if let (Some(data), Some(entry)) = (&self.data, self.store.find_mut(self.id)) {
+                entry.data = data.clone();
+            }
+            result = self.store.save(sd).map(|_| ());
+        } else if let Some(data) = &self.data {
             if self.baseline.as_ref() != Some(data) {
                 let path = data::sd_path(self.id);
                 result = sd.write(&path, &data.to_bytes()).and_then(|_| sd.mark_changed(&path));
@@ -175,7 +244,7 @@ impl Move {
 
     /// True when something changed and was not saved.
     fn dirty(&self) -> bool {
-        self.data != self.baseline || self.texts.changed()
+        self.data != self.baseline || self.texts.changed() || self.store.changed()
     }
 
     /// The picker, the buttons and the state.
@@ -185,22 +254,36 @@ impl Move {
         let mut reset_tab = false;
         let mut reset_more = false;
         let mut undo = false;
+        let mut add = false;
+        let mut delete = false;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let rows = self.menu_rows(session);
                 let mut chosen = self.id;
                 picker::move_menu(ui, "move_menu", &mut chosen, 280.0, &rows);
-                self.id = chosen.clamp(1, COUNT);
-                if self.bundle.is_some() {
+                self.id = chosen.clamp(1, self.last_move());
+                if self.bundle.is_some() && !self.is_custom() {
                     ui.label(widget::hint(&format!("archive {}, move {}", data::ARCHIVE, self.id)));
+                } else if self.is_custom() {
+                    ui.label(widget::hint("new move"));
                 }
                 let has_card = session.sd.is_some() && self.bundle.is_some();
                 ui.add_enabled_ui(has_card, |ui| {
+                    add = widget::button(ui, "+ New move");
+                })
+                .response
+                .on_hover_text("Adds a move that starts like this one (the same data). Then you change it like the other moves.");
+                ui.add_enabled_ui(has_card && self.is_custom(), |ui| {
+                    delete = widget::button(ui, "Delete");
+                })
+                .response
+                .on_hover_text("Deletes this new move.");
+                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_tab = widget::button(ui, "Reset tab");
                 })
                 .response
                 .on_hover_text("Puts the data of this tab for this move back to the romfs. Undo gives it back.");
-                ui.add_enabled_ui(has_card, |ui| {
+                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
@@ -225,6 +308,12 @@ impl Move {
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
             }
         });
+        if add {
+            self.add_move();
+        }
+        if delete {
+            self.delete_move(session);
+        }
         if self.id != before {
             self.loaded = None;
         }
@@ -404,7 +493,7 @@ impl Move {
         self.card(ui, Group::Basics, |ui| {
             egui::Grid::new("move_basics").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                 self.line(ui, data, "type", |ui, value, _| {
-                    let mut kind = (*value).clamp(0, 17) as u8;
+                    let mut kind = (*value).clamp(0, 31) as u8;
                     sango_species::type_menu(ui, "move_type", &mut kind, None);
                     *value = kind as i32;
                 });
@@ -601,10 +690,12 @@ impl Module for Move {
         if self.root.as_deref() != Some(dump.root()) {
             self.open(&dump);
         }
+        self.store.ensure(session.sd.as_ref());
         if self.bundle.is_some() && self.loaded != Some(self.id) {
             self.load(session);
         }
         let session: &Session = session;
+        sango_species::battle_icons::refresh_custom_types(session.sd.as_ref());
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);
@@ -637,9 +728,24 @@ impl Module for Move {
         }
         match self.tab {
             0 => self.general_tab(ui, session),
+            REACTIONS_TAB => {
+                let id = self.id;
+                match self.store.find_mut(id) {
+                    Some(entry) => egui::ScrollArea::vertical().id_salt("move_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
+                    None => widget::card(ui, |ui| {
+                        ui.label(widget::hint("The moves of the game have their reactions in the code of the game. A new move (the button \"+ New move\") has its own reactions here."));
+                    }),
+                }
+            }
             _ => {
-                let sd = session.sd.as_ref();
-                self.texts.ui(ui, sd, self.id);
+                if let Some(entry) = self.store.find_mut(self.id) {
+                    let mut language = self.custom_language;
+                    egui::ScrollArea::vertical().id_salt("move_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
+                    self.custom_language = language;
+                } else {
+                    let sd = session.sd.as_ref();
+                    self.texts.ui(ui, sd, self.id);
+                }
             }
         }
     }
@@ -674,6 +780,54 @@ mod test {
         let power = DEFS.iter().find(|d| d.key == "power").unwrap();
         let (shown, more) = index.examples(power, 40, 1);
         assert!(!shown.is_empty() && shown.len() + more > 1, "other moves have the power 40");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod add_test {
+    use super::*;
+
+    /// With the dump of the game: a new move is added from the open move, edited in the same tabs, saved, and found by another
+    /// page; it is deleted.
+    #[test]
+    fn a_new_move_is_made_and_edited_like_the_others() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_move_add_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(sango_core::SdCard::open(folder.to_str().unwrap()).unwrap()), ..Session::default() };
+        let mut page = Move::default();
+        let ctx = egui::Context::default();
+        let frame = |page: &mut Move, session: &mut Session| {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        page.id = 85;
+        frame(&mut page, &mut session);
+        frame(&mut page, &mut session);
+        let power = page.data.as_ref().unwrap().get("power").unwrap();
+        page.add_move();
+        assert_eq!(page.id, 900);
+        for tab in [0, 1, 2] {
+            page.tab = tab;
+            frame(&mut page, &mut session);
+            frame(&mut page, &mut session);
+        }
+        assert_eq!(page.data.as_ref().unwrap().get("power"), Some(power), "the new move starts with the data of the open move");
+        page.data.as_mut().unwrap().set("power", 77);
+        page.save(&session);
+        assert!(matches!(page.status, Some((true, _))), "{:?}", page.status);
+        let mut other = Move::default();
+        other.id = 900;
+        frame(&mut other, &mut session);
+        frame(&mut other, &mut session);
+        assert_eq!(other.data.as_ref().unwrap().get("power"), Some(77));
+        let rows = other.menu_rows(&session);
+        assert_eq!(rows[900].name, "New move");
+        assert!(rows[800].name.is_empty());
+        other.delete_move(&session);
+        assert!(other.store.find(900).is_none() && session.sd.as_ref().unwrap().read("move/custom/900.bin").is_none());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

@@ -74,7 +74,19 @@ pub fn ability_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: 
         ui.input_mut(|i| {
             let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
             if step != 0 {
-                *value = (*value as isize + step).clamp(1, last as isize) as usize;
+                // A row without a name (a number between the new abilities) is skipped.
+                let mut next = *value as isize;
+                loop {
+                    let candidate = (next + step).clamp(1, last as isize);
+                    if candidate == next {
+                        break;
+                    }
+                    next = candidate;
+                    if !rows[next as usize].name.is_empty() {
+                        *value = next as usize;
+                        break;
+                    }
+                }
             }
         });
     }
@@ -99,7 +111,7 @@ pub fn ability_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: 
         let clean = |s: &str| s.to_lowercase().replace(['é', 'è'], "e");
         let query = clean(state.search.trim());
         let number_query = query.trim_start_matches('#').trim_start_matches('0').to_string();
-        let mut matches: Vec<usize> = (1..=last).filter(|&n| query.is_empty() || clean(&rows[n].name).contains(&query) || (!number_query.is_empty() && n.to_string() == number_query)).collect();
+        let mut matches: Vec<usize> = (1..=last).filter(|&n| !rows[n].name.is_empty()).filter(|&n| query.is_empty() || clean(&rows[n].name).contains(&query) || (!number_query.is_empty() && n.to_string() == number_query)).collect();
 
         header(ui, &mut state);
         ui.separator();

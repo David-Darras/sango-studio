@@ -1,8 +1,8 @@
 //! The names of the 18 types of the game, in each of the eight languages.
 //!
 //! They are the lines 0 to 17 of the file of texts 18: the line is the number of the type. A file that the user changed goes
-//! on the SD card with the layout of the romfs, in the folder `text`. The names of the new types are in the list of the
-//! types (one name for all the languages).
+//! on the SD card with the layout of the romfs, in the folder `text`. The names of the new types, in every language, are in the
+//! list of the types (see `types.rs`): the Text tab edits them too.
 
 use sango_core::csv_text::{quote, records};
 use sango_core::text::{self, TextFile, LANGUAGES};
@@ -110,7 +110,7 @@ impl TypeTexts {
     }
 
     /// Draws the tab: the languages, and a box for the name of each type. `icon` draws the icon of a type before its box.
-    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, icon: &mut dyn FnMut(&mut egui::Ui, usize)) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, custom: &mut crate::types::TypeList, icon: &mut dyn FnMut(&mut egui::Ui, usize)) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
             for (index, language) in LANGUAGES.iter().enumerate() {
@@ -123,7 +123,7 @@ impl TypeTexts {
         egui::ScrollArea::vertical().id_salt("type_text_tab").auto_shrink([false, false]).show(ui, |ui| {
             widget::card(ui, |ui| {
                 ui.set_width(520.0);
-                ui.label(widget::hint("The name that the game shows for each type of the game, in this language. The new types have one name, in the Types tab."));
+                ui.label(widget::hint("The name that the game shows for each type, in this language. The new types come after the types of the game."));
                 ui.add_space(6.0);
                 for kind in 0..COUNT {
                     let key = (language, kind);
@@ -154,6 +154,32 @@ impl TypeTexts {
                         }
                     });
                     ui.add_space(2.0);
+                }
+                if !custom.custom.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("New types").strong());
+                    if language != ENGLISH {
+                        ui.label(widget::hint("A new type starts with its English name in every language: type the name in this language."));
+                    }
+                    for entry in custom.custom.iter_mut() {
+                        let id = entry.id;
+                        ui.horizontal(|ui| {
+                            ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| icon(ui, id));
+                            let mut text = entry.name_in(language).to_string();
+                            let response = ui.add(egui::TextEdit::singleline(&mut text).id_salt(("type_new_text", language, id)).desired_width(260.0).char_limit(crate::types::MAX_NAME));
+                            if response.changed() {
+                                if language == ENGLISH {
+                                    entry.rename(&text);
+                                } else {
+                                    entry.translations[language] = text.clone();
+                                }
+                            }
+                            if let Some(problem) = crate::types::name_problem(entry.name_in(language)) {
+                                ui.label(egui::RichText::new(problem).color(color::ROSE).size(12.5));
+                            }
+                        });
+                        ui.add_space(2.0);
+                    }
                 }
             });
         });

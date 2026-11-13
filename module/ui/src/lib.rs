@@ -2,6 +2,7 @@
 
 pub mod item_menu;
 pub mod module;
+pub mod retired;
 pub mod theme;
 pub mod widget;
 

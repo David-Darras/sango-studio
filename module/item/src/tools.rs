@@ -252,7 +252,7 @@ impl Item {
                 }
                 ui.vertical(|ui| {
                     ui.label(widget::title("Picture"));
-                    let own = crate::icons::ItemIcons::file_of(self.item).is_some();
+                    let own = crate::icons::ItemIcons::has_own(self.item);
                     if own {
                         ui.label(widget::hint("30 × 30 pixels, in the Bag and the shops."));
                     } else {

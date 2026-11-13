@@ -6,6 +6,7 @@
 //! page of Bulbapedia. A field that no code reads is not in the page: it is in the card "Not used by the game".
 
 mod csv;
+mod custom;
 pub mod data;
 mod icons;
 mod pockets;
@@ -19,7 +20,10 @@ use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
 /// The tabs of the page.
-const TABS: [&str; 2] = ["General", "Text"];
+const TABS: [&str; 3] = ["General", "Text", "Reactions"];
+
+/// The place of the tab "Reactions" in [`TABS`]: only a new item has reactions.
+const REACTIONS_TAB: usize = 2;
 
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
@@ -70,6 +74,9 @@ pub struct Item {
     texts: texts::ItemTexts,
     icons: icons::ItemIcons,
     tools: tools::Tools,
+    store: custom::Store,
+    /// The language of the texts of a new item.
+    custom_language: usize,
 }
 
 impl Default for Item {
@@ -93,6 +100,8 @@ impl Default for Item {
             texts: texts::ItemTexts::default(),
             icons: icons::ItemIcons::default(),
             tools: tools::Tools::default(),
+            store: custom::Store::default(),
+            custom_language: 2,
         }
     }
 }
@@ -124,7 +133,12 @@ impl Item {
         self.pockets = pockets::current(self.pocket_garc.as_ref(), session.sd.as_ref());
         self.pockets_baseline = self.pockets.clone();
         let found = self.current(session.sd.as_ref(), self.item);
-        self.from_sd = session.sd.as_ref().is_some_and(|sd| sd.read(&data::sd_path(self.item)).is_some());
+        self.from_sd = self.is_custom() || session.sd.as_ref().is_some_and(|sd| sd.read(&data::sd_path(self.item)).is_some());
+        if self.is_custom() {
+            // A new item shows the picture of the item that it was copied from, until it has its own.
+            let shown = self.store.find(self.item).map_or(0, |c| c.icon_item as usize);
+            self.icons.set_fallback(self.item, shown);
+        }
         match found {
             Some(item) => {
                 self.baseline = Some(item.clone());
@@ -141,8 +155,56 @@ impl Item {
 
     /// The data of an item as the user has it: the SD card first, then the romfs.
     fn current(&self, sd: Option<&sango_core::SdCard>, item: usize) -> Option<ItemData> {
+        if item >= sango_core::custom_item::FIRST_ID {
+            return self.store.find(item).map(|c| c.data.clone());
+        }
         let on_card = sd.and_then(|sd| sd.read(&data::sd_path(item))).and_then(|b| ItemData::from_bytes(&b).ok());
         on_card.or_else(|| self.garc.as_ref().and_then(|g| g.first_file(item)).and_then(|b| ItemData::from_bytes(b).ok()))
+    }
+
+    /// True when the open item is a new item of the user (not an item of the game).
+    fn is_custom(&self) -> bool {
+        self.item >= sango_core::custom_item::FIRST_ID
+    }
+
+    /// The highest number that the list shows: the last item of the game, or the last new item.
+    fn last_item(&self) -> usize {
+        self.store.ids().into_iter().max().unwrap_or(COUNT).max(COUNT)
+    }
+
+    /// Makes a new item that starts with the data of the open item (the same price, pocket, effects...). The item is then edited
+    /// like the other items.
+    fn add_item(&mut self, session: &Session) {
+        let template = self.data.clone();
+        let shown = if self.is_custom() { self.store.find(self.item).map_or(0, |c| c.icon_item) } else { self.item as u16 };
+        match self.store.add(template.as_ref().map(|data| (data, shown))) {
+            Ok(id) => {
+                self.item = id;
+                self.loaded = None;
+                self.status = Some((true, format!("The new item {id} starts like the item that was open. Change its name in the Text tab, and its picture in the General tab.")));
+                let _ = session;
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// Deletes the open item when it is a new item.
+    fn delete_item(&mut self, session: &Session) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        if !self.is_custom() {
+            return;
+        }
+        let id = self.item;
+        match self.store.delete(sd, id) {
+            Ok(()) => {
+                self.icons.forget_custom(id);
+                self.item = 1;
+                self.loaded = None;
+                self.list_names = None;
+                self.status = Some((true, format!("The new item {id} was deleted.")));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
     }
 
     /// The names of all the items for the list, read once.
@@ -159,7 +221,13 @@ impl Item {
     fn save(&mut self, session: &Session) {
         let Some(sd) = session.sd.as_ref() else { return };
         let mut result: Result<(), String> = Ok(());
-        if let Some(item) = &self.data {
+        if self.is_custom() {
+            // A new item keeps its data in its own file, with its texts and its reactions.
+            if let (Some(data), Some(entry)) = (&self.data, self.store.find_mut(self.item)) {
+                entry.data = data.clone();
+            }
+            result = self.store.save(sd).map(|_| ());
+        } else if let Some(item) = &self.data {
             if self.baseline.as_ref() != Some(item) {
                 let path = data::sd_path(self.item);
                 result = sd.write(&path, &item.to_bytes()).and_then(|_| sd.mark_changed(&path));
@@ -188,18 +256,28 @@ impl Item {
 
     /// True when something changed and was not saved.
     fn dirty(&self) -> bool {
-        self.data != self.baseline || self.pockets != self.pockets_baseline || self.texts.changed() || self.icons.changed()
+        self.data != self.baseline || self.pockets != self.pockets_baseline || self.texts.changed() || self.icons.changed() || self.store.changed()
     }
 
     /// The rows of the item list: the names as the user has them, with the price and the pocket of the romfs.
     fn menu_rows(&mut self, session: &Session) -> Vec<sango_ui::item_menu::Row> {
         let names = self.names(session);
-        (0..=COUNT)
+        let mut rows: Vec<sango_ui::item_menu::Row> = (0..=COUNT)
             .map(|n| {
                 let item = self.index.as_ref().and_then(|i| i.items.get(n)).and_then(|i| i.as_ref());
                 sango_ui::item_menu::Row { name: if n == 0 { "None".to_string() } else { names.get(n).cloned().unwrap_or_default() }, pocket: item.and_then(|i| i.get("pocket")).unwrap_or(0) as u8, price: item.and_then(|i| i.get("price")).unwrap_or(0) as u32 * 10 }
             })
-            .collect()
+            .collect();
+        // The new items come after the items of the game, at their numbers: a number between is a row without a name that the list skips.
+        if let Some(last) = self.store.ids().into_iter().max() {
+            rows.resize(last + 1, sango_ui::item_menu::Row::default());
+            for id in self.store.ids() {
+                if let Some(entry) = self.store.find(id) {
+                    rows[id] = sango_ui::item_menu::Row { name: entry.names[custom::ENGLISH].clone(), pocket: entry.data.get("pocket").unwrap_or(0) as u8, price: entry.data.get("price").unwrap_or(0) as u32 * 10 };
+                }
+            }
+        }
+        rows
     }
 
     /// The picker, the buttons and the state.
@@ -209,23 +287,37 @@ impl Item {
         let mut reset_tab = false;
         let mut reset_more = false;
         let mut undo = false;
+        let mut add = false;
+        let mut delete = false;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let rows = self.menu_rows(session);
                 let icons = &mut self.icons;
                 let mut chosen = self.item;
                 sango_ui::item_menu::item_menu(ui, "item_menu", &mut chosen, 260.0, &rows, &mut |ctx, n| icons.texture(ctx, n), false);
-                self.item = chosen.clamp(1, COUNT);
-                if self.garc.is_some() {
+                self.item = chosen.clamp(1, self.last_item());
+                if self.garc.is_some() && !self.is_custom() {
                     ui.label(widget::hint(&format!("archive {}, file {}", data::ARCHIVE, self.item)));
+                } else if self.is_custom() {
+                    ui.label(widget::hint("new item"));
                 }
                 let has_card = session.sd.is_some() && self.garc.is_some();
                 ui.add_enabled_ui(has_card, |ui| {
+                    add = widget::button(ui, "+ New item");
+                })
+                .response
+                .on_hover_text("Adds an item that starts like this one (the same data). Then you change it like the other items.");
+                ui.add_enabled_ui(has_card && self.is_custom(), |ui| {
+                    delete = widget::button(ui, "Delete");
+                })
+                .response
+                .on_hover_text("Deletes this new item.");
+                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_tab = widget::button(ui, "Reset tab");
                 })
                 .response
                 .on_hover_text("Puts the data of this tab for this item back to the romfs. Undo gives it back.");
-                ui.add_enabled_ui(has_card, |ui| {
+                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
@@ -250,6 +342,12 @@ impl Item {
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
             }
         });
+        if add {
+            self.add_item(session);
+        }
+        if delete {
+            self.delete_item(session);
+        }
         if self.item != before {
             self.loaded = None;
         }
@@ -455,6 +553,10 @@ impl Item {
             ui.add_space(6.0);
             self.chips(ui, item, &["use_on_pokemon", "keep_when_used"]);
             ui.add_space(8.0);
+            if item_number >= sango_core::custom_item::FIRST_ID {
+                // The pockets of the battle Bag are in an archive with one byte for each item of the game.
+                return;
+            }
             ui.label(egui::RichText::new("Pockets of the battle Bag").strong()).on_hover_text("The game reads the battle pockets in their own archive (one byte for each item), not in the file of the item. An item can be in two pockets.");
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
@@ -734,6 +836,7 @@ impl Module for Item {
         if self.root.as_deref() != Some(dump.root()) {
             self.open(&dump);
         }
+        self.store.ensure(session.sd.as_ref());
         if !self.icons_ready {
             self.icons.load_card(session.sd.as_ref());
             self.icons_ready = true;
@@ -774,9 +877,24 @@ impl Module for Item {
         }
         match self.tab {
             0 => self.general_tab(ui, session),
+            REACTIONS_TAB => {
+                let item = self.item;
+                match self.store.find_mut(item) {
+                    Some(entry) => egui::ScrollArea::vertical().id_salt("item_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
+                    None => widget::card(ui, |ui| {
+                        ui.label(widget::hint("The items of the game have their reactions in the code of the game. A new item (the button \"+ New item\") has its own reactions here."));
+                    }),
+                }
+            }
             _ => {
-                let sd = session.sd.as_ref();
-                self.texts.ui(ui, sd, self.item);
+                if let Some(entry) = self.store.find_mut(self.item) {
+                    let mut language = self.custom_language;
+                    egui::ScrollArea::vertical().id_salt("item_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
+                    self.custom_language = language;
+                } else {
+                    let sd = session.sd.as_ref();
+                    self.texts.ui(ui, sd, self.item);
+                }
             }
         }
     }
@@ -811,6 +929,57 @@ mod test {
         let hp = DEFS.iter().find(|d| d.key == "hp_restore").unwrap();
         let (shown, more) = index.examples(hp, 20, 17);
         assert!(!shown.is_empty() && shown.len() + more > 1, "other items restore 20 HP");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod add_test {
+    use super::*;
+
+    /// With the dump of the game: a new item is added from the open item, edited in the same tabs, saved, and found by another
+    /// page; it is deleted.
+    #[test]
+    fn a_new_item_is_made_and_edited_like_the_others() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_item_add_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(sango_core::SdCard::open(folder.to_str().unwrap()).unwrap()), ..Session::default() };
+        let mut page = Item::default();
+        let ctx = egui::Context::default();
+        let frame = |page: &mut Item, session: &mut Session| {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        page.item = 17;
+        frame(&mut page, &mut session);
+        frame(&mut page, &mut session);
+        let potion_price = page.data.as_ref().unwrap().get("price").unwrap();
+        page.add_item(&session);
+        assert_eq!(page.item, 900);
+        for tab in [0, 1, 2] {
+            page.tab = tab;
+            frame(&mut page, &mut session);
+            frame(&mut page, &mut session);
+        }
+        // The new item starts with the data of the Potion, and shows its picture.
+        assert_eq!(page.data.as_ref().unwrap().get("price"), Some(potion_price));
+        assert!(page.icons.rgba(900).is_some());
+        // It is edited like the others: a field of the General tab, then Save.
+        page.data.as_mut().unwrap().set("price", 77);
+        page.save(&session);
+        assert!(matches!(page.status, Some((true, _))), "{:?}", page.status);
+        let mut other = Item::default();
+        other.item = 900;
+        frame(&mut other, &mut session);
+        frame(&mut other, &mut session);
+        assert_eq!(other.data.as_ref().unwrap().get("price"), Some(77));
+        let rows = other.menu_rows(&session);
+        assert_eq!(rows[900].name, "New item");
+        assert!(rows[800].name.is_empty());
+        other.delete_item(&session);
+        assert!(other.store.find(900).is_none() && session.sd.as_ref().unwrap().read("item/custom/900.bin").is_none());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

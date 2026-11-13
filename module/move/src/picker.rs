@@ -126,7 +126,19 @@ pub fn move_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
         ui.input_mut(|i| {
             let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
             if step != 0 {
-                *value = (*value as isize + step).clamp(1, last as isize) as usize;
+                // A row without a name (a number between the new moves) is skipped.
+                let mut next = *value as isize;
+                loop {
+                    let candidate = (next + step).clamp(1, last as isize);
+                    if candidate == next {
+                        break;
+                    }
+                    next = candidate;
+                    if !rows[next as usize].name.is_empty() {
+                        *value = next as usize;
+                        break;
+                    }
+                }
             }
         });
     }
@@ -151,7 +163,7 @@ pub fn move_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
         let clean = |s: &str| s.to_lowercase().replace(['é', 'è'], "e");
         let query = clean(state.search.trim());
         let number_query = query.trim_start_matches('#').trim_start_matches('0').to_string();
-        let mut matches: Vec<usize> = (1..=last).filter(|&n| query.is_empty() || clean(&rows[n].name).contains(&query) || (!number_query.is_empty() && n.to_string() == number_query)).collect();
+        let mut matches: Vec<usize> = (1..=last).filter(|&n| !rows[n].name.is_empty()).filter(|&n| query.is_empty() || clean(&rows[n].name).contains(&query) || (!number_query.is_empty() && n.to_string() == number_query)).collect();
 
         header(ui, &mut state);
         ui.separator();
@@ -224,7 +236,7 @@ pub fn move_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
                 ui.painter().text(egui::pos2(row.left() + COLUMNS[0].0, y), egui::Align2::LEFT_CENTER, format!("#{number:03}"), egui::FontId::proportional(12.0), color::MUTED);
                 ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &data.name, egui::FontId::proportional(13.5), color::TEXT);
                 if battle_icons::paint_type(ui.painter(), data.kind, egui::pos2(row.left() + COLUMNS[2].0, y)).is_none() {
-                    ui.painter().text(egui::pos2(row.left() + COLUMNS[2].0, y), egui::Align2::LEFT_CENTER, sango_species::TYPE_NAMES.get(data.kind as usize).copied().unwrap_or("-"), egui::FontId::proportional(12.0), color::MUTED);
+                    ui.painter().text(egui::pos2(row.left() + COLUMNS[2].0, y), egui::Align2::LEFT_CENTER, battle_icons::custom_type_name(data.kind).or_else(|| sango_species::TYPE_NAMES.get(data.kind as usize).map(|n| n.to_string())).unwrap_or_else(|| "-".into()), egui::FontId::proportional(12.0), color::MUTED);
                 }
                 if let Some(texture) = battle_icons::category_texture(ui.ctx(), category_of(data.damage_kind)) {
                     battle_icons::paint(ui.painter(), &texture, egui::pos2(row.left() + COLUMNS[3].0, y));

@@ -52,6 +52,9 @@ fn move_id(name: &str) -> Option<u16> {
 
 /// The name of a move.
 pub(crate) fn move_name(id: u16) -> &'static str {
+    if let Some(name) = crate::custom_moves::name_of(id) {
+        return name;
+    }
     (id as usize).checked_sub(1).and_then(|place| MOVE.get(place)).copied().unwrap_or("-")
 }
 
@@ -390,7 +393,10 @@ impl Learnset {
 
     /// The choices of a list of moves, each with its type.
     fn move_choices(&self) -> Vec<Choice> {
-        (1..=MOVE.len()).map(|id| Choice { label: move_name(id as u16).to_string(), kind: self.moves.as_ref().and_then(|t| t.get(id)).map(|m| m.kind), value: id }).collect()
+        let mut choices: Vec<Choice> = (1..=MOVE.len()).map(|id| Choice { label: move_name(id as u16).to_string(), kind: self.moves.as_ref().and_then(|t| t.get(id)).map(|m| m.kind), value: id }).collect();
+        // The new moves of the user come after the moves of the game.
+        choices.extend(crate::custom_moves::all().into_iter().map(|(id, name, info)| Choice { label: name, kind: Some(info.kind), value: id as usize }));
+        choices
     }
 
     /// The header of a table: the names of the columns.
@@ -416,7 +422,7 @@ impl Learnset {
 
     /// The columns of a move: type, category, power, accuracy and PP.
     fn move_columns(&self, ui: &egui::Ui, row: egui::Rect, id: u16) {
-        let Some(info) = self.moves.as_ref().and_then(|table| table.get(id as usize)) else { return };
+        let Some(info) = self.moves.as_ref().and_then(|table| table.get(id as usize).copied()).or_else(|| crate::custom_moves::info_of(id)) else { return };
         let painter = ui.painter();
         let y = row.center().y;
         type_pill(painter, egui::pos2(column(row, 2).left(), y), info.kind, 12.0);
