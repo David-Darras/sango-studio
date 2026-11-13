@@ -17,3 +17,4 @@ sango-code.workspace = true
 sango-move.workspace = true
 sango-ability.workspace = true
 sango-type.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }

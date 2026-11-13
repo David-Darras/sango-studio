@@ -316,7 +316,11 @@ impl Move {
             Part::Data => {
                 let rows = csv::parse(text)?;
                 let data = |id: usize| self.current(Some(sd), id);
-                csv::apply(&rows, &data, sd)
+                let written = csv::apply(&rows, &data, sd)?;
+                // A file that is the same as the game is not a change: it goes away.
+                let romfs = |name: &str| name.parse::<usize>().ok().and_then(|id| self.bundle.as_ref()?.resource(id)).map(|bytes| bytes.to_vec());
+                sango_core::modified::remove_unchanged(sd, crate::data::SD_FOLDER, &romfs)?;
+                Ok(written)
             }
             Part::Texts => {
                 let rows = texts::parse(text)?;

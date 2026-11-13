@@ -21,6 +21,7 @@ pub mod learnset;
 pub mod lz;
 pub mod model;
 pub mod motion;
+pub mod modified;
 pub mod moves;
 pub mod posing;
 pub mod render;

@@ -39,6 +39,8 @@ pub struct Archive {
     input: String,
     loaded: Option<Loaded>,
     error: Option<String>,
+    /// While the list of the archives is open: the archive that the keyboard cursor is on.
+    cursor: Option<usize>,
 }
 
 /// The height of a line of the list of files, in points.
@@ -145,28 +147,65 @@ impl Archive {
                 }
                 let current = self.loaded.as_ref().map(|l| l.number);
                 let position = current.and_then(|n| self.numbers.iter().position(|&x| x == n));
-                if widget::button(ui, "<") {
-                    if let Some(p) = position {
-                        if p > 0 {
-                            go = Some(self.numbers[p - 1]);
-                        }
-                    }
-                }
-                if widget::button(ui, ">") {
-                    if let Some(p) = position {
-                        if p + 1 < self.numbers.len() {
-                            go = Some(self.numbers[p + 1]);
-                        }
-                    }
-                }
                 let label = current.map_or("choose".to_string(), |n| format!("{n}   {}", short_path(n)));
-                egui::ComboBox::from_id_salt("archive_list").selected_text(label).width(190.0).height(360.0).show_ui(ui, |ui| {
+                // While the list is open, the arrows move a cursor in it, Enter chooses and Escape closes (egui does that).
+                let combo_id = ui.make_persistent_id(egui::Id::new("archive_list"));
+                let mut cursor_moved = false;
+                if egui::ComboBox::is_open(ui.ctx(), combo_id) && !self.numbers.is_empty() {
+                    let at = self.cursor.or(current).and_then(|n| self.numbers.iter().position(|&x| x == n)).unwrap_or(0);
+                    let (step, home, end, enter) = ui.input_mut(|i| {
+                        let none = egui::Modifiers::NONE;
+                        let step = if i.consume_key(none, egui::Key::ArrowDown) { 1 } else if i.consume_key(none, egui::Key::ArrowUp) { -1 } else if i.consume_key(none, egui::Key::PageDown) { 10 } else if i.consume_key(none, egui::Key::PageUp) { -10 } else { 0 };
+                        (step, i.consume_key(none, egui::Key::Home), i.consume_key(none, egui::Key::End), i.consume_key(none, egui::Key::Enter))
+                    });
+                    let to = if home { 0 } else if end { self.numbers.len() - 1 } else { (at as isize + step).clamp(0, self.numbers.len() as isize - 1) as usize };
+                    cursor_moved = to != at || self.cursor.is_none() || step != 0 || home || end;
+                    self.cursor = Some(self.numbers[to]);
+                    if enter {
+                        go = self.cursor;
+                        ui.memory_mut(|m| m.close_popup());
+                    }
+                } else {
+                    self.cursor = None;
+                }
+                let cursor = self.cursor;
+                let combo = egui::ComboBox::from_id_salt("archive_list").selected_text(label).width(190.0).height(360.0).show_ui(ui, |ui| {
                     for &n in &self.numbers {
-                        if ui.selectable_label(current == Some(n), format!("{n:>3}   {}", short_path(n))).clicked() {
+                        let response = ui.selectable_label(current == Some(n) || cursor == Some(n), format!("{n:>3}   {}", short_path(n)));
+                        if cursor_moved && cursor == Some(n) {
+                            response.scroll_to_me(None);
+                        }
+                        if response.clicked() {
                             go = Some(n);
                         }
                     }
                 });
+                // The list is a stop of the keyboard navigation too: a click chooses it, it glows, and Enter opens it.
+                let list = combo.response;
+                widget::register_focusable(ui, list.id, list.rect);
+                if list.clicked() {
+                    widget::set_active_id(ui, list.id);
+                }
+                if widget::is_active(ui, list.id) && widget::page_has_focus(ui) {
+                    widget::glow(ui, list.rect, 6.0);
+                    let open = egui::ComboBox::is_open(ui.ctx(), list.id);
+                    if ui.input(|i| i.key_pressed(egui::Key::Enter)) && !open {
+                        ui.memory_mut(|m| m.open_popup(list.id.with("popup")));
+                    }
+                    // The arrows go to the archive before or after the one that is open.
+                    if !open {
+                        let (up, down) = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)));
+                        if let Some(p) = position {
+                            if up && p > 0 {
+                                go = Some(self.numbers[p - 1]);
+                            } else if down && p + 1 < self.numbers.len() {
+                                go = Some(self.numbers[p + 1]);
+                            }
+                        } else if (up || down) && !self.numbers.is_empty() {
+                            go = Some(self.numbers[0]);
+                        }
+                    }
+                }
                 ui.label(widget::hint(&format!("{} archives in the dump", self.numbers.len())));
             });
         });
@@ -610,6 +649,90 @@ mod test {
         frame(&mut page, &mut session, vec![enter(true), enter(false)]);
         frame(&mut page, &mut session, Vec::new());
         assert_eq!(page.loaded.as_ref().map(|l| l.number), Some(wanted), "Enter opens the archive {wanted}");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// With the dump of the game: while the list of the archives is open, the arrows move a cursor and Enter opens the archive.
+    #[test]
+    fn the_open_list_has_a_keyboard_cursor() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_archive_cursor_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(sango_core::SdCard::open(folder.to_str().unwrap()).unwrap()), focus_page: true, ..Session::default() };
+        let mut page = Archive::default();
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0)));
+        let frame = |page: &mut Archive, session: &mut Session, events: Vec<egui::Event>| {
+            let _ = ctx.run(egui::RawInput { screen_rect: screen, events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::update_navigation(ui);
+                    page.ui(ui, session);
+                });
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut page, &mut session, Vec::new());
+        }
+        let start = page.loaded.as_ref().map(|l| l.number).expect("an archive is open");
+        let place = page.numbers.iter().position(|&n| n == start).unwrap();
+        // The list is open: the page that draws it has the id of its button.
+        let stops = ctx.data(|d| d.get_temp::<Vec<widget::FocusableWidget>>(egui::Id::new("sango_focusable_widgets"))).unwrap_or_default();
+        let list = stops.iter().find(|w| (w.rect.width() - 190.0).abs() < 30.0).map(|w| w.id).expect("the list is a stop of the page");
+        ctx.memory_mut(|m| m.open_popup(list.with("popup")));
+        let key = |key| vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];
+        frame(&mut page, &mut session, Vec::new());
+        assert_eq!(page.cursor, Some(start), "the cursor starts on the open archive");
+        frame(&mut page, &mut session, key(egui::Key::ArrowUp));
+        frame(&mut page, &mut session, key(egui::Key::ArrowUp));
+        assert_eq!(page.cursor, Some(page.numbers[place - 2]));
+        frame(&mut page, &mut session, key(egui::Key::ArrowDown));
+        assert_eq!(page.cursor, Some(page.numbers[place - 1]));
+        assert_eq!(page.loaded.as_ref().map(|l| l.number), Some(start), "the cursor opens nothing by itself");
+        frame(&mut page, &mut session, key(egui::Key::Enter));
+        assert_eq!(page.loaded.as_ref().map(|l| l.number), Some(page.numbers[place - 1]), "Enter opens the archive of the cursor");
+        frame(&mut page, &mut session, Vec::new());
+        assert_eq!(page.cursor, None, "the cursor goes away with the list");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// With the dump of the game: the arrows on the list of the archives (when the page has chosen it) open the archive before
+    /// or after.
+    #[test]
+    fn the_arrows_work_on_the_list_of_the_archives() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_archive_list_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(sango_core::SdCard::open(folder.to_str().unwrap()).unwrap()), focus_page: true, ..Session::default() };
+        let mut page = Archive::default();
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0)));
+        let frame = |page: &mut Archive, session: &mut Session, events: Vec<egui::Event>| {
+            let _ = ctx.run(egui::RawInput { screen_rect: screen, events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::update_navigation(ui);
+                    page.ui(ui, session);
+                });
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut page, &mut session, Vec::new());
+        }
+        // The page chooses the list of the archives (the stop whose width is the one of the list).
+        let stops = ctx.data(|d| d.get_temp::<Vec<widget::FocusableWidget>>(egui::Id::new("sango_focusable_widgets"))).unwrap_or_default();
+        let list = stops.iter().find(|w| (w.rect.width() - 190.0).abs() < 30.0).map(|w| w.id).expect("the list is a stop of the page");
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_active_widget"), list));
+        let key = |key| vec![egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }];
+        frame(&mut page, &mut session, Vec::new());
+        let open_now = |page: &Archive| page.loaded.as_ref().map(|l| l.number);
+        let start = open_now(&page).expect("an archive is open");
+        let place = page.numbers.iter().position(|&n| n == start).unwrap();
+        assert!(place > 1, "the test needs archives before the open one");
+        frame(&mut page, &mut session, key(egui::Key::ArrowUp));
+        assert_eq!(open_now(&page), Some(page.numbers[place - 1]), "Up opens the archive before");
+        frame(&mut page, &mut session, key(egui::Key::ArrowUp));
+        assert_eq!(open_now(&page), Some(page.numbers[place - 2]));
+        frame(&mut page, &mut session, key(egui::Key::ArrowDown));
+        assert_eq!(open_now(&page), Some(page.numbers[place - 1]), "Down opens the next archive");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

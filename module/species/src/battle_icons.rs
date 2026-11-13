@@ -26,6 +26,8 @@ struct Image {
 
 struct Icons {
     types: Vec<Option<Image>>,
+    /// The icons of the types of the game in each language (the places of the languages in the archives), when the dump has them.
+    types_by_language: Vec<Vec<Option<Image>>>,
     /// Status, Physical, Special.
     categories: Vec<Option<Image>>,
     /// Changes when the icons are read again, so that the pictures that the windows keep are made again.
@@ -37,9 +39,14 @@ static ICONS: RwLock<Option<Icons>> = RwLock::new(None);
 /// The pictures of the first file of a layout archive (in English), with their names. The file starts with the number of pictures, then
 /// one name of 64 bytes for each picture, then the pictures in the same order.
 fn pictures(dump: &Dump, archive: usize) -> Vec<(String, Image)> {
+    pictures_in(dump, archive, ENGLISH)
+}
+
+/// The same pictures, with the text of a language (the place of the language in the archives).
+fn pictures_in(dump: &Dump, archive: usize, language: usize) -> Vec<(String, Image)> {
     let Ok(garc) = Garc::open(&dump.archive(archive)) else { return Vec::new() };
     // The files of a layout archive exist for each language of the game: the pictures have the text in English.
-    let Some(bytes) = garc.file_or_first(0, ENGLISH) else { return Vec::new() };
+    let Some(bytes) = garc.file_or_first(0, language) else { return Vec::new() };
     let data = if sango_core::lz::is_compressed(bytes) { sango_core::lz::decompress(bytes).unwrap_or_default() } else { bytes.to_vec() };
     let count = data.get(..4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize);
     let Some(names) = data.get(4..4 + count * 64) else { return Vec::new() };
@@ -70,12 +77,18 @@ fn named(list: &[(String, Image)], start: &str) -> Option<Image> {
 pub fn load(dump: &Dump) {
     let list = pictures(dump, TYPE_ARCHIVE);
     let types: Vec<Option<Image>> = (0..18).map(|k| named(&list, &format!("type_icon_{k:02}_"))).collect();
+    let by_language: Vec<Vec<Option<Image>>> = (0..8)
+        .map(|language| {
+            let list = pictures_in(dump, TYPE_ARCHIVE, language);
+            (0..18).map(|k| named(&list, &format!("type_icon_{k:02}_"))).collect()
+        })
+        .collect();
     let list = pictures(dump, CATEGORY_ARCHIVE);
     let categories: Vec<Option<Image>> = (0..3).map(|k| named(&list, &format!("damage_type_icon_{k:02}_"))).collect();
     let previous = ICONS.read().ok().and_then(|icons| icons.as_ref().map(|i| i.generation)).unwrap_or(0);
     if let Ok(mut icons) = ICONS.write() {
         let complete = |list: Vec<Option<Image>>| if list.iter().all(|i| i.is_some()) { list } else { Vec::new() };
-        *icons = Some(Icons { types: complete(types), categories: complete(categories), generation: previous + 1 });
+        *icons = Some(Icons { types: complete(types), types_by_language: by_language.into_iter().map(|list| if list.iter().all(|i| i.is_some()) { list } else { Vec::new() }).collect(), categories: complete(categories), generation: previous + 1 });
     }
 }
 
@@ -159,6 +172,15 @@ pub fn type_rgba(kind: u8) -> Option<(usize, usize, Vec<u8>)> {
     Some((image.width, image.height, image.rgba.clone()))
 }
 
+/// The pixels of the icon of a type of the game in a language (the place of the language in the archives): the icon has the
+/// name of the type in that language. A language without icons gives the English icon.
+pub fn type_rgba_in(kind: u8, language: usize) -> Option<(usize, usize, Vec<u8>)> {
+    let icons = ICONS.read().ok()?;
+    let icons = icons.as_ref()?;
+    let image = icons.types_by_language.get(language).and_then(|list| list.get(kind as usize)).and_then(|image| image.as_ref()).or_else(|| icons.types.get(kind as usize)?.as_ref())?;
+    Some((image.width, image.height, image.rgba.clone()))
+}
+
 /// The icon of a category of moves, when the dump has it.
 pub fn category_texture(ctx: &egui::Context, category: Category) -> Option<egui::TextureHandle> {
     // The pictures of the archive are in this order: Status, Physical, Special.
@@ -189,6 +211,19 @@ pub fn paint_type(painter: &egui::Painter, kind: u8, left_center: egui::Pos2) ->
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// With the dump of the game: each language has its own icons of the types, with the name of the type in that language.
+    #[test]
+    fn the_icons_of_the_types_exist_in_each_language() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        load(&Dump::open(&root).unwrap());
+        for language in 0..8 {
+            assert!(type_rgba_in(0, language).is_some(), "language {language}");
+        }
+        let english = type_rgba_in(0, ENGLISH).unwrap().2;
+        let different = (0..8).filter(|&language| type_rgba_in(0, language).unwrap().2 != english).count();
+        assert!(different > 0, "at least one language has an icon with another text");
+    }
 
     /// With the dump of the game: the 18 icons of the types and the 3 icons of the categories are found.
     #[test]

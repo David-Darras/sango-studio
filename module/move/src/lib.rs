@@ -70,6 +70,8 @@ pub struct Move {
     status: Option<(bool, String)>,
     /// The names of the moves in the list, as the user has them.
     list_names: Option<Vec<String>>,
+    /// The entries that are not the same as in the game, found again from time to time.
+    modified: sango_core::modified::Cache,
     /// The rows of the romfs for the list: the data without the names.
     rows: Vec<picker::Row>,
     index: Option<Index>,
@@ -93,6 +95,7 @@ impl Default for Move {
             tab: 0,
             status: None,
             list_names: None,
+            modified: Default::default(),
             rows: Vec::new(),
             index: None,
             texts: texts::MoveTexts::default(),
@@ -125,7 +128,7 @@ impl Move {
     /// The row of the list for the data of a move.
     fn row(data: Option<&MoveData>, name: String) -> picker::Row {
         let get = |key: &str| data.and_then(|d| d.get(key)).unwrap_or(0);
-        picker::Row { name, kind: get("type") as u8, damage_kind: get("damage_kind") as u8, power: get("power") as u8, accuracy: get("accuracy") as u8, pp: get("pp") as u8 }
+        picker::Row { name, kind: get("type") as u8, damage_kind: get("damage_kind") as u8, power: get("power") as u8, accuracy: get("accuracy") as u8, pp: get("pp") as u8, modified: false }
     }
 
     /// Reads the data of the chosen move: the SD card first, then the romfs.
@@ -156,6 +159,21 @@ impl Move {
         on_card.or_else(|| self.bundle.as_ref().and_then(|b| b.resource(id)).and_then(|b| MoveData::from_bytes(b).ok()))
     }
 
+    /// The moves whose data or texts are not the same as in the game (the files of the SD card compared with the romfs).
+    fn modified_moves(&mut self, session: &Session) -> std::collections::HashSet<usize> {
+        let Some(sd) = session.sd.as_ref() else { return Default::default() };
+        let (bundle, texts) = (&self.bundle, &self.texts);
+        self.modified
+            .get(|| {
+                let romfs = |name: &str| name.parse::<usize>().ok().and_then(|id| bundle.as_ref()?.resource(id)).map(|bytes| bytes.to_vec());
+                let mut set: std::collections::HashSet<usize> = sango_core::modified::changed_files(sd, data::SD_FOLDER, &romfs).iter().filter_map(|name| name.parse().ok()).collect();
+                let files: Vec<usize> = texts::FIELDS.iter().map(|field| field.file).collect();
+                set.extend(sango_core::modified::changed_text_lines(sd, &files, &|language, file| texts.romfs(language, file)));
+                set
+            })
+            .clone()
+    }
+
     /// The rows of the move list as the user has them: the names and the data of the SD card and the romfs.
     fn menu_rows(&mut self, session: &Session) -> Vec<picker::Row> {
         let sd = session.sd.as_ref();
@@ -165,6 +183,10 @@ impl Move {
         }
         let names = self.list_names.clone().unwrap_or_default();
         let mut rows: Vec<picker::Row> = (0..=COUNT).map(|n| Self::row(self.current(sd, n).as_ref(), names.get(n).cloned().unwrap_or_default())).collect();
+        let changed = self.modified_moves(session);
+        for (id, row) in rows.iter_mut().enumerate() {
+            row.modified = changed.contains(&id);
+        }
         // The new moves come after the moves of the game, at their numbers: a number between is a row without a name that the list skips.
         if let Some(last) = self.store.ids().into_iter().max() {
             rows.resize(last + 1, picker::Row::default());

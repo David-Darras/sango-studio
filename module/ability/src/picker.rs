@@ -12,6 +12,8 @@ pub struct Row {
     pub name: String,
     /// The number of species and forms that have the ability.
     pub species: usize,
+    /// True when the entry is not the same as in the game: the list marks it with a dot.
+    pub modified: bool,
 }
 
 /// A column of the list. A click on its header sorts the list.
@@ -176,7 +178,11 @@ pub fn ability_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: 
                 }
                 let y = row.center().y;
                 ui.painter().text(egui::pos2(row.left() + COLUMNS[0].0, y), egui::Align2::LEFT_CENTER, format!("#{number:03}"), egui::FontId::proportional(12.0), color::MUTED);
-                ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &rows[number].name, egui::FontId::proportional(13.5), color::TEXT);
+                let name_ink = if rows[number].modified { color::ACCENT } else { color::TEXT };
+                let name_rect = ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &rows[number].name, egui::FontId::proportional(13.5), name_ink);
+                if rows[number].modified {
+                    ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
+                }
                 let (x, width, _, _) = COLUMNS[2];
                 ui.painter().text(egui::pos2(row.left() + x + width - 10.0, y), egui::Align2::RIGHT_CENTER, rows[number].species.to_string(), egui::FontId::proportional(12.5), color::TEXT);
                 if response.clicked() {

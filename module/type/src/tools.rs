@@ -44,7 +44,7 @@ impl Part {
     fn hint(self) -> &'static str {
         match self {
             Part::Chart => "General tab: the effect of each type against each type.",
-            Part::Types => "Icons tab: the new types and the icons.",
+            Part::Types => "Text tab: the new types and the icons of all the types, in every language.",
             Part::Names => "Text tab: the names of the types of the game, in every language.",
         }
     }
@@ -59,12 +59,13 @@ impl Part {
     }
 }
 
-/// The part of the page that a tab shows.
-pub fn tab_part(tab: usize) -> Part {
+/// The parts of the page that a tab shows: the chart in the General tab, the new types, their icons and the names in the Text
+/// tab. The CSV tab shows no part.
+pub fn tab_parts(tab: usize) -> Vec<Part> {
     match tab {
-        0 => Part::Chart,
-        1 => Part::Types,
-        _ => Part::Names,
+        0 => vec![Part::Chart],
+        1 => vec![Part::Types, Part::Names],
+        _ => Vec::new(),
     }
 }
 

@@ -15,6 +15,8 @@ struct App {
     frames: u32,
     /// True when the last click was in the side bar: then the up and down arrows change the page.
     side_bar_focus: bool,
+    /// The next page that is drawn out of sight to load its data (see `warm_up`).
+    warmed: usize,
 }
 
 impl App {
@@ -33,7 +35,7 @@ impl App {
         ];
         // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
         let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).unwrap_or(0);
-        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true }
+        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0 }
     }
 
     fn side_bar(&mut self, ctx: &egui::Context) {
@@ -60,6 +62,35 @@ impl App {
                 ui.label(widget::hint(&format!("v{}", sango_core::VERSION)));
             });
         });
+    }
+
+    /// Draws one page that is not open, out of sight, at each frame once the window is ready. Each page reads its files and
+    /// makes its textures the first time that it is drawn, which takes a few seconds for the big ones: this way the wait
+    /// is at the start and the click on a page is quick.
+    fn warm_up(&mut self, ctx: &egui::Context) {
+        if self.frames < 12 || self.session.missing().is_some() {
+            return;
+        }
+        if self.warmed == self.current {
+            self.warmed += 1;
+        }
+        let place = self.warmed;
+        let Some(module) = self.modules.get_mut(place) else { return };
+        self.warmed += 1;
+        let session = &mut self.session;
+        let (was, size) = (session.focus_page, egui::vec2(1300.0, 800.0));
+        session.focus_page = false;
+        widget::isolated(ctx, || {
+            widget::set_page_focus(ctx, false);
+            egui::Area::new(egui::Id::new(("warm_up", place))).order(egui::Order::Background).fixed_pos(egui::pos2(-20000.0, -20000.0)).constrain(false).interactable(false).show(ctx, |ui| {
+                ui.set_invisible();
+                ui.set_min_size(size);
+                ui.set_max_size(size);
+                module.ui(ui, session);
+            });
+        });
+        session.focus_page = was;
+        ctx.request_repaint();
     }
 
     fn update_ctx(&mut self, ctx: &egui::Context) {
@@ -168,12 +199,23 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.update_ctx(ctx);
+        self.warm_up(ctx);
     }
 }
 
+/// The logo, as the icon of the window.
+fn window_icon() -> Option<egui::IconData> {
+    let image = image::load_from_memory(include_bytes!("../assets/logo_256.png")).ok()?.to_rgba8();
+    Some(egui::IconData { width: image.width(), height: image.height(), rgba: image.into_raw() })
+}
+
 fn main() -> eframe::Result<()> {
+    let mut viewport = egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]).with_min_inner_size([720.0, 480.0]).with_title(sango_core::NAME);
+    if let Some(icon) = window_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]).with_min_inner_size([720.0, 480.0]).with_title(sango_core::NAME),
+        viewport,
         renderer: eframe::Renderer::Wgpu,
         ..Default::default()
     };
@@ -183,6 +225,38 @@ fn main() -> eframe::Result<()> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// The pages that are not open are drawn out of sight one after the other, once, and the keyboard focus of the open page
+    /// stays as it was.
+    #[test]
+    fn the_other_pages_are_loaded_out_of_sight() {
+        let mut app = App {
+            modules: vec![Box::new(sango_home::Home::default()), Box::new(sango_species::Species::default()), Box::new(sango_item::Item::default())],
+            current: 0,
+            session: Session::restore(),
+            frames: 20,
+            warmed: 0,
+            side_bar_focus: false,
+        };
+        let ctx = egui::Context::default();
+        for _ in 0..6 {
+            let _ = ctx.run(Default::default(), |ctx| {
+                app.update_ctx(ctx);
+                app.warm_up(ctx);
+            });
+        }
+        if app.session.missing().is_none() {
+            assert_eq!(app.warmed, 3, "the two other pages were drawn, one at each frame, and then no more");
+        }
+        assert_eq!(app.current, 0);
+    }
+
+    #[test]
+    fn the_logo_is_the_icon_of_the_window() {
+        let icon = window_icon().expect("the logo is a PNG picture");
+        assert_eq!((icon.width, icon.height), (256, 256));
+        assert_eq!(icon.rgba.len(), 256 * 256 * 4);
+    }
 
     #[test]
     fn clicking_in_species_page() {
@@ -200,6 +274,7 @@ mod test {
             current: 2,
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: false,
         };
 
@@ -240,6 +315,7 @@ mod test {
             current: 0,
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: true,
         };
 
@@ -290,6 +366,7 @@ mod test {
             current: 0,
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: true,
         };
 
@@ -345,6 +422,7 @@ mod test {
             current: 0,
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: false,
         };
         let ctx = egui::Context::default();
@@ -393,6 +471,7 @@ mod test {
             current: 1, // Archive module
             session: Session::default(), // No dump loaded -> missing
             frames: 10,
+            warmed: 0,
             side_bar_focus: false,
         };
         let ctx = egui::Context::default();
@@ -440,6 +519,7 @@ mod test {
             current: 2,
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: false,
         };
 
@@ -484,6 +564,7 @@ mod test {
             current: 0,
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: true,
         };
 
@@ -551,6 +632,7 @@ mod test {
             current: 2, // Species module
             session: Session::restore(),
             frames: 10,
+            warmed: 0,
             side_bar_focus: false,
         };
 

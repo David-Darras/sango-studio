@@ -107,6 +107,34 @@ const FOCUSABLE_WIDGETS_KEY: &str = "sango_focusable_widgets";
 const FOCUSABLE_WIDGETS_NEXT_KEY: &str = "sango_focusable_widgets_next";
 const SCROLL_TO_ACTIVE_KEY: &str = "sango_scroll_to_active";
 
+/// Runs `draw` and then puts the keyboard navigation back as it was: the widgets that `draw` registers, the active widget
+/// and the focus of the page are forgotten. For a page that is drawn out of sight to load its data.
+pub fn isolated<R>(ctx: &egui::Context, draw: impl FnOnce() -> R) -> R {
+    let (active, focus, current, next) = ctx.data(|d| {
+        (
+            d.get_temp::<egui::Id>(egui::Id::new(ACTIVE_WIDGET_KEY)),
+            d.get_temp::<bool>(egui::Id::new(PAGE_FOCUS_KEY)),
+            d.get_temp::<Vec<FocusableWidget>>(egui::Id::new(FOCUSABLE_WIDGETS_KEY)),
+            d.get_temp::<Vec<FocusableWidget>>(egui::Id::new(FOCUSABLE_WIDGETS_NEXT_KEY)),
+        )
+    });
+    let result = draw();
+    ctx.data_mut(|d| {
+        fn put<T: 'static + Clone + Send + Sync>(d: &mut egui::util::IdTypeMap, key: &str, value: Option<T>) {
+            match value {
+                Some(value) => d.insert_temp(egui::Id::new(key), value),
+                None => d.remove::<T>(egui::Id::new(key)),
+            }
+        }
+        put(d, ACTIVE_WIDGET_KEY, active);
+        put(d, PAGE_FOCUS_KEY, focus);
+        put(d, FOCUSABLE_WIDGETS_KEY, current);
+        put(d, FOCUSABLE_WIDGETS_NEXT_KEY, next);
+        d.remove_temp::<bool>(egui::Id::new(SCROLL_TO_ACTIVE_KEY));
+    });
+    result
+}
+
 /// A focusable widget representation with its ID and screen-space bounding rectangle.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocusableWidget {

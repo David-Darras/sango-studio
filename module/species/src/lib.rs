@@ -245,6 +245,15 @@ struct ListRow {
     stats: [u8; 6],
     /// The sum of the six base stats.
     total: u16,
+    /// True when a file of the SD card (data, moves or evolutions) is not the same as in the game.
+    modified: bool,
+}
+
+impl ListRow {
+    fn with_modified(mut self, modified: bool) -> Self {
+        self.modified = modified;
+        self
+    }
 }
 
 /// A column of the species list. A click on its header sorts the list.
@@ -315,8 +324,31 @@ fn sort_species(list: &mut [usize], rows: &[ListRow], column: SortColumn, descen
     });
 }
 
+/// The species that have a file on the SD card (data, moves or evolutions) that is not the same as the file of the game.
+fn modified_species(garc: Option<&Garc>, session: &Session) -> std::collections::HashSet<usize> {
+    let (Some(sd), Some(dump), Some(garc)) = (session.sd.as_ref(), session.dump.as_ref(), garc) else { return Default::default() };
+    // A name like "25_0" is a species and a form: the file of the game is the place of that form in the archive.
+    let form_file = |name: &str| -> Option<usize> {
+        let (species, form) = name.split_once('_')?;
+        Some(file_index(garc, species.parse().ok()?, form.parse().ok()?))
+    };
+    let mut found = std::collections::HashSet::new();
+    let mut note = |names: Vec<String>| found.extend(names.iter().filter_map(|name| name.split('_').next()?.parse::<usize>().ok()));
+    note(sango_core::modified::changed_files(sd, "pokemon/data", &|name| garc.first_file(form_file(name)?).map(|bytes| bytes.to_vec())));
+    for (folder, archive) in [("pokemon/learnset", sango_core::learnset::LEVEL_UP_ARCHIVE), ("pokemon/evolution", sango_core::evolution::ARCHIVE)] {
+        if let Ok(other) = Garc::open(&dump.archive(archive)) {
+            note(sango_core::modified::changed_files(sd, folder, &|name| other.first_file(form_file(name)?).map(|bytes| bytes.to_vec())));
+        }
+    }
+    if let Ok(eggs) = Garc::open(&dump.archive(sango_core::learnset::EGG_ARCHIVE)) {
+        note(sango_core::modified::changed_files(sd, "pokemon/egg_moves", &|name| eggs.first_file(name.parse().ok()?).map(|bytes| bytes.to_vec())));
+    }
+    found
+}
+
 /// Reads the list data of all the species: the SD card first, then the romfs.
 fn read_list_rows(garc: Option<&Garc>, session: &Session) -> Vec<ListRow> {
+    let changed = modified_species(garc, session);
     (1..=SPECIES_COUNT)
         .map(|species| {
             let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
@@ -326,9 +358,11 @@ fn read_list_rows(garc: Option<&Garc>, session: &Session) -> Vec<ListRow> {
                     types: [d.type_1, d.type_2],
                     stats: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
                     total: d.base_total() as u16,
+                    modified: false,
                 },
-                None => ListRow { types: [0, 0], stats: [0; 6], total: 0 },
+                None => ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false },
             }
+            .with_modified(changed.contains(&species))
         })
         .collect()
 }
@@ -385,7 +419,11 @@ fn paint_list_row(ui: &egui::Ui, rect: egui::Rect, number: usize, row: Option<&L
     let y = rect.center().y;
     let left = rect.left();
     ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
-    ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), color::TEXT);
+    let modified = row.is_some_and(|row| row.modified);
+    let name_rect = ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), if modified { color::ACCENT } else { color::TEXT });
+    if modified {
+        ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
+    }
     if let Some(row) = row {
         // The icons of the types; the text when the dump has no icons.
         if battle_icons::paint_type(ui.painter(), row.types[0], egui::pos2(left + 236.0, y)).is_none() {
@@ -583,9 +621,14 @@ impl Species {
                 }
 
                 widget::register_focusable(ui, species_id, button_response.rect);
-                if ui.memory(|m| m.is_popup_open(popup_id)) && self.list_rows.is_none() {
-                    let rows = self.build_list_rows(session);
-                    self.list_rows = Some(rows);
+                if ui.memory(|m| m.is_popup_open(popup_id)) {
+                    if self.list_rows.is_none() {
+                        let rows = self.build_list_rows(session);
+                        self.list_rows = Some(rows);
+                    }
+                } else {
+                    // The list is read again at each opening: a reset, an import or an undo may have changed the files.
+                    self.list_rows = None;
                 }
                 let popup_res = egui::popup::popup_below_widget(
                     ui,
@@ -2530,10 +2573,10 @@ mod test {
 
     #[test]
     fn the_species_list_sorts_on_each_column() {
-        let mut rows = vec![ListRow { types: [0, 0], stats: [0; 6], total: 0 }; 3];
-        rows[0] = ListRow { types: [0, 1], stats: [10, 0, 0, 0, 0, 0], total: 10 }; // Bulbasaur
-        rows[1] = ListRow { types: [2, 2], stats: [30, 0, 0, 0, 0, 0], total: 30 }; // Ivysaur
-        rows[2] = ListRow { types: [1, 0], stats: [30, 5, 0, 0, 0, 0], total: 35 }; // Venusaur
+        let mut rows = vec![ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false }; 3];
+        rows[0] = ListRow { types: [0, 1], stats: [10, 0, 0, 0, 0, 0], total: 10, modified: false }; // Bulbasaur
+        rows[1] = ListRow { types: [2, 2], stats: [30, 0, 0, 0, 0, 0], total: 30, modified: false }; // Ivysaur
+        rows[2] = ListRow { types: [1, 0], stats: [30, 5, 0, 0, 0, 0], total: 35, modified: false }; // Venusaur
 
         let mut list = vec![1, 2, 3];
         // Equal HP: the species number decides.

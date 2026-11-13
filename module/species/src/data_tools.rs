@@ -492,6 +492,12 @@ impl Species {
                 let garc = self.garc.as_ref().ok_or("The archive is not open.")?;
                 let rows = csv::parse(text)?;
                 let report = csv::apply(&rows, garc, sd, &mut self.pokedex)?;
+                // A file that is the same as the game is not a change: it goes away.
+                let romfs = |name: &str| {
+                    let (species, form) = name.split_once('_')?;
+                    garc.first_file(crate::file_index(garc, species.parse().ok()?, form.parse().ok()?)).map(|bytes| bytes.to_vec())
+                };
+                sango_core::modified::remove_unchanged(sd, "pokemon/data", &romfs)?;
                 Ok(report.written + report.shape_written as usize)
             }
             Part::Moves => self.learnset.csv_import(sd, text),

@@ -404,7 +404,11 @@ impl Item {
                 let rows = csv::parse(text)?;
                 let data = |item: usize| self.current(Some(sd), item);
                 let pockets = crate::pockets::current(self.pocket_garc.as_ref(), Some(sd));
-                csv::apply(&rows, &data, &pockets, sd)
+                let written = csv::apply(&rows, &data, &pockets, sd)?;
+                // A file that is the same as the game is not a change: it goes away.
+                let romfs = |name: &str| name.parse::<usize>().ok().and_then(|item| self.garc.as_ref()?.first_file(item)).map(|bytes| bytes.to_vec());
+                sango_core::modified::remove_unchanged(sd, crate::data::SD_FOLDER, &romfs)?;
+                Ok(written)
             }
             Part::Texts => {
                 let rows = texts::parse(text)?;

@@ -74,6 +74,8 @@ pub struct Item {
     status: Option<(bool, String)>,
     /// The names of the items in the list, as the user has them.
     list_names: Option<Vec<String>>,
+    /// The entries that are not the same as in the game, found again from time to time.
+    modified: sango_core::modified::Cache,
     index: Option<Index>,
     /// False until the pictures of the SD card are read.
     icons_ready: bool,
@@ -101,6 +103,7 @@ impl Default for Item {
             tab: 0,
             status: None,
             list_names: None,
+            modified: Default::default(),
             index: None,
             icons_ready: false,
             texts: texts::ItemTexts::default(),
@@ -271,19 +274,38 @@ impl Item {
         let mut rows: Vec<sango_ui::item_menu::Row> = (0..=COUNT)
             .map(|n| {
                 let item = self.index.as_ref().and_then(|i| i.items.get(n)).and_then(|i| i.as_ref());
-                sango_ui::item_menu::Row { name: if n == 0 { "None".to_string() } else { names.get(n).cloned().unwrap_or_default() }, pocket: item.and_then(|i| i.get("pocket")).unwrap_or(0) as u8, price: item.and_then(|i| i.get("price")).unwrap_or(0) as u32 * 10 }
+                sango_ui::item_menu::Row { name: if n == 0 { "None".to_string() } else { names.get(n).cloned().unwrap_or_default() }, pocket: item.and_then(|i| i.get("pocket")).unwrap_or(0) as u8, price: item.and_then(|i| i.get("price")).unwrap_or(0) as u32 * 10, modified: false }
             })
             .collect();
+        let changed = self.modified_items(session);
+        for (item, row) in rows.iter_mut().enumerate() {
+            row.modified = changed.contains(&item);
+        }
         // The new items come after the items of the game, at their numbers: a number between is a row without a name that the list skips.
         if let Some(last) = self.store.ids().into_iter().max() {
             rows.resize(last + 1, sango_ui::item_menu::Row::default());
             for id in self.store.ids() {
                 if let Some(entry) = self.store.find(id) {
-                    rows[id] = sango_ui::item_menu::Row { name: entry.names[custom::ENGLISH].clone(), pocket: entry.data.get("pocket").unwrap_or(0) as u8, price: entry.data.get("price").unwrap_or(0) as u32 * 10 };
+                    rows[id] = sango_ui::item_menu::Row { name: entry.names[custom::ENGLISH].clone(), pocket: entry.data.get("pocket").unwrap_or(0) as u8, price: entry.data.get("price").unwrap_or(0) as u32 * 10, modified: false };
                 }
             }
         }
         rows
+    }
+
+    /// The items whose data or texts are not the same as in the game (the files of the SD card compared with the romfs).
+    fn modified_items(&mut self, session: &Session) -> std::collections::HashSet<usize> {
+        let Some(sd) = session.sd.as_ref() else { return Default::default() };
+        let (garc, texts) = (&self.garc, &self.texts);
+        self.modified
+            .get(|| {
+                let romfs = |name: &str| name.parse::<usize>().ok().and_then(|item| garc.as_ref()?.first_file(item)).map(|bytes| bytes.to_vec());
+                let mut set: std::collections::HashSet<usize> = sango_core::modified::changed_files(sd, data::SD_FOLDER, &romfs).iter().filter_map(|name| name.parse().ok()).collect();
+                let files: Vec<usize> = texts::FIELDS.iter().map(|field| field.file).collect();
+                set.extend(sango_core::modified::changed_text_lines(sd, &files, &|language, file| texts.romfs(language, file)));
+                set
+            })
+            .clone()
     }
 
     /// The picker, the buttons and the state.

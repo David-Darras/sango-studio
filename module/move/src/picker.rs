@@ -19,6 +19,8 @@ pub struct Row {
     pub power: u8,
     pub accuracy: u8,
     pub pp: u8,
+    /// True when the entry is not the same as in the game: the list marks it with a dot.
+    pub modified: bool,
 }
 
 /// A column of the list. A click on its header sorts the list.
@@ -234,7 +236,11 @@ pub fn move_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
                 let data = &rows[number];
                 let y = row.center().y;
                 ui.painter().text(egui::pos2(row.left() + COLUMNS[0].0, y), egui::Align2::LEFT_CENTER, format!("#{number:03}"), egui::FontId::proportional(12.0), color::MUTED);
-                ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &data.name, egui::FontId::proportional(13.5), color::TEXT);
+                let name_ink = if data.modified { color::ACCENT } else { color::TEXT };
+                let name_rect = ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &data.name, egui::FontId::proportional(13.5), name_ink);
+                if data.modified {
+                    ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
+                }
                 if battle_icons::paint_type(ui.painter(), data.kind, egui::pos2(row.left() + COLUMNS[2].0, y)).is_none() {
                     ui.painter().text(egui::pos2(row.left() + COLUMNS[2].0, y), egui::Align2::LEFT_CENTER, battle_icons::custom_type_name(data.kind).or_else(|| sango_species::TYPE_NAMES.get(data.kind as usize).map(|n| n.to_string())).unwrap_or_else(|| "-".into()), egui::FontId::proportional(12.0), color::MUTED);
                 }

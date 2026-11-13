@@ -5,6 +5,7 @@
 //! read, in `type/icon/<number>.bclim`. A new type without a file is drawn as a pill with its name, in the colour of its
 //! colour type.
 
+use sango_core::text::LANGUAGES;
 use sango_core::{Clim, SdCard};
 use sango_species::battle_icons;
 use sango_ui::theme::color;
@@ -15,24 +16,48 @@ use std::collections::{HashMap, HashSet};
 pub const WIDTH: usize = 50;
 pub const HEIGHT: usize = 20;
 
+/// The language of the icons that are drawn where the page has no language to choose (the chart): English.
+pub const ENGLISH: usize = 2;
+
 /// The folder of the icons on the SD card.
 pub const SD_FOLDER: &str = "type/icon";
 
-/// Where the icon of a type is on the SD card.
-pub fn sd_path(id: usize) -> String {
-    format!("{SD_FOLDER}/{id}.bclim")
+/// Where the icon of a type is on the SD card, for a language (the number of the language in `LANGUAGES`). The English icon is
+/// `type/icon/<number>.bclim`; the icon of another language is in the folder of that language, `type/icon/<language>/<number>.bclim`.
+pub fn sd_path(id: usize, language: usize) -> String {
+    match LANGUAGES.get(language) {
+        Some(other) if language != ENGLISH => format!("{SD_FOLDER}/{}/{id}.bclim", other.folder),
+        _ => format!("{SD_FOLDER}/{id}.bclim"),
+    }
 }
 
+/// The type and the language of a file of the folder of the icons, from the path of the file.
+fn parse_path(path: &str) -> Option<(usize, usize)> {
+    let parts: Vec<&str> = path.strip_prefix(SD_FOLDER)?.trim_start_matches('/').split('/').collect();
+    let number = |name: &str| name.strip_suffix(".bclim").and_then(|n| n.parse::<usize>().ok());
+    match parts.as_slice() {
+        [file] => number(file).map(|id| (id, ENGLISH)),
+        [folder, file] => Some((number(file)?, LANGUAGES.iter().position(|language| language.folder == *folder)?)),
+        _ => None,
+    }
+}
+
+/// An icon of the user: the number of the type and the language.
+type Key = (usize, usize);
+
 /// The icons that the user changed, and the textures of all the icons.
+///
+/// A type has one icon for each language, because the icon shows the name of the type. A type of the game has the icons of the
+/// game; a new type that has no icon in a language shows its English icon.
 #[derive(Default)]
 pub struct TypeIcons {
     /// The files of the icons: the SD card, and the changes that were not saved.
-    overrides: HashMap<usize, Vec<u8>>,
+    overrides: HashMap<Key, Vec<u8>>,
     /// The icons that changed and were not saved.
-    pending: HashSet<usize>,
+    pending: HashSet<Key>,
     /// The icons that were reset and whose file must go.
-    removed: HashSet<usize>,
-    textures: HashMap<usize, Option<egui::TextureHandle>>,
+    removed: HashSet<Key>,
+    textures: HashMap<Key, Option<egui::TextureHandle>>,
     /// The textures that were forgotten: they live on a few frames, because the frame may still draw them.
     retired: sango_ui::retired::Retired,
 }
@@ -46,10 +71,9 @@ impl TypeIcons {
         self.retired.forget_all(&mut self.textures);
         let Some(sd) = sd else { return };
         for path in sd.files_in(SD_FOLDER) {
-            let id = path.rsplit('/').next().and_then(|name| name.strip_suffix(".bclim")).and_then(|n| n.parse::<usize>().ok());
-            if let (Some(id), Some(bytes)) = (id, sd.read(&path)) {
+            if let (Some(key), Some(bytes)) = (parse_path(&path), sd.read(&path)) {
                 if decode(&bytes).is_ok() {
-                    self.overrides.insert(id, bytes);
+                    self.overrides.insert(key, bytes);
                 }
             }
         }
@@ -62,73 +86,94 @@ impl TypeIcons {
 
     /// True when an icon comes from the SD card.
     pub fn from_card(&self) -> bool {
-        self.overrides.keys().any(|id| !self.pending.contains(id))
+        self.overrides.keys().any(|key| !self.pending.contains(key))
     }
 
-    /// True when the type has an icon of the user.
-    pub fn has_override(&self, id: usize) -> bool {
-        self.overrides.contains_key(&id)
+    /// True when the type has an icon of the user in this language.
+    pub fn has_override(&self, id: usize, language: usize) -> bool {
+        self.overrides.contains_key(&(id, language))
     }
 
-    /// The pixels of the icon of a type, when it has one (the icon of the user, or the icon of the game).
-    pub fn rgba(&self, id: usize) -> Option<Vec<u8>> {
-        if let Some(bytes) = self.overrides.get(&id) {
+    /// The pixels of the icon of a type in a language, when it has one: the icon of the user, or the icon of the game, or
+    /// (for a new type) the English icon of the user.
+    pub fn rgba(&self, id: usize, language: usize) -> Option<Vec<u8>> {
+        if let Some(bytes) = self.overrides.get(&(id, language)) {
             return decode(bytes).ok();
         }
-        battle_icons::type_rgba(id.min(255) as u8).filter(|_| id < crate::chart::GAME_TYPES).map(|(_, _, rgba)| rgba)
+        if id >= crate::chart::GAME_TYPES {
+            return self.overrides.get(&(id, ENGLISH)).and_then(|bytes| decode(bytes).ok());
+        }
+        battle_icons::type_rgba_in(id.min(255) as u8, language).map(|(_, _, rgba)| rgba)
     }
 
-    /// The texture of the icon of a type, when it has one.
-    pub fn texture(&mut self, ctx: &egui::Context, id: usize) -> Option<egui::TextureHandle> {
+    /// The texture of the icon of a type in a language, when it has one.
+    pub fn texture(&mut self, ctx: &egui::Context, id: usize, language: usize) -> Option<egui::TextureHandle> {
         self.retired.tick(ctx);
-        if let Some(found) = self.textures.get(&id) {
+        if let Some(found) = self.textures.get(&(id, language)) {
             return found.clone();
         }
-        let made = self.rgba(id).map(|rgba| ctx.load_texture(format!("type_icon_{id}"), egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
-        self.textures.insert(id, made.clone());
+        let made = self.rgba(id, language).map(|rgba| ctx.load_texture(format!("type_icon_{id}_{language}"), egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
+        self.textures.insert((id, language), made.clone());
         made
     }
 
-    /// Gives a type an icon: a PNG file of 50 × 20 pixels. The change is kept until it is saved.
-    pub fn import(&mut self, id: usize, path: &std::path::Path) -> Result<(), String> {
+    /// Forgets the textures that a change of an icon reaches: the icon of that language, and (for a new type) all the
+    /// languages when the English icon changes, because they follow it.
+    fn forget_textures(&mut self, id: usize, language: usize) {
+        for other in 0..LANGUAGES.len() {
+            if other == language || (id >= crate::chart::GAME_TYPES && language == ENGLISH) {
+                self.retired.forget(&mut self.textures, &(id, other));
+            }
+        }
+    }
+
+    /// Gives a type an icon in a language: a PNG file of 50 x 20 pixels. The change is kept until it is saved.
+    pub fn import(&mut self, id: usize, language: usize, path: &std::path::Path) -> Result<(), String> {
         let pixels = read_png(path)?;
         let clim = Clim::from_rgba4(WIDTH, HEIGHT, &pixels)?;
-        self.overrides.insert(id, clim.to_bytes());
-        self.pending.insert(id);
-        self.removed.remove(&id);
-        self.retired.forget(&mut self.textures, &id);
+        self.overrides.insert((id, language), clim.to_bytes());
+        self.pending.insert((id, language));
+        self.removed.remove(&(id, language));
+        self.forget_textures(id, language);
         Ok(())
     }
 
-    /// Writes the icon of a type as a PNG file.
-    pub fn export(&self, id: usize, path: &std::path::Path) -> Result<(), String> {
-        let rgba = self.rgba(id).ok_or("This type has no icon yet: import one.")?;
+    /// Writes the icon of a type in a language as a PNG file.
+    pub fn export(&self, id: usize, language: usize, path: &std::path::Path) -> Result<(), String> {
+        let rgba = self.rgba(id, language).ok_or("This type has no icon yet: import one.")?;
         image::save_buffer(path, &rgba, WIDTH as u32, HEIGHT as u32, image::ColorType::Rgba8).map_err(|error| format!("{}: {error}", path.display()))
     }
 
-    /// Takes the icon of the user away: the type has the icon of the game again (or the pill of a new type).
-    pub fn reset(&mut self, id: usize) {
-        if self.overrides.remove(&id).is_some() {
-            self.pending.remove(&id);
-            self.removed.insert(id);
-            self.retired.forget(&mut self.textures, &id);
+    /// Takes the icon of the user away in a language: the type has the icon of the game again (or the English icon of a new type).
+    pub fn reset(&mut self, id: usize, language: usize) {
+        if self.overrides.remove(&(id, language)).is_some() {
+            self.pending.remove(&(id, language));
+            self.removed.insert((id, language));
+            self.forget_textures(id, language);
+        }
+    }
+
+    /// Takes the icons of the user away in every language (a type that is removed).
+    pub fn reset_all(&mut self, id: usize) {
+        for language in 0..LANGUAGES.len() {
+            self.reset(id, language);
         }
     }
 
     /// Writes the icons that changed on the SD card (and removes the ones that were reset), and tells the game.
     pub fn save(&mut self, sd: &SdCard) -> Result<(), String> {
-        let mut changed: Vec<usize> = self.pending.iter().copied().collect();
+        let mut changed: Vec<Key> = self.pending.iter().copied().collect();
         changed.sort_unstable();
-        for id in changed {
-            let path = sd_path(id);
-            sd.write(&path, &self.overrides[&id]).and_then(|_| sd.mark_changed(&path))?;
-            self.pending.remove(&id);
+        for key in changed {
+            let path = sd_path(key.0, key.1);
+            sd.write(&path, &self.overrides[&key]).and_then(|_| sd.mark_changed(&path))?;
+            self.pending.remove(&key);
         }
-        let mut removed: Vec<usize> = self.removed.iter().copied().collect();
+        let mut removed: Vec<Key> = self.removed.iter().copied().collect();
         removed.sort_unstable();
-        for id in removed {
-            sd.remove(&sd_path(id))?;
-            self.removed.remove(&id);
+        for key in removed {
+            sd.remove(&sd_path(key.0, key.1))?;
+            self.removed.remove(&key);
         }
         Ok(())
     }
@@ -146,8 +191,8 @@ impl TypeIcons {
 
     /// Draws the icon of a type in a rectangle. A new type without an icon is a pill with its `name` in the colour of the
     /// type `colour_type`.
-    pub fn paint(&mut self, ui: &egui::Ui, id: usize, rect: egui::Rect, name: &str, colour_type: u8) {
-        if let Some(texture) = self.texture(ui.ctx(), id) {
+    pub fn paint(&mut self, ui: &egui::Ui, id: usize, language: usize, rect: egui::Rect, name: &str, colour_type: u8) {
+        if let Some(texture) = self.texture(ui.ctx(), id, language) {
             let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             ui.painter().image(texture.id(), rect, full, egui::Color32::WHITE);
             return;
@@ -171,13 +216,13 @@ impl TypeIcons {
     /// Draws the icon of a type turned a quarter of a turn to the left (the name reads from the bottom to the top), in a
     /// rectangle of `width` × `height` points: the icon of 50 × 20 pixels is drawn `height` points long. It is the header of
     /// the columns of the chart, where the columns are narrower than the icons.
-    pub fn paint_turned(&mut self, ui: &egui::Ui, id: usize, rect: egui::Rect, name: &str, colour_type: u8) {
+    pub fn paint_turned(&mut self, ui: &egui::Ui, id: usize, language: usize, rect: egui::Rect, name: &str, colour_type: u8) {
         let centre = rect.center();
         // The icon before the turn is `long` points wide and `short` points high.
         let (short, long) = (rect.width(), rect.height());
         let turn = |x: f32, y: f32| centre + egui::vec2(y, -x);
         let (half_long, half_short) = (long / 2.0, short / 2.0);
-        if let Some(texture) = self.texture(ui.ctx(), id) {
+        if let Some(texture) = self.texture(ui.ctx(), id, language) {
             let mut mesh = egui::Mesh::with_texture(texture.id());
             for (x, y, u, v) in [(-half_long, -half_short, 0.0, 0.0), (half_long, -half_short, 1.0, 0.0), (half_long, half_short, 1.0, 1.0), (-half_long, half_short, 0.0, 1.0)] {
                 mesh.vertices.push(egui::epaint::Vertex { pos: turn(x, y), uv: egui::pos2(u, v), color: egui::Color32::WHITE });
@@ -220,7 +265,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn an_icon_is_imported_saved_and_reset() {
+    fn an_icon_is_imported_saved_and_reset_in_each_language() {
         let folder = std::env::temp_dir().join(format!("sango_type_icons_{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
@@ -231,24 +276,40 @@ mod test {
             *pixel = image::Rgba([255, 0, 0, 255]);
         }
         picture.save(&png).unwrap();
-        icons.import(19, &png).unwrap();
-        assert!(icons.changed() && icons.has_override(19));
-        assert_eq!(icons.rgba(19).unwrap()[..4], [255, 0, 0, 255]);
+        let spanish = LANGUAGES.iter().position(|language| language.folder != LANGUAGES[ENGLISH].folder).unwrap();
+        // The English icon of a new type is also the icon of the other languages, until they have their own.
+        icons.import(19, ENGLISH, &png).unwrap();
+        assert!(icons.changed() && icons.has_override(19, ENGLISH) && !icons.has_override(19, spanish));
+        assert_eq!(icons.rgba(19, ENGLISH).unwrap()[..4], [255, 0, 0, 255]);
+        assert_eq!(icons.rgba(19, spanish).unwrap()[..4], [255, 0, 0, 255], "the languages follow the English icon");
+        // Another language has its own file, in its own folder.
+        let mut green = picture.clone();
+        for pixel in green.pixels_mut() {
+            *pixel = image::Rgba([0, 255, 0, 255]);
+        }
+        green.save(&png).unwrap();
+        icons.import(19, spanish, &png).unwrap();
+        assert_eq!(icons.rgba(19, spanish).unwrap()[..4], [0, 255, 0, 255]);
         icons.save(&sd).unwrap();
         assert!(!icons.changed());
-        assert!(sd.read(&sd_path(19)).is_some());
+        assert!(sd.read(&sd_path(19, ENGLISH)).is_some() && sd.read(&sd_path(19, spanish)).is_some());
+        assert_eq!(sd_path(19, ENGLISH), "type/icon/19.bclim");
+        assert!(sd_path(19, spanish).starts_with("type/icon/") && sd_path(19, spanish).ends_with("/19.bclim"));
         let mut again = TypeIcons::default();
         again.load_card(Some(&sd));
-        assert!(again.from_card() && again.has_override(19));
-        again.reset(19);
-        assert!(again.changed() && !again.has_override(19));
+        assert!(again.from_card() && again.has_override(19, ENGLISH) && again.has_override(19, spanish));
+        again.reset(19, spanish);
+        assert!(again.changed() && !again.has_override(19, spanish));
         again.save(&sd).unwrap();
-        assert!(sd.read(&sd_path(19)).is_none());
+        assert!(sd.read(&sd_path(19, spanish)).is_none() && sd.read(&sd_path(19, ENGLISH)).is_some());
+        again.reset_all(19);
+        again.save(&sd).unwrap();
+        assert!(sd.read(&sd_path(19, ENGLISH)).is_none());
         // A picture of another size is refused, and an export needs an icon.
         let wrong = folder.join("wrong.png");
         image::RgbaImage::new(10, 10).save(&wrong).unwrap();
-        assert!(again.import(19, &wrong).unwrap_err().contains("50 × 20"));
-        assert!(again.export(19, &png).is_err());
+        assert!(again.import(19, ENGLISH, &wrong).unwrap_err().contains("50 × 20"));
+        assert!(again.export(19, ENGLISH, &png).is_err());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

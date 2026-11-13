@@ -109,8 +109,11 @@ impl TypeTexts {
         Ok(written)
     }
 
-    /// Draws the tab: the languages, and a box for the name of each type. `icon` draws the icon of a type before its box.
-    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, custom: &mut crate::types::TypeList, icon: &mut dyn FnMut(&mut egui::Ui, usize)) {
+    /// Draws the tab: the languages, and for each type its icon in this language and a box for its name. `row` draws what belongs
+    /// to a type in this language: it gets the type, the language and `false` to draw the icon before the box, `true` to draw the
+    /// buttons of the icon after it. Gives the number of a new type that the user removed.
+    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, custom: &mut crate::types::TypeList, row: &mut dyn FnMut(&mut egui::Ui, usize, usize, bool)) -> Option<usize> {
+        let mut removed = None;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
             for (index, language) in LANGUAGES.iter().enumerate() {
@@ -122,13 +125,13 @@ impl TypeTexts {
         self.load(sd, language);
         egui::ScrollArea::vertical().id_salt("type_text_tab").auto_shrink([false, false]).show(ui, |ui| {
             widget::card(ui, |ui| {
-                ui.set_width(520.0);
-                ui.label(widget::hint("The name that the game shows for each type, in this language. The new types come after the types of the game."));
+                ui.set_min_width(820.0);
+                ui.label(widget::hint("The name of each type and its icon (50 × 20 pixels, with the name written on it), in this language. The new types come after the types of the game; a new type without an icon in this language shows its English icon."));
                 ui.add_space(6.0);
                 for kind in 0..COUNT {
                     let key = (language, kind);
                     ui.horizontal(|ui| {
-                        ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| icon(ui, kind));
+                        ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| row(ui, kind, language, false));
                         let Some(file) = self.files.get_mut(&language) else {
                             ui.label(widget::hint("This language is not in the files that were read."));
                             return;
@@ -152,6 +155,7 @@ impl TypeTexts {
                         if let Some(message) = self.errors.get(&key) {
                             ui.label(egui::RichText::new(message).color(color::ROSE).size(12.5));
                         }
+                        row(ui, kind, language, true);
                     });
                     ui.add_space(2.0);
                 }
@@ -164,7 +168,7 @@ impl TypeTexts {
                     for entry in custom.custom.iter_mut() {
                         let id = entry.id;
                         ui.horizontal(|ui| {
-                            ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| icon(ui, id));
+                            ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| row(ui, id, language, false));
                             let mut text = entry.name_in(language).to_string();
                             let response = ui.add(egui::TextEdit::singleline(&mut text).id_salt(("type_new_text", language, id)).desired_width(260.0).char_limit(crate::types::MAX_NAME));
                             if response.changed() {
@@ -177,12 +181,21 @@ impl TypeTexts {
                             if let Some(problem) = crate::types::name_problem(entry.name_in(language)) {
                                 ui.label(egui::RichText::new(problem).color(color::ROSE).size(12.5));
                             }
+                            row(ui, id, language, true);
+                            ui.label(widget::hint("Colour of the buttons in battle:"));
+                            let mut colour = entry.colour;
+                            sango_species::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
+                            entry.colour = colour;
+                            if widget::button(ui, "Remove") {
+                                removed = Some(id);
+                            }
                         });
                         ui.add_space(2.0);
                     }
                 }
             });
         });
+        removed
     }
 }
 

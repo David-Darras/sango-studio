@@ -13,7 +13,7 @@ mod texts;
 mod tools;
 pub mod types;
 
-use chart::{Chart, FIRST_CUSTOM, GAME_TYPES, MAX_CUSTOM};
+use chart::{Chart, GAME_TYPES, MAX_CUSTOM};
 use sango_core::{Dump, SdCard};
 use sango_species::battle_icons;
 use sango_ui::theme::color;
@@ -22,10 +22,10 @@ use std::path::PathBuf;
 use types::TypeList;
 
 /// The tabs of the page.
-const TABS: [&str; 4] = ["General", "Icons", "Text", "CSV"];
+const TABS: [&str; 3] = ["General", "Text", "CSV"];
 
 /// The place of the tab "CSV" in [`TABS`]: the import and the export of all the types.
-const CSV_TAB: usize = 3;
+const CSV_TAB: usize = 2;
 
 /// The size of a cell of the chart, and of the headers.
 const CELL_W: f32 = 30.0;
@@ -131,7 +131,7 @@ impl Type {
         match self.list.add("New type", colour) {
             Some(id) => {
                 self.chart.clear_type(id);
-                self.status = Some((true, format!("The type {id} was added. Change its name in the Text tab, its icon in the Icons tab, its effects in the General tab, then Save.")));
+                self.status = Some((true, format!("The type {id} was added. Change its name and its icons in the Text tab, its effects in the General tab, then Save.")));
             }
             None => self.status = Some((false, "The list of the new types is full.".into())),
         }
@@ -230,11 +230,11 @@ impl Type {
             self.add_type();
         }
         if reset_tab {
-            self.run_reset(session, &[tools::tab_part(self.tab)]);
+            self.run_reset(session, &tools::tab_parts(self.tab));
         }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [self.tab == 0, self.tab == 1, self.tab == 2];
+            self.tools.parts = [self.tab == 0, self.tab == 1, self.tab == 1];
         }
         if undo {
             self.undo(session);
@@ -277,9 +277,9 @@ impl Type {
                     let colour = self.colour_of(id);
                     // The icons of the columns are turned: they are as long as the icons of the rows.
                     let column = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + place as f32 * CELL_W + 4.0, rect.top() + 4.0), egui::vec2(CELL_W - 8.0, HEAD_H - 8.0));
-                    self.icons.paint_turned(ui, id, column, &names[place], colour);
+                    self.icons.paint_turned(ui, id, icons::ENGLISH, column, &names[place], colour);
                     let row = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.top() + HEAD_H + place as f32 * CELL_H + 2.0), egui::vec2(HEAD_W - 6.0, CELL_H - 4.0));
-                    self.icons.paint(ui, id, row, &names[place], colour);
+                    self.icons.paint(ui, id, icons::ENGLISH, row, &names[place], colour);
                 }
                 // The cells.
                 let mut selected = ids.iter().position(|&id| id == self.selected.0).zip(ids.iter().position(|&id| id == self.selected.1)).unwrap_or((0, 0));
@@ -366,92 +366,36 @@ impl Type {
         });
     }
 
-    /// The Icons tab: the icon, the number and the name of each type, the colour of the new types, and the buttons.
-    fn types_tab(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().id_salt("type_types_scroll").auto_shrink([false, false]).show(ui, |ui| {
-            widget::card(ui, |ui| {
-                ui.set_min_width(760.0);
-                ui.label(widget::title("Icons"));
-                ui.label(widget::hint(&format!("The game has the types 0 to 17. A new type has a number from {FIRST_CUSTOM} to {} ({MAX_CUSTOM} at most). The icon is a PNG of {} × {} pixels; without one, a new type shows a pill with its name.", chart::MAX_TYPES - 1, icons::WIDTH, icons::HEIGHT)));
-                ui.label(widget::hint("The names of the types of the game are in the Text tab."));
-                ui.add_space(8.0);
-                let ids = self.list.ids();
-                let mut remove = None;
-                let mut import = None;
-                let mut export = None;
-                let mut reset = None;
-                for id in ids {
-                    ui.horizontal(|ui| {
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(icons::WIDTH as f32, icons::HEIGHT as f32), egui::Sense::hover());
-                        let colour = self.colour_of(id);
-                        let name = self.type_name(id);
-                        self.icons.paint(ui, id, rect, &name, colour);
-                        ui.label(widget::hint(&format!("#{id}")));
-                        if id < GAME_TYPES {
-                            ui.add_sized([180.0, 22.0], egui::Label::new(name));
-                        } else if let Some(custom) = self.list.custom.iter_mut().find(|c| c.id == id) {
-                            let mut name = custom.name.clone();
-                            ui.add(egui::TextEdit::singleline(&mut name).id_salt(("type_name", id)).desired_width(150.0).char_limit(types::MAX_NAME));
-                            if name != custom.name {
-                                // The languages that follow English follow the new name; the others keep their own.
-                                custom.rename(&name);
-                            }
-                            let mut colour = custom.colour;
-                            ui.label(widget::hint("Colour of the buttons in battle:"));
-                            sango_species::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
-                            custom.colour = colour;
-                            if let Some(problem) = types::name_problem(&custom.name) {
-                                ui.label(egui::RichText::new(problem).color(color::ROSE).size(12.5));
-                            }
-                        }
-                        if widget::button(ui, "Export PNG…") {
-                            export = Some(id);
-                        }
-                        if widget::button(ui, "Import PNG…") {
-                            import = Some(id);
-                        }
-                        ui.add_enabled_ui(self.icons.has_override(id), |ui| {
-                            if widget::button(ui, "Reset icon") {
-                                reset = Some(id);
-                            }
-                        });
-                        if id >= GAME_TYPES && widget::button(ui, "Remove") {
-                            remove = Some(id);
-                        }
+    /// Does what a click on a button of an icon asked: a PNG file goes in or out, or the icon of the game comes back.
+    fn icon_action(&mut self, action: IconAction, id: usize, language: usize) {
+        match action {
+            IconAction::Reset => self.icons.reset(id, language),
+            IconAction::Import => {
+                if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() {
+                    self.status = Some(match self.icons.import(id, language, &path) {
+                        Ok(()) => (true, "Icon imported. Save writes it on the SD card.".to_string()),
+                        Err(message) => (false, message),
                     });
-                    ui.add_space(2.0);
                 }
-                ui.add_space(10.0);
-                if self.list.custom.len() >= MAX_CUSTOM {
-                    ui.label(widget::hint("The list of the new types is full."));
+            }
+            IconAction::Export => {
+                if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).set_file_name(format!("type_{id}_{}.png", sango_core::text::LANGUAGES[language].folder)).save_file() {
+                    self.status = Some(match self.icons.export(id, language, &path) {
+                        Ok(()) => (true, format!("Exported the icon to {}.", path.display())),
+                        Err(message) => (false, message),
+                    });
                 }
-                if let Some(id) = remove {
-                    self.list.remove(id);
-                    self.chart.clear_type(id);
-                    self.icons.reset(id);
-                }
-                if let Some(id) = reset {
-                    self.icons.reset(id);
-                }
-                if let Some(id) = import {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() {
-                        self.status = Some(match self.icons.import(id, &path) {
-                            Ok(()) => (true, format!("Icon of the type {id} imported. Save writes it on the SD card.")),
-                            Err(message) => (false, message),
-                        });
-                    }
-                }
-                if let Some(id) = export {
-                    if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).set_file_name(format!("type_{id}.png")).save_file() {
-                        self.status = Some(match self.icons.export(id, &path) {
-                            Ok(()) => (true, format!("Exported the icon to {}.", path.display())),
-                            Err(message) => (false, message),
-                        });
-                    }
-                }
-            });
-        });
+            }
+        }
     }
+}
+
+/// What a button of an icon asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum IconAction {
+    Export,
+    Import,
+    Reset,
 }
 
 impl Module for Type {
@@ -511,7 +455,6 @@ impl Module for Type {
         ui.add_space(6.0);
         match self.tab {
             0 => self.chart_tab(ui),
-            1 => self.types_tab(ui),
             CSV_TAB => {
                 egui::ScrollArea::vertical().id_salt("type_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
             }
@@ -519,11 +462,35 @@ impl Module for Type {
                 let sd: Option<&SdCard> = session.sd.as_ref();
                 let shown: Vec<(String, u8)> = (0..chart::MAX_TYPES).map(|id| (self.type_name(id), self.colour_of(id))).collect();
                 let icons = &mut self.icons;
-                self.texts.ui(ui, sd, &mut self.list, &mut |ui, kind| {
-                    let (rect, _) = ui.allocate_exact_size(egui::vec2(icons::WIDTH as f32, icons::HEIGHT as f32), egui::Sense::hover());
-                    let (name, colour) = shown.get(kind).cloned().unwrap_or_default();
-                    icons.paint(ui, kind, rect, if kind < GAME_TYPES { "" } else { &name }, colour);
+                let mut asked: Option<(IconAction, usize, usize)> = None;
+                // The icon of the type in the language of the tab before the box of the name, its buttons after it.
+                let removed = self.texts.ui(ui, sd, &mut self.list, &mut |ui, kind, language, buttons| {
+                    if !buttons {
+                        let (rect, _) = ui.allocate_exact_size(egui::vec2(icons::WIDTH as f32, icons::HEIGHT as f32), egui::Sense::hover());
+                        let (name, colour) = shown.get(kind).cloned().unwrap_or_default();
+                        icons.paint(ui, kind, language, rect, if kind < GAME_TYPES { "" } else { &name }, colour);
+                        return;
+                    }
+                    if widget::button(ui, "Export PNG…") {
+                        asked = Some((IconAction::Export, kind, language));
+                    }
+                    if widget::button(ui, "Import PNG…") {
+                        asked = Some((IconAction::Import, kind, language));
+                    }
+                    ui.add_enabled_ui(icons.has_override(kind, language), |ui| {
+                        if widget::button(ui, "Reset icon") {
+                            asked = Some((IconAction::Reset, kind, language));
+                        }
+                    });
                 });
+                if let Some((action, id, language)) = asked {
+                    self.icon_action(action, id, language);
+                }
+                if let Some(id) = removed {
+                    self.list.remove(id);
+                    self.chart.clear_type(id);
+                    self.icons.reset_all(id);
+                }
             }
         }
     }
@@ -611,8 +578,8 @@ mod add_test {
         assert!(matches!(page.status, Some((true, _))));
         // The type is edited like the others: its name, and its picture.
         page.list.custom[0].rename("Cosmic");
-        page.icons.import(19, &png).unwrap();
-        assert!(page.icons.has_override(19));
+        page.icons.import(19, icons::ENGLISH, &png).unwrap();
+        assert!(page.icons.has_override(19, icons::ENGLISH));
         assert!((0..8).all(|language| page.list.find(19).unwrap().name_in(language) == "Cosmic"));
         let _ = std::fs::remove_dir_all(&folder);
     }

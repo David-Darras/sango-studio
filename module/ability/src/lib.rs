@@ -45,6 +45,8 @@ pub struct Ability {
     status: Option<(bool, String)>,
     /// The names of the abilities in the list, as the user has them.
     list_names: Option<Vec<String>>,
+    /// The entries that are not the same as in the game, found again from time to time.
+    modified: sango_core::modified::Cache,
     /// For each ability, the species and forms that have it in each slot. Read from the data of the species.
     usage: Vec<[Vec<User>; 3]>,
     usage_ready: bool,
@@ -57,7 +59,7 @@ pub struct Ability {
 
 impl Default for Ability {
     fn default() -> Self {
-        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2 }
+        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2 }
     }
 }
 
@@ -97,6 +99,18 @@ impl Ability {
         all.len()
     }
 
+    /// The abilities whose texts are not the same as in the game (the files of the SD card compared with the romfs).
+    fn modified_abilities(&mut self, session: &Session) -> std::collections::HashSet<usize> {
+        let Some(sd) = session.sd.as_ref() else { return Default::default() };
+        let texts = &self.texts;
+        self.modified
+            .get(|| {
+                let files: Vec<usize> = texts::FIELDS.iter().map(|field| field.file).collect();
+                sango_core::modified::changed_text_lines(sd, &files, &|language, file| texts.romfs(language, file))
+            })
+            .clone()
+    }
+
     /// The rows of the ability list as the user has them: the names, and the number of species.
     fn menu_rows(&mut self, session: &Session) -> Vec<picker::Row> {
         let sd = session.sd.as_ref();
@@ -105,13 +119,17 @@ impl Ability {
             self.list_names = Some(names);
         }
         let names = self.list_names.clone().unwrap_or_default();
-        let mut rows: Vec<picker::Row> = (0..=COUNT).map(|n| picker::Row { name: names.get(n).cloned().unwrap_or_default(), species: self.user_count(n) }).collect();
+        let mut rows: Vec<picker::Row> = (0..=COUNT).map(|n| picker::Row { name: names.get(n).cloned().unwrap_or_default(), species: self.user_count(n), modified: false }).collect();
+        let changed = self.modified_abilities(session);
+        for (id, row) in rows.iter_mut().enumerate() {
+            row.modified = changed.contains(&id);
+        }
         // The new abilities come after the abilities of the game, at their numbers: a number between is a row without a name that the list skips.
         if let Some(last) = self.store.ids().into_iter().max() {
             rows.resize(last + 1, picker::Row::default());
             for id in self.store.ids() {
                 if let Some(entry) = self.store.find(id) {
-                    rows[id] = picker::Row { name: entry.names[rules::ENGLISH].clone(), species: self.user_count(id) };
+                    rows[id] = picker::Row { name: entry.names[rules::ENGLISH].clone(), species: self.user_count(id), modified: false };
                 }
             }
         }

@@ -126,8 +126,9 @@ pub fn variants(archive: &Garc, species: usize) -> Vec<Variant> {
                 (1, _) if flags & 2 != 0 => "Female".to_string(),
                 (_, Some(51)) => "Mega Evolution or Primal Reversion".to_string(),
                 (_, Some(52)) => "Mega Evolution Y".to_string(),
-                (_, Some(number)) if number > 0 => format!("Form {number}"),
-                _ => format!("Form {slot}"),
+                // The number after the name of the species is not the form (all the models of Furfrou have the same one):
+                // the form is the place of the model, and the female model does not count.
+                _ => format!("Form {}", slot - usize::from(flags & 2 != 0)),
             };
             Variant { slot: slot as u8, file, label }
         })

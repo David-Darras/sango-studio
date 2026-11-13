@@ -22,6 +22,8 @@ pub struct Row {
     pub pocket: u8,
     /// The price in Poké Dollars.
     pub price: u32,
+    /// True when the entry is not the same as in the game: the list marks it with a dot.
+    pub modified: bool,
 }
 
 /// The pictures of the items as textures of the window, decoded at the first display and then kept.
@@ -79,7 +81,7 @@ pub fn rows_from_dump(dump: &Dump) -> Vec<Row> {
         .map(|item| {
             let bytes = data.as_ref().and_then(|g| g.first_file(item));
             let (price, pocket) = bytes.map_or((0, 0), item_icons::price_and_pocket);
-            Row { name: if item == 0 { "None".to_string() } else { names.as_ref().and_then(|f| f.text(item)).unwrap_or_default() }, pocket, price }
+            Row { name: if item == 0 { "None".to_string() } else { names.as_ref().and_then(|f| f.text(item)).unwrap_or_default() }, pocket, price, modified: false }
         })
         .collect()
 }
@@ -122,7 +124,7 @@ impl ItemList {
             self.rows.resize(last + 1, Row::default());
             for item in &found {
                 let (price, pocket) = item_icons::price_and_pocket(&item.data);
-                self.rows[item.id] = Row { name: item.name.clone(), pocket, price };
+                self.rows[item.id] = Row { name: item.name.clone(), pocket, price, modified: false };
             }
         }
         self.icons.set_custom(found.iter().filter_map(|c| c.picture.clone().map(|rgba| (c.id, rgba))).collect());
@@ -312,7 +314,11 @@ pub fn item_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
                 }
                 let y = row.center().y;
                 ui.painter().text(egui::pos2(row.left() + COLUMNS[0].0, y), egui::Align2::LEFT_CENTER, format!("#{number:03}"), egui::FontId::proportional(12.0), color::MUTED);
-                ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &rows[number].name, egui::FontId::proportional(13.5), color::TEXT);
+                let name_ink = if rows[number].modified { color::ACCENT } else { color::TEXT };
+                let name_rect = ui.painter().text(egui::pos2(row.left() + COLUMNS[1].0, y), egui::Align2::LEFT_CENTER, &rows[number].name, egui::FontId::proportional(13.5), name_ink);
+                if rows[number].modified {
+                    ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
+                }
                 if number != 0 {
                     let pocket = POCKETS.get(rows[number].pocket as usize).copied().unwrap_or("-");
                     ui.painter().text(egui::pos2(row.left() + COLUMNS[2].0, y), egui::Align2::LEFT_CENTER, pocket, egui::FontId::proportional(12.0), color::MUTED);
@@ -375,7 +381,7 @@ mod test {
 
     fn rows() -> Vec<Row> {
         let names = ["None", "Master Ball", "Potion", "Antidote", "TM01"];
-        names.iter().enumerate().map(|(n, name)| Row { name: name.to_string(), pocket: (n % 5) as u8, price: n as u32 * 100 }).collect()
+        names.iter().enumerate().map(|(n, name)| Row { name: name.to_string(), pocket: (n % 5) as u8, price: n as u32 * 100, modified: false }).collect()
     }
 
     /// The list opens, draws its header and rows, sorts, filters, and the keys change the item.
