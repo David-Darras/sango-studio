@@ -704,6 +704,7 @@ impl Species {
                     for form in 0..forms {
                         let chosen = self.form == form;
                         let row = ui.selectable_label(chosen, form_text(form));
+                        widget::scroll_to_chosen(ui, &row, chosen);
                         if chosen {
                             widget::glow(ui, row.rect, 5.0);
                         }
@@ -1527,7 +1528,7 @@ fn color_menu(ui: &mut egui::Ui, id: &str, value: &mut u8) {
 }
 
 /// A menu of the types: the button and the list show the icons of the game. Without the icons it is a menu of names.
-fn type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>) {
+pub fn type_menu(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u8>) {
     if battle_icons::type_texture(ui.ctx(), 0).is_none() {
         return menu(ui, id, value, &names::TYPE, 130.0);
     }
@@ -1585,6 +1586,7 @@ fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f32) 
         for (place, name) in list.iter().enumerate() {
             let chosen = *value == place as u8;
             let row = ui.selectable_label(chosen, *name);
+            widget::scroll_to_chosen(ui, &row, chosen);
             if chosen {
                 widget::glow(ui, row.rect, 5.0);
             }

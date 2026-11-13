@@ -322,7 +322,7 @@ mod test {
         let ctx = egui::Context::default();
         let rows = rows();
         let mut value = 2usize;
-        let mut frame = |value: &mut usize, input: egui::RawInput, open: bool| {
+        let frame = |value: &mut usize, input: egui::RawInput, open: bool| {
             let _ = ctx.run(input, |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if open {

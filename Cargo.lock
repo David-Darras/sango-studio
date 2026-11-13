@@ -2398,6 +2398,10 @@ dependencies = [
 name = "sango-move"
 version = "0.1.0"
 dependencies = [
+ "image",
+ "rfd",
+ "sango-core",
+ "sango-species",
  "sango-ui",
 ]
 

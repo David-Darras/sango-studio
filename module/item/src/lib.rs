@@ -363,7 +363,9 @@ impl Item {
             let text = list.get(*value as usize).map_or(format!("Value {value}"), |s| s.to_string());
             let combo = egui::ComboBox::from_id_salt(def.key).selected_text(text).width(140.0).show_ui(ui, |ui| {
                 for (place, name) in list.iter().enumerate() {
-                    if ui.selectable_label(*value == place as i32, *name).clicked() {
+                    let row = ui.selectable_label(*value == place as i32, *name);
+                    widget::scroll_to_chosen(ui, &row, *value == place as i32);
+                    if row.clicked() {
                         *value = place as i32;
                     }
                 }
@@ -537,7 +539,9 @@ impl Item {
             let mut chosen = mode;
             let combo = egui::ComboBox::from_id_salt("pp_mode").selected_text(MODES[mode]).width(100.0).show_ui(ui, |ui| {
                 for (place, name) in MODES.iter().enumerate() {
-                    if ui.selectable_label(chosen == place, *name).clicked() {
+                    let row = ui.selectable_label(chosen == place, *name);
+                    widget::scroll_to_chosen(ui, &row, chosen == place);
+                    if row.clicked() {
                         chosen = place;
                     }
                 }

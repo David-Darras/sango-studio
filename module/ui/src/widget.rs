@@ -630,6 +630,22 @@ pub fn tab_button(ui: &mut egui::Ui, text: &str, selected: bool, has_glow: bool)
     response
 }
 
+/// Keeps the chosen row of a drop-down list in view: the list scrolls to it when it opens and each time that the choice
+/// changes (with the arrow keys). A row that the pointer scrolled away is left alone while the choice stays the same.
+pub fn scroll_to_chosen(ui: &egui::Ui, row: &egui::Response, chosen: bool) {
+    if !chosen {
+        return;
+    }
+    let key = ui.id().with("chosen_row");
+    let now = ui.input(|i| i.time);
+    let last: Option<(egui::Id, f64)> = ui.data(|d| d.get_temp(key));
+    let changed = last.map_or(true, |(id, time)| id != row.id || now - time > 0.4);
+    ui.data_mut(|d| d.insert_temp(key, (row.id, now)));
+    if changed {
+        row.scroll_to_me(None);
+    }
+}
+
 /// A toggle that looks like a pill: filled when it is on. Gives the response; a click, or Enter or Space when the page
 /// has focused it, changes `on`.
 pub fn chip(ui: &mut egui::Ui, text: &str, on: &mut bool) -> egui::Response {

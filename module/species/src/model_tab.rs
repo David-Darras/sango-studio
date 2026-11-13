@@ -357,7 +357,9 @@ impl ModelTab {
                 let selected = available.iter().find(|v| v.slot == self.form).map_or(String::new(), |v| v.label.clone());
                 egui::ComboBox::from_id_salt("model_form").selected_text(selected).width(260.0).show_ui(ui, |ui| {
                     for variant in available {
-                        if ui.selectable_label(self.form == variant.slot, &variant.label).clicked() {
+                        let row = ui.selectable_label(self.form == variant.slot, &variant.label);
+                        widget::scroll_to_chosen(ui, &row, self.form == variant.slot);
+                        if row.clicked() {
                             self.form = variant.slot;
                         }
                     }
