@@ -23,6 +23,7 @@ sango-ability = { path = "module/ability" }
 sango-rules = { path = "module/rules" }
 sango-type = { path = "module/type" }
 sango-code = { path = "module/code" }
+sango-pack = { path = "module/pack" }
 
 [profile.dev]
 opt-level = 2

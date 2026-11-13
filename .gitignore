@@ -39,3 +39,6 @@ desktop.ini
 # What the editor writes for the game
 /sdmc
 /export
+# Species packs made by tools (content to share, not source)
+/packs/
+*.sangopack
