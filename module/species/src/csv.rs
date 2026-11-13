@@ -19,7 +19,7 @@
 //! | `name` | The name of the species. The import ignores it. | text without a comma |
 //! | `base_hp` ... `base_speed` | The six base stats. | 0 to 255 |
 //! | `type_1`, `type_2` | The two types. Equal values mean one type. | 0 to 17 |
-//! | `ability_1`, `ability_2`, `ability_hidden` | The abilities. 0 is none. | 0 to 191 |
+//! | `ability_1`, `ability_2`, `ability_hidden` | The abilities. 0 is none. 192 to 255 are the new abilities of the Ability page. | 0 to 255 |
 //! | `egg_group_1`, `egg_group_2` | The two egg groups. | 0 to 15 |
 //! | `item_50`, `item_5` | The wild held items. 0 is none. | 0 to 775 |
 //! | `leveling_rate` | The experience curve. | 0 to 7 |
@@ -204,9 +204,9 @@ pub fn parse(text: &str) -> Result<Vec<Row>, String> {
             ],
             types: [number(9, names::TYPE.len() as u32 - 1) as u8, number(10, names::TYPE.len() as u32 - 1) as u8],
             abilities: [
-                number(11, names::ABILITY.len() as u32) as u8,
-                number(12, names::ABILITY.len() as u32) as u8,
-                number(13, names::ABILITY.len() as u32) as u8,
+                number(11, 255) as u8,
+                number(12, 255) as u8,
+                number(13, 255) as u8,
             ],
             egg_groups: [number(14, names::EGG_GROUP.len() as u32 - 1) as u8, number(15, names::EGG_GROUP.len() as u32 - 1) as u8],
             items: [number(16, names::ITEM.len() as u32) as u16, number(17, names::ITEM.len() as u32) as u16],

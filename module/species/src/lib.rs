@@ -1307,6 +1307,10 @@ fn searchable_picker<T>(
             }
             for (idx, &name) in names.iter().enumerate() {
                 let id = idx + 1;
+                if name.is_empty() {
+                    // An id without a name (the free ids between the abilities) is not in the list.
+                    continue;
+                }
                 let c_name = clean(name);
                 let num_str = id.to_string();
                 let formatted = format!("#{:03}", id);
@@ -1412,6 +1416,36 @@ struct FieldNote {
 
 /// The key of the list of items in the memory of the interface.
 const ITEM_LIST_ID: &str = "species_item_list";
+
+/// The key of the names of the abilities in the memory of the interface.
+const ABILITY_LIST_ID: &str = "species_ability_list";
+
+/// The names of the abilities: the abilities of the game, then the new ones of the SD card. The card is read again once each
+/// second at most, so a new ability shows in the lists soon after it is saved.
+fn ability_names(ctx: &egui::Context, sd: Option<&sango_core::SdCard>) -> std::sync::Arc<Vec<String>> {
+    let id = egui::Id::new(ABILITY_LIST_ID);
+    let cached: Option<(std::time::Instant, std::sync::Arc<Vec<String>>)> = ctx.data(|d| d.get_temp(id));
+    if let Some((when, names)) = cached {
+        if when.elapsed() < std::time::Duration::from_secs(1) {
+            return names;
+        }
+    }
+    let names = std::sync::Arc::new(sango_core::custom_ability::list(&names::ABILITY, sd));
+    ctx.data_mut(|d| d.insert_temp(id, (std::time::Instant::now(), names.clone())));
+    names
+}
+
+/// A drop-down list of abilities, with the new abilities of the user after the ones of the game.
+fn ability_picker(ui: &mut egui::Ui, id_salt: &str, value: &mut u8) {
+    let shared: Option<std::sync::Arc<Vec<String>>> = ui.ctx().data(|d| d.get_temp::<(std::time::Instant, std::sync::Arc<Vec<String>>)>(egui::Id::new(ABILITY_LIST_ID)).map(|(_, names)| names));
+    match shared {
+        Some(list) => {
+            let names: Vec<&str> = list.iter().map(String::as_str).collect();
+            searchable_picker(ui, id_salt, value, &names, 180.0);
+        }
+        None => searchable_picker(ui, id_salt, value, &names::ABILITY, 180.0),
+    }
+}
 
 /// A drop-down list of items, with their pictures. Without the list of items it is the list of names.
 fn item_picker(ui: &mut egui::Ui, id_salt: &str, value: &mut u16) {
@@ -1756,7 +1790,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::Ability1, d.ability_1 as u32)),
                 }),
                 |ui| {
-                    searchable_picker(ui, "ability_1", &mut d.ability_1, &names::ABILITY, 180.0);
+                    ability_picker(ui, "ability_1", &mut d.ability_1);
                     ui.label(widget::hint(&format!("0x{:02X}", d.ability_1)));
                 },
             );
@@ -1769,7 +1803,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::Ability2, d.ability_2 as u32)),
                 }),
                 |ui| {
-                    searchable_picker(ui, "ability_2", &mut d.ability_2, &names::ABILITY, 180.0);
+                    ability_picker(ui, "ability_2", &mut d.ability_2);
                     ui.label(widget::hint(&format!("0x{:02X}", d.ability_2)));
                 },
             );
@@ -1782,7 +1816,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::HiddenAbility, d.ability_hidden as u32)),
                 }),
                 |ui| {
-                    searchable_picker(ui, "ability_hidden", &mut d.ability_hidden, &names::ABILITY, 180.0);
+                    ability_picker(ui, "ability_hidden", &mut d.ability_hidden);
                     ui.label(widget::hint(&format!("0x{:02X}", d.ability_hidden)));
                 },
             );
@@ -2199,6 +2233,7 @@ impl Module for Species {
             self.load(session);
         }
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ITEM_LIST_ID), self.item_list.clone()));
+        ability_names(ui.ctx(), session.sd.as_ref());
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);

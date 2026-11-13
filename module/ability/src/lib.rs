@@ -6,7 +6,9 @@
 //!
 //! The files that the user changes go on the SD card, in the folder `text`: the romfs is never changed.
 
+mod custom;
 mod picker;
+pub mod rules;
 mod texts;
 mod tools;
 
@@ -20,7 +22,10 @@ use std::path::PathBuf;
 pub const COUNT: usize = 191;
 
 /// The tabs of the page.
-const TABS: [&str; 2] = ["General", "Text"];
+const TABS: [&str; 3] = ["General", "Text", "New abilities"];
+
+/// The place of the tab "New abilities" in [`TABS`].
+const NEW_ABILITIES_TAB: usize = 2;
 
 /// The names of the three ability slots of a species.
 const SLOTS: [&str; 3] = ["Ability 1", "Ability 2", "Hidden ability"];
@@ -42,11 +47,12 @@ pub struct Ability {
     usage_ready: bool,
     texts: texts::AbilityTexts,
     tools: tools::Tools,
+    custom: custom::Custom,
 }
 
 impl Default for Ability {
     fn default() -> Self {
-        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default() }
+        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), custom: custom::Custom::default() }
     }
 }
 
@@ -256,8 +262,10 @@ impl Module for Ability {
         if !self.usage_ready {
             self.read_usage(session);
         }
-        self.top_bar(ui, session);
-        self.reset_window(ui.ctx(), session);
+        if self.tab != NEW_ABILITIES_TAB {
+            self.top_bar(ui, session);
+            self.reset_window(ui.ctx(), session);
+        }
         ui.add_space(8.0);
         let mut clicked = None;
         egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(12.0)).inner_margin(egui::Margin::same(6.0)).show(ui, |ui| {
@@ -285,6 +293,7 @@ impl Module for Ability {
         ui.add_space(6.0);
         match self.tab {
             0 => self.general_tab(ui, session),
+            NEW_ABILITIES_TAB => self.custom.ui(ui, session.sd.as_ref()),
             _ => {
                 let sd: Option<&SdCard> = session.sd.as_ref();
                 self.texts.ui(ui, sd, self.id);
