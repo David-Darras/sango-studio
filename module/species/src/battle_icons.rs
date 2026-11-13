@@ -98,6 +98,13 @@ pub fn type_texture(ctx: &egui::Context, kind: u8) -> Option<egui::TextureHandle
     texture(ctx, "type", kind as usize, |icons| icons.types.get(kind as usize).cloned().flatten())
 }
 
+/// The pixels of the icon of a type (50 × 20 pixels of RGBA), when the dump has it.
+pub fn type_rgba(kind: u8) -> Option<(usize, usize, Vec<u8>)> {
+    let icons = ICONS.read().ok()?;
+    let image = icons.as_ref()?.types.get(kind as usize)?.as_ref()?;
+    Some((image.width, image.height, image.rgba.clone()))
+}
+
 /// The icon of a category of moves, when the dump has it.
 pub fn category_texture(ctx: &egui::Context, category: Category) -> Option<egui::TextureHandle> {
     // The pictures of the archive are in this order: Status, Physical, Special.

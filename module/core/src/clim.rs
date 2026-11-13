@@ -175,6 +175,47 @@ impl Clim {
         Ok(Clim { width, height, format: Format::Rgba5551, body, footer })
     }
 
+    /// Makes an image of the format RGBA4 (4 bits for each of red, green, blue and alpha, no palette) from RGBA pixels (4
+    /// bytes each, row by row from the top). The layouts of the game read this format for the type icons: 50 × 20 pixels.
+    /// The image goes in the corner of a texture whose sides are powers of 2. A pixel with no alpha is black.
+    pub fn from_rgba4(width: usize, height: usize, rgba: &[u8]) -> Result<Clim, String> {
+        if width == 0 || height == 0 || width > 512 || height > 512 {
+            return Err("The image must be from 1 to 512 pixels on each side.".into());
+        }
+        if rgba.len() != width * height * 4 {
+            return Err("The pixels do not match the size of the image.".into());
+        }
+        let (side_x, side_y) = (texture_side(width), texture_side(height));
+        let tiles_per_row = side_x / 8;
+        let mut body = vec![0u8; side_x * side_y * 2];
+        let nibble = |value: u8| ((value as f32 / 17.0).round() as u16).min(15);
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = &rgba[(y * width + x) * 4..][..4];
+                let (r, g, b, a) = if pixel[3] == 0 { (0, 0, 0, 0) } else { (nibble(pixel[0]), nibble(pixel[1]), nibble(pixel[2]), nibble(pixel[3])) };
+                let raw = r << 12 | g << 8 | b << 4 | a;
+                let (tx, ty) = (x % 8, y % 8);
+                let inside = (tx & 1) | ((ty & 1) << 1) | ((tx & 2) << 1) | ((ty & 2) << 2) | ((tx & 4) << 2) | ((ty & 4) << 3);
+                let index = ((y / 8) * tiles_per_row + x / 8) * 64 + inside;
+                body[index * 2..][..2].copy_from_slice(&raw.to_le_bytes());
+            }
+        }
+        let mut footer = [0u8; FOOTER_SIZE];
+        footer[..4].copy_from_slice(SIGNATURE);
+        footer[4..6].copy_from_slice(&0xFEFFu16.to_le_bytes());
+        footer[6..8].copy_from_slice(&0x14u16.to_le_bytes());
+        footer[8..12].copy_from_slice(&0x0202_0000u32.to_le_bytes());
+        footer[12..16].copy_from_slice(&((body.len() + FOOTER_SIZE) as u32).to_le_bytes());
+        footer[16..18].copy_from_slice(&1u16.to_le_bytes());
+        footer[20..24].copy_from_slice(b"imag");
+        footer[24..28].copy_from_slice(&0x10u32.to_le_bytes());
+        footer[WIDTH_AT..WIDTH_AT + 2].copy_from_slice(&(width as u16).to_le_bytes());
+        footer[HEIGHT_AT..HEIGHT_AT + 2].copy_from_slice(&(height as u16).to_le_bytes());
+        footer[FORMAT_AT..FORMAT_AT + 4].copy_from_slice(&8u32.to_le_bytes());
+        footer[36..40].copy_from_slice(&(body.len() as u32).to_le_bytes());
+        Ok(Clim { width, height, format: Format::Rgba4, body, footer })
+    }
+
     /// The bytes of the file.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = self.body.clone();
@@ -407,6 +448,19 @@ mod test {
         assert_eq!(Clim::parse(&image.to_bytes()).unwrap().to_rgba().unwrap(), quantized);
         assert!(Clim::from_rgba(0, 5, &[]).is_err());
         assert!(Clim::from_rgba(2, 2, &[0; 4]).is_err());
+    }
+
+    #[test]
+    fn an_rgba4_image_is_made_and_decoded_back() {
+        let (width, height) = (50, 20);
+        let rgba: Vec<u8> = (0..width * height).flat_map(|n| if n % 7 == 0 { [0, 0, 0, 0] } else { [(n % 16) as u8 * 17, (n / 3 % 16) as u8 * 17, (n / 11 % 16) as u8 * 17, 255 - (n % 4) as u8 * 17] }).collect();
+        let image = Clim::from_rgba4(width, height, &rgba).unwrap();
+        assert_eq!((image.width(), image.height(), image.format()), (50, 20, Format::Rgba4));
+        let bytes = image.to_bytes();
+        assert_eq!(bytes.len(), 64 * 32 * 2 + FOOTER_SIZE, "the texture is 64 × 32");
+        let back = Clim::parse(&bytes).unwrap();
+        assert_eq!(back.to_rgba().unwrap(), rgba, "the colours of 4 bits come back as they went");
+        assert!(Clim::from_rgba4(0, 5, &[]).is_err());
     }
 
     #[test]
