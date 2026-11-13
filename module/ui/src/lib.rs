@@ -1,5 +1,6 @@
 //! The look of Sango Studio: a white theme, a few widgets, and the trait of a module.
 
+pub mod item_menu;
 pub mod module;
 pub mod theme;
 pub mod widget;

@@ -630,6 +630,84 @@ pub fn tab_button(ui: &mut egui::Ui, text: &str, selected: bool, has_glow: bool)
     response
 }
 
+/// A toggle that looks like a pill: filled when it is on. Gives the response; a click, or Enter or Space when the page
+/// has focused it, changes `on`.
+pub fn chip(ui: &mut egui::Ui, text: &str, on: &mut bool) -> egui::Response {
+    let font_id = egui::FontId::proportional(13.0);
+    let text_width = ui.fonts(|f| f.layout_no_wrap(text.to_string(), font_id.clone(), color::WHITE).size().x);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(text_width + 24.0, 26.0), egui::Sense::click());
+    if response.hovered() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    if response.clicked() {
+        *on = !*on;
+        set_active_id(ui, response.id);
+    }
+    register_focusable(ui, response.id, rect);
+    // The page can focus the pill: Enter or Space then turn it on or off.
+    if is_active(ui, response.id) && page_has_focus(ui) {
+        glow(ui, rect, 13.0);
+        scroll_active_into_view(ui, &response);
+        let toggle = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space));
+        if toggle {
+            *on = !*on;
+        }
+    }
+    let rounding = Rounding::same(13.0);
+    let (fill, ink) = if *on {
+        (color::ACCENT, color::WHITE)
+    } else if response.hovered() {
+        (color::ACCENT_SOFT, color::ACCENT)
+    } else {
+        (color::SURFACE_STRONG, color::MUTED)
+    };
+    ui.painter().rect_filled(rect, rounding, fill);
+    if !*on {
+        ui.painter().rect_stroke(rect, rounding, Stroke::new(1.0_f32, color::BORDER));
+    }
+    ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, font_id, ink);
+    response
+}
+
+/// A horizontal bar to set a whole number between `min` and `max`: click or drag. When `min` is negative the bar grows
+/// from zero, to the left in red for a negative value and to the right for a positive one. Gives true when the value
+/// changed.
+pub fn value_bar(ui: &mut egui::Ui, value: &mut i32, min: i32, max: i32) -> bool {
+    let width = 180.0_f32;
+    let bar_height = 10.0_f32;
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 28.0), egui::Sense::click_and_drag());
+    if response.hovered() || response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+    }
+    let track = egui::Rect::from_center_size(rect.center(), egui::vec2(width - 12.0, bar_height));
+    let span = (max - min).max(1) as f32;
+    let before = *value;
+    if response.clicked() || response.dragged() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let ratio = ((pos.x - track.left()) / track.width()).clamp(0.0, 1.0);
+            *value = (min as f32 + ratio * span).round() as i32;
+        }
+    }
+    let rounding = Rounding::same(bar_height / 2.0);
+    ui.painter().rect_filled(track, rounding, color::SURFACE_STRONG);
+    ui.painter().rect_stroke(track, rounding, Stroke::new(1.0_f32, color::BORDER));
+    let place = |v: i32| track.left() + ((v - min) as f32 / span).clamp(0.0, 1.0) * track.width();
+    let origin = if min < 0 { place(0) } else { track.left() };
+    let at = place(*value);
+    let fill = if *value < 0 { color::ROSE } else { color::ACCENT };
+    let (left, right) = if at >= origin { (origin, at) } else { (at, origin) };
+    if right - left > 0.5 {
+        ui.painter().rect_filled(egui::Rect::from_min_max(egui::pos2(left, track.top()), egui::pos2(right, track.bottom())), Rounding::same(bar_height / 2.0), fill);
+    }
+    if min < 0 {
+        ui.painter().line_segment([egui::pos2(origin, track.top() - 3.0), egui::pos2(origin, track.bottom() + 3.0)], Stroke::new(1.0_f32, color::MUTED));
+    }
+    let radius = if response.dragged() { 7.5 } else if response.hovered() { 7.0 } else { 6.0 };
+    ui.painter().circle_filled(egui::pos2(at, track.center().y), radius, color::WHITE);
+    ui.painter().circle_stroke(egui::pos2(at, track.center().y), radius, Stroke::new(2.0_f32, fill));
+    *value != before
+}
+
 /// A number field with two arrow buttons. When active, plain ArrowUp and ArrowDown
 /// directly increment and decrement the value without requiring an edit mode.
 /// Holding Shift steps by 10. PageUp and PageDown step by 10.

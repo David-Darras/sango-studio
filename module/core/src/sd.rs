@@ -131,6 +131,40 @@ impl SdCard {
         (counter, paths)
     }
 
+    /// Removes a file. A file that is not there is not an error. Gives true when a file was removed.
+    pub fn remove(&self, relative: &str) -> Result<bool, String> {
+        let path = self.path(relative)?;
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(format!("{}: {error}", path.display())),
+        }
+    }
+
+    /// The files of a folder and of the folders inside it, as paths in the folder of the card (with `/`), in
+    /// alphabetical order. A folder that is not there has no file.
+    pub fn files_in(&self, relative: &str) -> Vec<String> {
+        let mut found = Vec::new();
+        if let Ok(path) = self.path(relative) {
+            Self::collect(&path, relative, &mut found);
+        }
+        found.sort();
+        found
+    }
+
+    fn collect(path: &Path, relative: &str, found: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(path) else { return };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let inner = format!("{relative}/{name}");
+            match entry.file_type() {
+                Ok(kind) if kind.is_dir() => Self::collect(&entry.path(), &inner, found),
+                Ok(kind) if kind.is_file() => found.push(inner),
+                _ => {}
+            }
+        }
+    }
+
     /// Reads a file. The result is `None` when the file is not there.
     pub fn read(&self, relative: &str) -> Option<Vec<u8>> {
         std::fs::read(self.path(relative).ok()?).ok()
@@ -147,6 +181,19 @@ mod test {
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    #[test]
+    fn files_are_listed_and_removed() {
+        let path = folder("list");
+        let sd = SdCard::open(&path.to_string_lossy()).unwrap();
+        sd.write("a/1.bin", b"1").unwrap();
+        sd.write("a/b/2.bin", b"2").unwrap();
+        assert_eq!(sd.files_in("a"), ["a/1.bin", "a/b/2.bin"]);
+        assert!(sd.files_in("nothing").is_empty());
+        assert_eq!(sd.remove("a/1.bin"), Ok(true));
+        assert_eq!(sd.remove("a/1.bin"), Ok(false));
+        assert_eq!(sd.files_in("a"), ["a/b/2.bin"]);
     }
 
     #[test]

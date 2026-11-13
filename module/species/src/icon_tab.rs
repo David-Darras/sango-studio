@@ -115,16 +115,12 @@ impl IconTab {
         Ok(written)
     }
 
-    /// Takes the icons of a species and a form from the romfs again. Save writes them.
-    pub fn reset(&mut self, species: usize, form: usize) {
-        for female in [false, true] {
-            if let Some(file) = icon_file(species, form, female) {
-                if let Some(original) = self.romfs(file) {
-                    self.pending.insert(file, original);
-                }
-            }
-        }
+    /// Forgets the changes that were not saved and what was read from the SD card: the next display reads the files again.
+    pub fn reload(&mut self) {
+        self.pending.clear();
+        self.from_card.clear();
         self.shown = None;
+        self.texture = None;
     }
 
     /// Gives an icon a new picture: 40 × 30 pixels of RGBA. Returns the compressed file.
@@ -348,9 +344,9 @@ mod test {
         assert_eq!(decode(&read).unwrap()[..4], [248 + 7, 0, 0, 255]);
         assert!(again.from_card());
 
-        // Reset gives back the romfs file.
-        again.reset(1, 0);
-        assert_eq!(again.pending[&file], again.romfs(file).unwrap());
+        // Reload forgets the read files.
+        again.reload();
+        assert!(!again.from_card() && !again.changed());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

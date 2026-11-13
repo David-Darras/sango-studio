@@ -11,7 +11,7 @@ use crate::names;
 use sango_core::evolution::{self, argument_of, method_name, Argument, Evolution, Evolutions, METHODS, SLOTS};
 use sango_core::{Dump, Garc, SdCard};
 use sango_ui::theme::color;
-use sango_ui::{egui, widget, Session};
+use sango_ui::{egui, widget};
 use std::collections::HashMap;
 
 /// The places of the columns of a row: x and width, in points. The species, the method, the need, the delete button.
@@ -54,10 +54,6 @@ pub struct EvolutionTab {
     from_card: bool,
     icon_garc: Option<Garc>,
     icon_textures: HashMap<usize, Option<egui::TextureHandle>>,
-    /// What happened at the last click on a CSV button: true for a success.
-    status: Option<(bool, String)>,
-    /// True when an import wrote files: the species page reads its data again.
-    imported: bool,
 }
 
 impl EvolutionTab {
@@ -80,13 +76,6 @@ impl EvolutionTab {
         self.from_card = on_card.is_some();
         self.evolutions = on_card.or_else(|| self.read_romfs(file)).unwrap_or_default();
         self.saved = self.evolutions.clone();
-    }
-
-    /// Takes the evolutions of the romfs again. Save writes them.
-    pub fn reset(&mut self, file: usize) {
-        if let Some(evolutions) = self.read_romfs(file) {
-            self.evolutions = evolutions;
-        }
     }
 
     /// True when the evolutions changed since they were read or saved.
@@ -122,20 +111,8 @@ impl EvolutionTab {
     }
 
     /// Draws the tab.
-    pub fn ui(&mut self, ui: &mut egui::Ui, session: &Session) {
+    pub fn ui(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().id_salt("evolution_tab").auto_shrink([false, false]).show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if widget::button(ui, "Export CSV") {
-                    self.export_csv(session);
-                }
-                if session.sd.is_some() && widget::button(ui, "Import CSV") {
-                    self.import_csv(session);
-                }
-            });
-            if let Some((ok, message)) = &self.status {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
-            }
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
@@ -159,36 +136,16 @@ impl EvolutionTab {
         Some(evolution_csv::Library { species: self.species_archive.as_ref()?, evolutions: self.archive.as_ref()?, sd })
     }
 
-    /// Writes the evolutions of all the species and forms to a CSV file that the user chooses.
-    fn export_csv(&mut self, session: &Session) {
-        let Some(library) = self.library(session.sd.as_ref()) else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("evolutions.csv").save_file() else { return };
-        let text = evolution_csv::export(&library);
-        let rows = text.lines().count() - 1;
-        self.status = Some(match std::fs::write(&path, &text) {
-            Ok(()) => (true, format!("Exported {rows} rows to {}.", path.display())),
-            Err(error) => (false, format!("{}: {error}", path.display())),
-        });
+    /// The evolutions of all the species and forms as CSV text (the SD card first, then the romfs).
+    pub(crate) fn csv_export(&self, sd: Option<&SdCard>) -> Option<String> {
+        Some(evolution_csv::export(&self.library(sd)?))
     }
 
-    /// Reads a CSV file that the user chooses, checks it, and writes the changes on the SD card.
-    fn import_csv(&mut self, session: &Session) {
-        let (Some(library), Some(sd)) = (self.library(session.sd.as_ref()), session.sd.as_ref()) else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
-        let result = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|text| evolution_csv::parse(&text)).and_then(|rows| evolution_csv::apply(&rows, &library, sd));
-        self.status = Some(match result {
-            Ok(0) => (true, "The file matches the current evolutions: nothing to write.".to_string()),
-            Ok(files) => {
-                self.imported = true;
-                (true, format!("Imported: {files} files written on the SD card. The game loads them again by itself."))
-            }
-            Err(message) => (false, message),
-        });
-    }
-
-    /// True once after an import wrote files.
-    pub fn take_imported(&mut self) -> bool {
-        std::mem::take(&mut self.imported)
+    /// Reads CSV text, checks it, and writes the changes on the SD card. Gives the number of files that were written.
+    pub(crate) fn csv_import(&self, sd: &SdCard, text: &str) -> Result<usize, String> {
+        let library = self.library(Some(sd)).ok_or("The archives of the evolutions are not open.")?;
+        let rows = evolution_csv::parse(text)?;
+        evolution_csv::apply(&rows, &library, sd)
     }
 
     /// The names of the columns.
@@ -348,12 +305,11 @@ mod test {
         assert!(!tab.evolutions.has_room() && !tab.changed() && !tab.from_card());
 
         let ctx = egui::Context::default();
-        let session = Session::default();
         let frame = |tab: &mut EvolutionTab| {
             let mut input = egui::RawInput::default();
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0)));
             let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| tab.ui(ui, &session));
+                egui::CentralPanel::default().show(ctx, |ui| tab.ui(ui));
             });
         };
         frame(&mut tab);
@@ -377,10 +333,10 @@ mod test {
         assert_eq!(again.evolutions, tab.evolutions);
         assert_eq!(again.evolutions.list.len(), 7);
 
-        // Reset gives back the romfs; a species that does not evolve draws too.
-        again.reset(133);
+        // Without the SD card the evolutions are the ones of the romfs; a species that does not evolve draws too.
+        again.load(None, 133, 0, 133);
         assert_eq!(again.evolutions.list.len(), 8);
-        assert!(again.changed());
+        assert!(!again.from_card());
         again.load(None, 3, 0, 3);
         assert!(again.evolutions.list.is_empty());
         frame(&mut again);

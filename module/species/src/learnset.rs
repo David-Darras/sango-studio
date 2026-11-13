@@ -20,7 +20,7 @@ use sango_core::learnset::{self, EggMoves, LevelUp, LevelUpMove, MAX_LEVEL_UP_MO
 use sango_core::moves::{Category, MoveTable};
 use sango_core::{Dump, Garc, SdCard};
 use sango_ui::theme::color;
-use sango_ui::{egui, widget, Session};
+use sango_ui::{egui, widget};
 
 /// The groups of moves, with the name of their button.
 const GROUPS: [&str; 4] = ["Level up", "Egg moves", "Tutor", "TM/HM"];
@@ -279,10 +279,6 @@ pub struct Learnset {
     group: usize,
     /// True when a level changed: the moves go back in the order of the levels when the user lets go.
     needs_sort: bool,
-    /// What happened at the last click on a CSV button: true for a success.
-    status: Option<(bool, String)>,
-    /// True when an import wrote files: the species page reads its data again.
-    imported: bool,
 }
 
 impl Learnset {
@@ -317,16 +313,6 @@ impl Learnset {
         self.egg_archive.as_ref()?.first_file(species).and_then(|b| EggMoves::from_bytes(b).ok())
     }
 
-    /// Takes the moves of the romfs again. Save writes them.
-    pub fn reset(&mut self, species: usize, file: usize) {
-        if let Some(level_up) = self.read_romfs_level_up(file) {
-            self.level_up = level_up;
-        }
-        if let Some(eggs) = self.read_romfs_eggs(species) {
-            self.eggs = eggs;
-        }
-    }
-
     /// True when the level-up moves or the egg moves changed since they were read or saved.
     pub fn changed(&self) -> bool {
         self.level_up != self.level_up_saved || self.eggs != self.eggs_saved
@@ -359,25 +345,14 @@ impl Learnset {
     }
 
     /// Draws the tab: the buttons of the groups, then the table of the chosen group.
-    pub fn ui(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData, session: &Session) {
+    pub fn ui(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData) {
         egui::ScrollArea::vertical().id_salt("learnset_tab").auto_shrink([false, false]).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                 for (place, name) in GROUPS.iter().enumerate() {
                     self.group = tab(ui, place, name, self.group);
                 }
-                ui.add_space(12.0);
-                if widget::button(ui, "Export CSV") {
-                    self.export_csv(session);
-                }
-                if session.sd.is_some() && widget::button(ui, "Import CSV") {
-                    self.import_csv(session);
-                }
             });
-            if let Some((ok, message)) = &self.status {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
-            }
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
@@ -401,36 +376,16 @@ impl Learnset {
         Some(learnset_csv::Library { species: self.species_archive.as_ref()?, level_up: self.level_up_archive.as_ref()?, eggs: self.egg_archive.as_ref()?, sd })
     }
 
-    /// Writes the moves of all the species and forms to a CSV file that the user chooses.
-    fn export_csv(&mut self, session: &Session) {
-        let Some(library) = self.library(session.sd.as_ref()) else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("learnsets.csv").save_file() else { return };
-        let text = learnset_csv::export(&library);
-        let rows = text.lines().count() - 1;
-        self.status = Some(match std::fs::write(&path, &text) {
-            Ok(()) => (true, format!("Exported {rows} moves to {}.", path.display())),
-            Err(error) => (false, format!("{}: {error}", path.display())),
-        });
+    /// The moves of all the species and forms as CSV text (the SD card first, then the romfs).
+    pub(crate) fn csv_export(&self, sd: Option<&SdCard>) -> Option<String> {
+        Some(learnset_csv::export(&self.library(sd)?))
     }
 
-    /// Reads a CSV file that the user chooses, checks it, and writes the changes on the SD card.
-    fn import_csv(&mut self, session: &Session) {
-        let (Some(library), Some(sd)) = (self.library(session.sd.as_ref()), session.sd.as_ref()) else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
-        let result = std::fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display())).and_then(|text| learnset_csv::parse(&text)).and_then(|rows| learnset_csv::apply(&rows, &library, sd));
-        self.status = Some(match result {
-            Ok(report) if report.total() == 0 => (true, "The file matches the current moves: nothing to write.".to_string()),
-            Ok(report) => {
-                self.imported = true;
-                (true, format!("Imported: {} files written on the SD card. The game loads them again by itself.", report.total()))
-            }
-            Err(message) => (false, message),
-        });
-    }
-
-    /// True once after an import wrote files.
-    pub fn take_imported(&mut self) -> bool {
-        std::mem::take(&mut self.imported)
+    /// Reads CSV text, checks it, and writes the changes on the SD card. Gives the number of files that were written.
+    pub(crate) fn csv_import(&self, sd: &SdCard, text: &str) -> Result<usize, String> {
+        let library = self.library(Some(sd)).ok_or("The archives of the moves are not open.")?;
+        let rows = learnset_csv::parse(text)?;
+        Ok(learnset_csv::apply(&rows, &library, sd)?.total())
     }
 
     /// The choices of a list of moves, each with its type.
@@ -753,12 +708,11 @@ mod test {
         let garc = Garc::open(&std::path::Path::new(&root).join("a/1/9/5")).unwrap();
         let mut data = SpeciesData::from_bytes(garc.first_file(1).unwrap()).unwrap();
         let ctx = egui::Context::default();
-        let session = Session::default();
         let frame = |learnset: &mut Learnset, data: &mut SpeciesData| {
             let mut input = egui::RawInput::default();
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0)));
             let _ = ctx.run(input, |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| learnset.ui(ui, data, &session));
+                egui::CentralPanel::default().show(ctx, |ui| learnset.ui(ui, data));
             });
         };
         for group in 0..GROUPS.len() {
@@ -797,12 +751,12 @@ mod test {
         assert_eq!(again.eggs, learnset.eggs);
         assert!(again.from_card());
 
-        // Reset gives back the romfs.
-        again.reset(1, 1);
+        // Without the SD card the moves are the ones of the romfs.
+        again.load(None, 1, 1, 1);
         assert_eq!(again.level_up.moves.len(), 14);
         assert_eq!(again.level_up.moves[0], LevelUpMove { id: 33, level: 1 });
         assert_eq!(again.eggs.moves.len(), 15);
-        assert!(again.changed());
+        assert!(!again.from_card());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

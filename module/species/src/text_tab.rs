@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 
 /// Which line of a file a field uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Line {
+pub(crate) enum Line {
     /// The number of the species.
     Species,
     /// The place of the form in the Pokédex tables.
@@ -28,23 +28,25 @@ enum Line {
 }
 
 /// A field of the tab.
-struct Field {
-    label: &'static str,
+pub(crate) struct Field {
+    pub(crate) label: &'static str,
+    /// The name of the field in the CSV file.
+    pub(crate) key: &'static str,
     /// The number of the file of texts.
-    file: usize,
-    line: Line,
+    pub(crate) file: usize,
+    pub(crate) line: Line,
     /// The number of lines that the text box shows.
     rows: usize,
     hint: &'static str,
 }
 
-const FIELDS: [Field; 6] = [
-    Field { label: "Name", file: 98, line: Line::Species, rows: 1, hint: "" },
-    Field { label: "Category", file: 2, line: Line::Species, rows: 1, hint: "The Pokédex shows it with the word Pokémon, as in Seed Pokémon." },
-    Field { label: "Pokédex entry", file: 6, line: Line::Species, rows: 5, hint: "The text that Alpha Sapphire shows. A line break is a line break of the text." },
-    Field { label: "Form name", file: 5, line: Line::Place, rows: 1, hint: "The name that the Pokédex gives to this form. The first form has none." },
-    Field { label: "Height", file: 4, line: Line::Place, rows: 1, hint: "The height as the Pokédex writes it. It does not change with the height of the data." },
-    Field { label: "Weight", file: 1, line: Line::Place, rows: 1, hint: "The weight as the Pokédex writes it. It does not change with the weight of the data." },
+pub(crate) const FIELDS: [Field; 6] = [
+    Field { label: "Name", key: "name", file: 98, line: Line::Species, rows: 1, hint: "" },
+    Field { label: "Category", key: "category", file: 2, line: Line::Species, rows: 1, hint: "The Pokédex shows it with the word Pokémon, as in Seed Pokémon." },
+    Field { label: "Pokédex entry", key: "entry", file: 6, line: Line::Species, rows: 5, hint: "The text that Alpha Sapphire shows. A line break is a line break of the text." },
+    Field { label: "Form name", key: "form_name", file: 5, line: Line::Place, rows: 1, hint: "The name that the Pokédex gives to this form. The first form has none." },
+    Field { label: "Height", key: "height", file: 4, line: Line::Place, rows: 1, hint: "The height as the Pokédex writes it. It does not change with the height of the data." },
+    Field { label: "Weight", key: "weight", file: 1, line: Line::Place, rows: 1, hint: "The weight as the Pokédex writes it. It does not change with the weight of the data." },
 ];
 
 /// The state of the Text tab.
@@ -97,7 +99,7 @@ impl TextTab {
     }
 
     /// A file of texts as the romfs has it.
-    fn romfs(&self, language: usize, file: usize) -> Option<TextFile> {
+    pub(crate) fn romfs(&self, language: usize, file: usize) -> Option<TextFile> {
         self.archives.get(language)?.as_ref()?.first_file(file).and_then(|bytes| TextFile::from_bytes(bytes).ok())
     }
 
@@ -127,25 +129,18 @@ impl TextTab {
     }
 
     /// The line of a field.
-    fn line_of(field: &Field, species: usize, place: usize) -> usize {
+    pub(crate) fn line_of(field: &Field, species: usize, place: usize) -> usize {
         match field.line {
             Line::Species => species,
             Line::Place => place,
         }
     }
 
-    /// Takes the texts of the species and the form from the romfs again, in all the languages that were read.
-    /// Save writes them.
-    pub fn reset(&mut self, species: usize, place: usize) {
-        for field in &FIELDS {
-            let line = Self::line_of(field, species, place);
-            for language in 0..LANGUAGES.len() {
-                let original = self.romfs(language, field.file).and_then(|file| file.text(line));
-                if let (Some(original), Some(file)) = (original, self.files.get_mut(&(language, field.file))) {
-                    let _ = file.set_text(line, &original);
-                }
-            }
-        }
+    /// Forgets the texts that were read and the changes that were not saved: the next display reads the files again.
+    pub fn reload(&mut self) {
+        self.files.clear();
+        self.saved.clear();
+        self.from_card.clear();
         self.buffers.clear();
         self.errors.clear();
     }
@@ -300,10 +295,9 @@ mod test {
         assert_eq!(again.files[&(2, 98)].text(1).as_deref(), Some("Bulbasaur"));
         assert!(again.from_card());
 
-        // Reset gives back the romfs for the species.
-        again.reset(1, 1);
-        assert_eq!(again.files[&(3, 98)].text(1).as_deref(), Some("Bulbizarre"));
-        assert!(again.changed());
+        // Reload forgets the files that were read.
+        again.reload();
+        assert!(again.files.is_empty() && !again.changed() && !again.from_card());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

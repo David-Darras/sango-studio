@@ -4,6 +4,7 @@
 //! `pokemon/data/<species>_<form>.bin` takes the place of the romfs when it exists.
 
 mod csv;
+mod data_tools;
 mod data;
 mod evolution;
 mod evolution_csv;
@@ -14,14 +15,18 @@ mod icons;
 mod learnset;
 mod learnset_csv;
 mod machines;
-mod battle_icons;
+pub mod battle_icons;
 mod model_export;
 mod model_tab;
 mod move_names;
 mod pokedex_data;
 mod table;
+mod text_csv;
 mod text_tab;
 mod names;
+
+/// The names of the 18 types, in the order of the game: Normal to Fairy.
+pub use names::TYPE as TYPE_NAMES;
 
 use data::SpeciesData;
 use examples::{Examples, Field};
@@ -159,6 +164,10 @@ pub struct Species {
     icon_tab: icon_tab::IconTab,
     /// The state of the Model tab.
     model_tab: model_tab::ModelTab,
+    /// The list of items (the rows and the pictures) that the fields of held items use.
+    item_list: std::sync::Arc<std::sync::Mutex<sango_ui::item_menu::ItemList>>,
+    /// The CSV files, the resets and the undo.
+    tools: data_tools::Tools,
 }
 
 impl Default for Species {
@@ -194,6 +203,8 @@ impl Default for Species {
             text: text_tab::TextTab::default(),
             icon_tab: icon_tab::IconTab::default(),
             model_tab: model_tab::ModelTab::default(),
+            item_list: Default::default(),
+            tools: data_tools::Tools::default(),
         }
     }
 }
@@ -481,7 +492,9 @@ impl Species {
 
     /// The menus, the two buttons and the state.
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
-        let mut reset = false;
+        let mut reset_tab = false;
+        let mut reset_more = false;
+        let mut undo = false;
         let mut save = false;
         let before = (self.species, self.form);
         widget::card(ui, |ui| {
@@ -720,7 +733,24 @@ impl Species {
                     ui.label(widget::hint(&format!("archive {ARCHIVE}, file {id}")))
                         .on_hover_text("The place of the file of this species and form in the archive of the species data.");
                 }
-                reset = widget::button(ui, "Reset");
+                let has_card = session.sd.is_some() && self.garc.is_some();
+                let tab_part = data_tools::tab_part(self.tab);
+                ui.add_enabled_ui(has_card && tab_part.is_some(), |ui| {
+                    reset_tab = widget::button(ui, "Reset tab");
+                })
+                .response
+                .on_hover_text("Puts the data of this tab for this form back to the romfs. Undo gives it back.");
+                ui.add_enabled_ui(has_card, |ui| {
+                    reset_more = widget::button(ui, "Reset…");
+                })
+                .response
+                .on_hover_text("Reset one form, one species or all the species, for the parts that you choose.");
+                let undo_label = self.undo_label().map(|label| format!("Undo: {label}"));
+                ui.add_enabled_ui(undo_label.is_some() && session.sd.is_some(), |ui| {
+                    undo = widget::button(ui, "Undo");
+                })
+                .response
+                .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -728,14 +758,6 @@ impl Species {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
-                }
-                if self.garc.is_some() {
-                    if widget::button(ui, "Export CSV") {
-                        self.export_csv(session);
-                    }
-                    if session.sd.is_some() && widget::button(ui, "Import CSV") {
-                        self.import_csv(session);
-                    }
                 }
             });
             if let Some((ok, message)) = &self.status {
@@ -746,68 +768,23 @@ impl Species {
         if (self.species, self.form) != before {
             self.loaded = None;
         }
-        if reset {
-            match self.read_romfs() {
-                Ok(data) => {
-                    self.data = Some(data);
-                    if let Some(shape) = self.read_pokedex_romfs().ok().and_then(|e| e.shape(self.species, self.form)) {
-                        self.shape = shape;
-                    }
-                    let file = self.garc.as_ref().map_or(self.species, |garc| file_index(garc, self.species, self.form));
-                    self.learnset.reset(self.species, file);
-                    self.evolution.reset(file);
-                    let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
-                    self.text.reset(self.species, place);
-                    self.icon_tab.reset(self.species, self.form);
-                    self.status = Some((true, "The data comes from the romfs again. Save to write it on the SD card.".into()));
-                }
-                Err(message) => self.status = Some((false, message)),
+        if reset_tab {
+            if let Some(part) = data_tools::tab_part(self.tab) {
+                self.run_reset(session, data_tools::Scope::Form, &[part]);
             }
+        }
+        if reset_more {
+            self.tools.reset_open = true;
+            self.tools.parts = [false; 5];
+            if let Some(part) = data_tools::tab_part(self.tab) {
+                self.tools.parts[data_tools::Part::ALL.iter().position(|p| *p == part).unwrap_or(0)] = true;
+            }
+        }
+        if undo {
+            self.undo(session);
         }
         if save {
             self.save(session);
-        }
-    }
-
-    /// Writes all the species and forms to a CSV file that the user chooses.
-    fn export_csv(&mut self, session: &Session) {
-        let Some(garc) = &self.garc else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("species.csv").save_file() else { return };
-        let text = csv::export(garc, session.sd.as_ref(), self.pokedex.as_ref());
-        let rows = text.lines().count() - 1;
-        self.status = Some(match std::fs::write(&path, &text) {
-            Ok(()) => (true, format!("Exported {rows} rows to {}.", path.display())),
-            Err(error) => (false, format!("{}: {error}", path.display())),
-        });
-    }
-
-    /// Reads a CSV file that the user chooses, checks it, and writes the changes on the SD card.
-    fn import_csv(&mut self, session: &Session) {
-        let (Some(garc), Some(sd)) = (&self.garc, &session.sd) else { return };
-        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
-        let result = std::fs::read_to_string(&path)
-            .map_err(|error| format!("{}: {error}", path.display()))
-            .and_then(|text| csv::parse(&text))
-            .and_then(|rows| csv::apply(&rows, garc, sd, &mut self.pokedex));
-        match result {
-            Ok(report) => {
-                let files = report.written + report.shape_written as usize;
-                self.status = Some((
-                    true,
-                    if files == 0 {
-                        "The file matches the current data: nothing to write.".to_string()
-                    } else {
-                        format!("Imported: {files} files written on the SD card. The game loads them again by itself.")
-                    },
-                ));
-                // The data on the SD card changed: the form and the list read it again.
-                self.loaded = None;
-                self.list_rows = None;
-                if report.shape_written {
-                    self.pokedex_from_sd = true;
-                }
-            }
-            Err(message) => self.status = Some((false, message)),
         }
     }
 
@@ -1406,6 +1383,23 @@ struct FieldNote {
     example: Option<(Field, u32)>,
 }
 
+/// The key of the list of items in the memory of the interface.
+const ITEM_LIST_ID: &str = "species_item_list";
+
+/// A drop-down list of items, with their pictures. Without the list of items it is the list of names.
+fn item_picker(ui: &mut egui::Ui, id_salt: &str, value: &mut u16) {
+    let shared: Option<std::sync::Arc<std::sync::Mutex<sango_ui::item_menu::ItemList>>> = ui.ctx().data(|d| d.get_temp(egui::Id::new(ITEM_LIST_ID)));
+    match shared {
+        Some(list) => {
+            let mut item = *value as usize;
+            if sango_ui::item_menu::shared_menu(ui, id_salt, &mut item, 240.0, &list, true) {
+                *value = item as u16;
+            }
+        }
+        None => searchable_picker(ui, id_salt, value, &names::ITEM, 180.0),
+    }
+}
+
 /// The key of the examples in the memory of the interface.
 const EXAMPLES_ID: &str = "species_examples";
 
@@ -1799,7 +1793,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::HeldItem50, d.item_50 as u32)),
                 }),
                 |ui| {
-                    searchable_picker(ui, "item_50", &mut d.item_50, &names::ITEM, 180.0);
+                    item_picker(ui, "item_50", &mut d.item_50);
                     ui.label(widget::hint(&format!("0x{:04X}", d.item_50)));
                 },
             );
@@ -1812,7 +1806,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::HeldItem5, d.item_5 as u32)),
                 }),
                 |ui| {
-                    searchable_picker(ui, "item_5", &mut d.item_5, &names::ITEM, 180.0);
+                    item_picker(ui, "item_5", &mut d.item_5);
                     ui.label(widget::hint(&format!("0x{:04X}", d.item_5)));
                 },
             );
@@ -2086,7 +2080,7 @@ fn group_ev_yield(ui: &mut egui::Ui, d: &mut SpeciesData, _shape: &mut u8) {
 }
 
 /// The groups of the General tab, side by side: as many columns as the window has room for.
-fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8) {
+fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, above: impl FnOnce(&mut egui::Ui)) {
     const GROUPS: [fn(&mut egui::Ui, &mut SpeciesData, &mut u8); 3] = [
         group_statistics,
         group_characteristics,
@@ -2101,6 +2095,8 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8) {
         _ => vec![(0..GROUPS.len()).collect()],
     };
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        above(ui);
+        ui.add_space(10.0);
         ui.horizontal_top(|ui| {
             for column in layout {
                 ui.vertical(|ui| {
@@ -2160,6 +2156,9 @@ impl Module for Species {
             self.icon_tab.open(&dump);
             self.model_tab.open(&dump);
             battle_icons::load(&dump);
+            if let Ok(mut list) = self.item_list.lock() {
+                list.open(&dump);
+            }
             self.icon_textures.clear();
             self.list_rows = None;
             self.loaded = None;
@@ -2171,7 +2170,9 @@ impl Module for Species {
         if self.garc.is_some() && self.loaded != Some((self.species, self.form)) {
             self.load(session);
         }
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ITEM_LIST_ID), self.item_list.clone()));
         self.top_bar(ui, session);
+        self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);
         let mut clicked_tab = None;
         egui::Frame::none()
@@ -2231,27 +2232,25 @@ impl Module for Species {
             ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(EXAMPLES_ID), shared));
         }
         match (self.tab, self.data.as_mut()) {
-            (0, Some(data)) => general_tab(ui, data, &mut self.shape),
-            (1, Some(data)) => {
-                self.learnset.ui(ui, data, session);
-                if self.learnset.take_imported() {
-                    // The files on the SD card changed: the species data and the lists are read again.
-                    self.loaded = None;
-                    self.list_rows = None;
+            (0, Some(_)) => {
+                // The data leaves the page while the tab is drawn: the CSV card can read the files again.
+                if let Some(mut data) = self.data.take() {
+                    let mut shape = self.shape;
+                    general_tab(ui, &mut data, &mut shape, |ui| self.csv_card(ui, session));
+                    if self.loaded.is_some() {
+                        self.data = Some(data);
+                        self.shape = shape;
+                    }
                 }
             }
+            (1, Some(data)) => self.learnset.ui(ui, data),
             (4, Some(_)) => self.icon_tab.ui(ui, session, self.species, self.form),
             (5, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
             (3, Some(_)) => {
                 let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                 self.text.ui(ui, session, self.species, self.form, place);
             }
-            (2, Some(_)) => {
-                self.evolution.ui(ui, session);
-                if self.evolution.take_imported() {
-                    self.loaded = None;
-                }
-            }
+            (2, Some(_)) => self.evolution.ui(ui),
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));
@@ -2353,7 +2352,7 @@ mod test {
                 widget::set_page_focus(ctx, true);
                 widget::update_navigation(ui);
                 species.top_bar(ui, &session);
-                general_tab(ui, &mut data, &mut 0u8);
+                general_tab(ui, &mut data, &mut 0u8, |_| {});
             });
         });
 
@@ -2370,7 +2369,7 @@ mod test {
                     widget::set_page_focus(ctx, true);
                     widget::update_navigation(ui);
                     species.top_bar(ui, &session);
-                    general_tab(ui, &mut data, &mut 0u8);
+                    general_tab(ui, &mut data, &mut 0u8, |_| {});
                 });
             });
         }

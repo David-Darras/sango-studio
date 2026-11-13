@@ -6,11 +6,14 @@ mod dump;
 mod sd;
 mod setting;
 
+pub mod backup;
 pub mod bundle;
 pub mod clim;
+pub mod csv_text;
 pub mod evolution;
 pub mod experience;
 pub mod garc;
+pub mod item_icons;
 pub mod learnset;
 pub mod lz;
 pub mod model;
@@ -20,6 +23,7 @@ pub mod posing;
 pub mod render;
 pub mod text;
 
+pub use backup::Backup;
 pub use bundle::Bundle;
 pub use clim::Clim;
 pub use dump::Dump;

@@ -88,7 +88,7 @@ fn current(garc: &Garc, sd: Option<&SdCard>, species: usize, form: usize) -> Opt
 }
 
 /// The number of forms of a species (at least one).
-fn form_count(garc: &Garc, species: usize) -> usize {
+pub(crate) fn form_count(garc: &Garc, species: usize) -> usize {
     garc.first_file(species).and_then(|b| SpeciesData::from_bytes(b).ok()).map_or(1, |d| (d.total_form_count as usize).max(1))
 }
 
