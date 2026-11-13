@@ -122,11 +122,26 @@ impl Archive {
             ui.horizontal(|ui| {
                 ui.label(widget::title("Archive"));
                 let field = ui.add(egui::TextEdit::singleline(&mut self.input).desired_width(70.0).hint_text("277"));
+                // Enter ends the text: ask before the box takes the focus back (taking it back hides the end of the text).
                 if field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
                     match self.input.trim().parse::<usize>() {
                         Ok(n) => go = Some(n),
                         Err(_) => self.error = Some("Type the number of an archive.".into()),
                     }
+                }
+                // The box is a stop of the keyboard navigation of the page: when the page has chosen it, it takes the focus of the
+                // text, so that the digits and Enter go to it. A click chooses it too.
+                widget::register_focusable(ui, field.id, field.rect);
+                if field.clicked() || field.gained_focus() {
+                    widget::set_active_id(ui, field.id);
+                }
+                if widget::is_active(ui, field.id) && widget::page_has_focus(ui) {
+                    if !field.has_focus() {
+                        field.request_focus();
+                    }
+                    widget::glow(ui, field.rect, 4.0);
+                } else if field.has_focus() {
+                    field.surrender_focus();
                 }
                 let current = self.loaded.as_ref().map(|l| l.number);
                 let position = current.and_then(|n| self.numbers.iter().position(|&x| x == n));
@@ -563,6 +578,39 @@ mod test {
         assert_eq!(first_bytes(b"GARCxx"), "\"GARC\"");
         assert_eq!(first_bytes(&[0x11, 0x80, 0x00]), "11 80 00");
         assert_eq!(first_bytes(&[]), "nothing");
+    }
+
+    /// With the dump of the game: a number typed in the box and Enter open that archive.
+    #[test]
+    fn enter_in_the_number_box_opens_the_archive() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_archive_page_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(sango_core::SdCard::open(folder.to_str().unwrap()).unwrap()), ..Session::default() };
+        let mut page = Archive::default();
+        let ctx = egui::Context::default();
+        let screen = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0)));
+        let mut frame = |page: &mut Archive, session: &mut Session, events: Vec<egui::Event>| {
+            let _ = ctx.run(egui::RawInput { screen_rect: screen, events, ..Default::default() }, |ctx| {
+                // The application chooses the active widget of the page before it draws the page.
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::update_navigation(ui);
+                    page.ui(ui, session);
+                });
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut page, &mut session, Vec::new());
+        }
+        let wanted = page.numbers[5];
+        page.input = wanted.to_string();
+        // The box has the focus of the text without a click, because the page chose it first.
+        frame(&mut page, &mut session, Vec::new());
+        let enter = |pressed| egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+        frame(&mut page, &mut session, vec![enter(true), enter(false)]);
+        frame(&mut page, &mut session, Vec::new());
+        assert_eq!(page.loaded.as_ref().map(|l| l.number), Some(wanted), "Enter opens the archive {wanted}");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     #[test]
