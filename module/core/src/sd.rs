@@ -73,6 +73,8 @@ impl SdCard {
             std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         }
         std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        // The files that replace a file of an archive of the game are copied where the plugin reads them.
+        crate::archive_files::mirror(self, relative, Some(bytes))?;
         Ok(path)
     }
 
@@ -135,7 +137,10 @@ impl SdCard {
     pub fn remove(&self, relative: &str) -> Result<bool, String> {
         let path = self.path(relative)?;
         match std::fs::remove_file(&path) {
-            Ok(()) => Ok(true),
+            Ok(()) => {
+                crate::archive_files::mirror(self, relative, None)?;
+                Ok(true)
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(format!("{}: {error}", path.display())),
         }

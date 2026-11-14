@@ -148,16 +148,28 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
             (Part::Moves, Scope::All) => {
                 remove(sd.files_in("pokemon/learnset"))?;
                 remove(sd.files_in("pokemon/egg_moves"))?;
+                sango_core::archive_files::clear(sd, learnset::LEVEL_UP_ARCHIVE)?;
             }
             (Part::Moves, _) => {
                 remove(forms.iter().map(|&f| learnset::level_up_sd_path(species, f)).collect())?;
+                for &f in forms.iter().filter(|_| species <= crate::SPECIES.len()) {
+                    sango_core::archive_files::remove(sd, learnset::LEVEL_UP_ARCHIVE, crate::file_index(library.species, species, f))?;
+                }
                 // The egg moves belong to the species: the first form takes them with it.
                 if forms.contains(&0) {
                     remove(vec![learnset::egg_sd_path(species)])?;
                 }
             }
-            (Part::Evolutions, Scope::All) => remove(sd.files_in("pokemon/evolution"))?,
-            (Part::Evolutions, _) => remove(forms.iter().map(|&f| evolution::sd_path(species, f)).collect())?,
+            (Part::Evolutions, Scope::All) => {
+                remove(sd.files_in("pokemon/evolution"))?;
+                sango_core::archive_files::clear(sd, evolution::ARCHIVE)?;
+            }
+            (Part::Evolutions, _) => {
+                remove(forms.iter().map(|&f| evolution::sd_path(species, f)).collect())?;
+                for &f in forms.iter().filter(|_| species <= crate::SPECIES.len()) {
+                    sango_core::archive_files::remove(sd, evolution::ARCHIVE, crate::file_index(library.species, species, f))?;
+                }
+            }
             (Part::Icons, Scope::All) => remove(sd.files_in("pokemon/icon"))?,
             (Part::Icons, _) => {
                 let files: BTreeSet<usize> = forms.iter().flat_map(|&f| [false, true].into_iter().filter_map(move |female| icon_tab::icon_file(species, f, female))).collect();

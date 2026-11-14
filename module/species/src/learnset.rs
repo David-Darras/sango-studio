@@ -278,6 +278,8 @@ pub struct Learnset {
     eggs_saved: EggMoves,
     /// True when the files come from the SD card.
     from_card: bool,
+    /// The place of the form in the archive of the level-up moves: the number of the file that the plugin replaces.
+    file: usize,
     /// The chosen group.
     group: usize,
     /// True when a level changed: the moves go back in the order of the levels when the user lets go.
@@ -297,6 +299,7 @@ impl Learnset {
     /// `file` is the place of the form in the archive of the level-up moves.
     pub fn load(&mut self, sd: Option<&SdCard>, species: usize, form: usize, file: usize) {
         let on_card = |path: String| sd.and_then(|sd| sd.read(&path));
+        self.file = file;
         let level_card = on_card(learnset::level_up_sd_path(species, form)).and_then(|b| LevelUp::from_bytes(&b).ok());
         let egg_card = on_card(learnset::egg_sd_path(species)).and_then(|b| EggMoves::from_bytes(&b).ok());
         self.from_card = level_card.is_some() || egg_card.is_some();
@@ -351,6 +354,10 @@ impl Learnset {
         if self.level_up != self.level_up_saved {
             let path = learnset::level_up_sd_path(species, form);
             sd.write(&path, &self.level_up.to_bytes()).and_then(|_| sd.mark_changed(&path))?;
+            // The plugin replaces the file of the archive by its number. The species of the packs have no file in the archive.
+            if species <= crate::SPECIES.len() {
+                sango_core::archive_files::write(sd, learnset::LEVEL_UP_ARCHIVE, self.file, &self.level_up.to_bytes())?;
+            }
             self.level_up_saved = self.level_up.clone();
             written.push(path);
         }

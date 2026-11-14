@@ -19,6 +19,7 @@ pub mod battle_icons;
 pub mod custom_moves;
 mod model_export;
 mod model_import;
+mod plugin_files;
 mod model_tab;
 mod move_names;
 mod pokedex_data;
@@ -2341,6 +2342,12 @@ impl Module for Species {
                 list.open(&dump);
             }
             self.icon_textures.clear();
+            // The files that were written before the plugin read them by number get their copy.
+            if let (Some(sd), Some(garc)) = (session.sd.as_ref(), self.garc.as_ref()) {
+                if let Err(message) = plugin_files::sync(sd, garc) {
+                    self.status = Some((false, message));
+                }
+            }
             self.list_rows = None;
             self.loaded = None;
             self.examples = match (&self.garc, self.read_pokedex_romfs()) {

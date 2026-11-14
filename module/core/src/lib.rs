@@ -6,6 +6,7 @@ mod dump;
 mod sd;
 mod setting;
 
+pub mod archive_files;
 pub mod backup;
 pub mod bundle;
 pub mod clim;
