@@ -3,7 +3,9 @@
 //!
 //! The files are C++ initialisers: nested lists of numbers, with `u"..."` texts. A small reader is enough for them.
 
-use crate::pack::{to_hex, Evolution, Move, Pack, PackForm, PackSpecies, Ref, DATA_SIZE};
+use crate::pack::{to_hex, Evolution, ModelRef, Move, Pack, PackForm, PackSpecies, Ref, DATA_SIZE, MODEL_FILES};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use crate::table::{FormRecord, SpeciesRecord, Table, FIRST_SPECIES};
 
 /// A value of an initialiser.
@@ -232,13 +234,91 @@ fn reference(number: u16, names: &std::collections::HashMap<u16, String>) -> Res
     }
 }
 
-fn pack_species(entries: &[IncSpecies], names: &std::collections::HashMap<u16, String>) -> Result<Vec<PackSpecies>, String> {
+/// The models that the plugin read before the packs: the folder `sango/pokemodel` (or `sango_off/pokemodel`) of the SD card,
+/// with `0.raw`, `index.bin` and the files `<file>.pc`. A *model form* (the number that the data files give) is a slot of a
+/// carrier species.
+pub struct OldModels {
+    folder: PathBuf,
+    /// The list of the old files (`0.raw` without its size), and the list of the game (the file 0 of the archive 8).
+    old_list: Vec<u8>,
+    base_list: Vec<u8>,
+}
+
+/// The first slot and the number of slots of a species in a list of the models.
+fn list_entry(list: &[u8], species: usize) -> Result<(usize, usize), String> {
+    let at = (species - 1) * 4;
+    let entry = list.get(at..at + 4).ok_or("A list of the models is too short.")?;
+    Ok((u16::from_le_bytes([entry[0], entry[1]]) as usize, entry[2] as usize))
+}
+
+impl OldModels {
+    /// `base_list` is the file 0 of the archive 8 of the game.
+    pub fn open(folder: &std::path::Path, base_list: &[u8]) -> Result<OldModels, String> {
+        let raw = std::fs::read(folder.join("0.raw")).map_err(|e| format!("{}/0.raw: {e}", folder.display()))?;
+        let old_list = raw.get(4..).ok_or("0.raw is too short.")?.to_vec();
+        Ok(OldModels { folder: folder.to_path_buf(), old_list, base_list: base_list.to_vec() })
+    }
+
+    /// The slot of a model form: a form of a carrier species.
+    pub fn slot_of(&self, model_form: u16) -> Result<usize, String> {
+        let (carrier, form) = ((model_form / 256) as usize, (model_form % 256) as usize);
+        let species = *[494usize, 721].get(carrier).ok_or_else(|| format!("The model form {model_form} is not a carrier form."))?;
+        Ok(list_entry(&self.old_list, species)?.0 + form)
+    }
+
+    /// The slots that the old files added at the end of the list of a species of the game: the first one and the number.
+    pub fn extension(&self, species: u16) -> Result<(usize, usize), String> {
+        let (first, count) = list_entry(&self.old_list, species as usize)?;
+        let (_, base_count) = list_entry(&self.base_list, species as usize)?;
+        let extra = count.checked_sub(base_count).ok_or_else(|| format!("The species {species} has fewer models than the game."))?;
+        Ok((first + base_count, extra))
+    }
+
+    /// The 8 files of the model of a model form (the data of each file, without the size in front).
+    pub fn files(&self, model_form: u16) -> Result<Vec<Vec<u8>>, String> {
+        self.files_of_slot(self.slot_of(model_form)?)
+    }
+
+    /// The 8 files of a slot.
+    pub fn files_of_slot(&self, slot: usize) -> Result<Vec<Vec<u8>>, String> {
+        (0..MODEL_FILES)
+            .map(|file| {
+                let path = self.folder.join(format!("{}.pc", slot * 8 + 3 + file));
+                let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+                bytes.get(4..).map(|data| data.to_vec()).ok_or_else(|| format!("{} is too short.", path.display()))
+            })
+            .collect()
+    }
+}
+
+/// A pack made from the old files, with what is needed to find the files of its models.
+pub struct Migrated {
+    pub pack: Pack,
+    /// For each model of the pack that is in a carrier species, the model form that the old files gave it.
+    pub models: HashMap<String, u16>,
+    /// For each model of a form of a species of the game, the slot that the old files gave it.
+    pub slots: HashMap<String, usize>,
+}
+
+fn model_ref(model_form: u16, name: &str, models: &mut HashMap<String, u16>) -> Option<ModelRef> {
+    if model_form & 0x8000 != 0 {
+        return Some(ModelRef::Native { native: model_form & 0x7FFF });
+    }
+    // Two entries with the same old model share one model of the pack.
+    let file = models.iter().find(|(_, form)| **form == model_form).map(|(file, _)| file.clone()).unwrap_or_else(|| {
+        models.insert(name.to_string(), model_form);
+        name.to_string()
+    });
+    Some(ModelRef::File { file })
+}
+
+fn pack_species(entries: &[IncSpecies], names: &HashMap<u16, String>, models: &mut HashMap<String, u16>) -> Result<Vec<PackSpecies>, String> {
     entries
         .iter()
         .map(|entry| {
             Ok(PackSpecies {
                 name: entry.name.clone(),
-                model_form: entry.model_form,
+                model: model_ref(entry.model_form, &entry.name, models).ok_or("A species has no model.")?,
                 data: to_hex(&entry.data),
                 moves: entry.moves.iter().filter(|(id, _)| *id != 0).map(|&(id, level)| Move { id, level }).collect(),
                 evolutions: entry
@@ -253,19 +333,51 @@ fn pack_species(entries: &[IncSpecies], names: &std::collections::HashMap<u16, S
 }
 
 /// The three packs of the files that the plugin had: `gen7`, `gen8` and `forms` (the regional forms and the new Mega Evolutions).
-/// Install them in this order to get the numbers that the plugin gave.
-pub fn packs_from_inc(gen7: &[IncSpecies], gen8: &[IncSpecies], forms: &[IncForm]) -> Result<Vec<Pack>, String> {
-    let names: std::collections::HashMap<u16, String> = gen7.iter().chain(gen8).map(|s| (s.id, s.name.clone())).collect();
-    let credit = "Data of the species, made for Sango Studio by ZettaD.".to_string();
+/// Install them in this order to get the numbers that the plugin gave. A model that two packs use is in both.
+pub fn packs_from_inc(gen7: &[IncSpecies], gen8: &[IncSpecies], forms: &[IncForm], old: &OldModels) -> Result<Vec<Migrated>, String> {
+    let names: HashMap<u16, String> = gen7.iter().chain(gen8).map(|s| (s.id, s.name.clone())).collect();
+    let credit = "Data of the species and models, made for Sango Studio by ZettaD.".to_string();
     let base = |id: &str, name: &str| Pack { id: id.into(), name: name.into(), version: "1.0".into(), author: "ZettaD".into(), license: String::new(), credit: credit.clone(), ..Pack::default() };
-    let mut seven = base("gen7", "Generation VII species");
-    seven.species = pack_species(gen7, &names)?;
-    let mut eight = base("gen8", "Generation VIII and IX species");
-    eight.species = pack_species(gen8, &names)?;
-    let mut extra = base("forms", "Regional forms and new Mega Evolutions");
-    extra.forms = forms
-        .iter()
-        .map(|form| Ok(PackForm { species: reference(form.species, &names)?, form: form.form, name: String::new(), model_form: form.model_form, data: to_hex(&form.data) }))
-        .collect::<Result<_, String>>()?;
+    let mut seven = Migrated { pack: base("gen7", "Generation VII species"), models: HashMap::new(), slots: HashMap::new() };
+    seven.pack.species = pack_species(gen7, &names, &mut seven.models)?;
+    let mut eight = Migrated { pack: base("gen8", "Generation VIII and IX species"), models: HashMap::new(), slots: HashMap::new() };
+    eight.pack.species = pack_species(gen8, &names, &mut eight.models)?;
+    let mut extra = Migrated { pack: base("forms", "Regional forms and new Mega Evolutions"), models: HashMap::new(), slots: HashMap::new() };
+    let mut made = Vec::new();
+    // The forms of a species of the game that have no model form have their model at the end of the list of the models of the
+    // species: the old files added one slot for each form (two for a species that has a female model that the form needs).
+    let mut forms_of: HashMap<u16, usize> = HashMap::new();
+    for form in forms.iter().filter(|f| f.model_form == 0 && (1..=721).contains(&f.species)) {
+        *forms_of.entry(form.species).or_default() += 1;
+    }
+    let mut taken: HashMap<u16, usize> = HashMap::new();
+    for form in forms {
+        let label = match reference(form.species, &names)? {
+            Ref::Game(number) => format!("{number}"),
+            Ref::Key(name) => name,
+        };
+        let name = format!("{label}#{}", form.form);
+        let (mut model, mut female_model) = (None, None);
+        if form.model_form != 0 {
+            model = model_ref(form.model_form, &name, &mut extra.models);
+        } else if (1..=721).contains(&form.species) {
+            let (start, slots) = old.extension(form.species)?;
+            let count = forms_of[&form.species];
+            if slots > 0 {
+                let own = if slots == count { 1 } else if count == 1 && slots <= 2 { slots } else { return Err(format!("The species {} has {slots} new slots for {count} forms.", form.species)) };
+                let offset = taken.entry(form.species).or_default();
+                extra.slots.insert(name.clone(), start + *offset);
+                model = Some(ModelRef::File { file: name.clone() });
+                if own == 2 {
+                    let second = format!("{name} 2");
+                    extra.slots.insert(second.clone(), start + *offset + 1);
+                    female_model = Some(ModelRef::File { file: second });
+                }
+                *offset += own;
+            }
+        }
+        made.push(PackForm { species: reference(form.species, &names)?, form: form.form, name: String::new(), model, female_model, data: to_hex(&form.data) });
+    }
+    extra.pack.forms = made;
     Ok(vec![seven, eight, extra])
 }

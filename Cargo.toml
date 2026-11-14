@@ -24,6 +24,7 @@ sango-rules = { path = "module/rules" }
 sango-type = { path = "module/type" }
 sango-code = { path = "module/code" }
 sango-pack = { path = "module/pack" }
+sango-packs = { path = "module/packs" }
 
 [profile.dev]
 opt-level = 2

@@ -1,0 +1,11 @@
+[package]
+name = "sango-packs"
+version.workspace = true
+edition.workspace = true
+description = "The Packs page of Sango Studio: install and remove species packs."
+
+[dependencies]
+sango-core.workspace = true
+sango-pack.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true

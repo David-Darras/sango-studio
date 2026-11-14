@@ -2467,6 +2467,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-packs"
+version = "0.1.0"
+dependencies = [
+ "rfd",
+ "sango-core",
+ "sango-pack",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-rules"
 version = "0.1.0"
 dependencies = [
@@ -2500,6 +2510,7 @@ dependencies = [
  "sango-item",
  "sango-leveling-rate",
  "sango-move",
+ "sango-packs",
  "sango-species",
  "sango-type",
  "sango-ui",
