@@ -2492,6 +2492,7 @@ dependencies = [
  "image",
  "rfd",
  "sango-core",
+ "sango-pack",
  "sango-ui",
  "zerocopy",
 ]

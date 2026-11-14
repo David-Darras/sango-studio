@@ -11,7 +11,54 @@ use sango_core::render::{bounds_of, render, render_framed_at, Camera};
 use sango_core::{lz, Bundle, Dump, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
+use std::borrow::Cow;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+/// Where the files of the models come from: the archive 8 of the game, or the folder `sango/pokemodel` of the SD card (the
+/// models of the packs, and the species of the game that a pack gave more models).
+pub trait Files {
+    /// The file with this number. The file 0 is the list of the models.
+    fn get(&self, id: usize) -> Option<Cow<'_, [u8]>>;
+}
+
+impl Files for Garc {
+    fn get(&self, id: usize) -> Option<Cow<'_, [u8]>> {
+        self.first_file(id).map(Cow::Borrowed)
+    }
+}
+
+/// The model files that Studio wrote on the SD card for the packs (`sango/pokemodel`): the list `0.raw` and the files `<number>.pc`,
+/// each with its size (4 bytes) in front.
+pub struct SdModels {
+    folder: PathBuf,
+    list: Vec<u8>,
+}
+
+impl SdModels {
+    /// Opens the folder, when it has the list.
+    pub fn open(folder: &Path) -> Option<SdModels> {
+        let raw = std::fs::read(folder.join("0.raw")).ok()?;
+        Some(SdModels { folder: folder.to_path_buf(), list: raw.get(4..)?.to_vec() })
+    }
+
+    /// The first slot and the number of slots of a species in the list of the SD card.
+    fn entry(&self, species: usize) -> Option<(usize, usize)> {
+        let at = species.checked_sub(1)? * 4;
+        let entry = self.list.get(at..at + 4)?;
+        Some((u16::from_le_bytes([entry[0], entry[1]]) as usize, entry[2] as usize))
+    }
+}
+
+impl Files for SdModels {
+    fn get(&self, id: usize) -> Option<Cow<'_, [u8]>> {
+        if id == 0 {
+            return Some(Cow::Borrowed(&self.list));
+        }
+        let bytes = std::fs::read(self.folder.join(format!("{id}.pc"))).ok()?;
+        bytes.get(4..).map(|data| Cow::Owned(data.to_vec()))
+    }
+}
 
 /// The size of the picture of the model, in pixels.
 const VIEW_SIZE: usize = 440;
@@ -95,13 +142,15 @@ pub struct Variant {
     pub file: usize,
     /// The name that the tab shows.
     pub label: String,
+    /// True when the files are on the SD card (a model of a pack) and not in the archive.
+    pub sd: bool,
 }
 
 /// The list of the models of the game is the file 0 of the archive 8: for each species (by its number in the Pokédex),
 /// 4 bytes: the place of its first model (u16, the models take 8 files each, after the 3 first files), the number of
 /// models (u8), and flags (u8: 2 the species has a female model, 4 it has forms).
-fn model_list(archive: &Garc, species: usize) -> Option<(usize, usize, u8)> {
-    let bytes = archive.first_file(0)?;
+fn model_list(archive: &dyn Files, species: usize) -> Option<(usize, usize, u8)> {
+    let bytes = archive.get(0)?;
     let at = species.checked_sub(1)? * 4;
     let entry = bytes.get(at..at + 4)?;
     let (first, count, flags) = (u16::from_le_bytes([entry[0], entry[1]]) as usize, entry[2] as usize, entry[3]);
@@ -110,7 +159,12 @@ fn model_list(archive: &Garc, species: usize) -> Option<(usize, usize, u8)> {
 
 /// The models of a species, from the list of the game. The names come from the file of each model: the number after the
 /// name of the species is the form (51 and 52 are the Mega Evolutions and the Primal Reversions).
-pub fn variants(archive: &Garc, species: usize) -> Vec<Variant> {
+pub fn variants(archive: &dyn Files, species: usize) -> Vec<Variant> {
+    variants_in(archive, species, false)
+}
+
+/// The same, for files that are on the SD card when `sd` is true.
+fn variants_in(archive: &dyn Files, species: usize, sd: bool) -> Vec<Variant> {
     let Some((first, count, flags)) = model_list(archive, species) else { return Vec::new() };
     (0..count)
         .map(|slot| {
@@ -130,7 +184,7 @@ pub fn variants(archive: &Garc, species: usize) -> Vec<Variant> {
                 // the form is the place of the model, and the female model does not count.
                 _ => format!("Form {}", slot - usize::from(flags & 2 != 0)),
             };
-            Variant { slot: slot as u8, file, label }
+            Variant { slot: slot as u8, file, label, sd }
         })
         .collect()
 }
@@ -160,6 +214,9 @@ struct Playing {
 /// The state of the Model tab.
 pub struct ModelTab {
     archive: Option<Garc>,
+    /// The folder of the model files of the packs on the SD card, and what it holds.
+    sd_folder: Option<PathBuf>,
+    sd_models: Option<SdModels>,
     /// The form of the model that the user chose.
     form: u8,
     shiny: bool,
@@ -190,26 +247,26 @@ pub struct ModelTab {
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, variants: Vec::new(), variants_of: None }
+        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, variants: Vec::new(), variants_of: None }
     }
 }
 
 /// The parts of a file of the archive: it is compressed, and it is a bundle.
-fn parts(archive: &Garc, file: usize) -> Result<Vec<Vec<u8>>, String> {
-    let bytes = archive.first_file(file).ok_or_else(|| format!("The file {file} is missing."))?;
-    let bytes = if lz::is_compressed(bytes) { lz::decompress(bytes)? } else { bytes.to_vec() };
+fn parts(archive: &dyn Files, file: usize) -> Result<Vec<Vec<u8>>, String> {
+    let bytes = archive.get(file).ok_or_else(|| format!("The file {file} is missing."))?;
+    let bytes = if lz::is_compressed(&bytes) { lz::decompress(&bytes)? } else { bytes.into_owned() };
     let bundle = Bundle::parse(bytes)?;
     Ok((0..bundle.resource_count()).filter_map(|i| bundle.resource(i).map(|part| part.to_vec())).collect())
 }
 
 /// Reads the motions of a file of the archive, when it has some.
-fn read_motions(archive: &Garc, file: usize) -> Option<MotionPack> {
+fn read_motions(archive: &dyn Files, file: usize) -> Option<MotionPack> {
     let parts = parts(archive, file).ok()?;
     MotionPack::parse(parts.first()?).ok()
 }
 
 /// Reads the model of a file and its pictures.
-fn read_model(archive: &Garc, first: usize, shiny: bool) -> Result<(Model, Vec<Texture>), String> {
+fn read_model(archive: &dyn Files, first: usize, shiny: bool) -> Result<(Model, Vec<Texture>), String> {
     let model = parse_model(parts(archive, first)?.first().ok_or("The file of the model has no part.")?)?;
     let offset = if shiny { SHINY_TEXTURE_OFFSET } else { TEXTURE_OFFSET };
     let textures = parts(archive, first + offset)?.first().map(|bytes| parse_textures(bytes)).transpose()?.unwrap_or_default();
@@ -220,10 +277,78 @@ impl ModelTab {
     /// Opens the archive of a dump.
     pub fn open(&mut self, dump: &Dump) {
         self.archive = Garc::open(&dump.archive(8)).ok();
+        self.sd_models = self.sd_folder.as_deref().and_then(SdModels::open);
         self.variants_of = None;
         self.loaded = None;
         self.picture = None;
         self.thumbnails.clear();
+    }
+
+    /// Tells the tab where the model files of the packs are (`sango/pokemodel` of the SD card): they are read again when the
+    /// folder changes or when `changed` is true (a pack was installed).
+    pub fn set_sd_folder(&mut self, folder: Option<PathBuf>, changed: bool) {
+        if self.sd_folder != folder || changed {
+            self.sd_models = folder.as_deref().and_then(SdModels::open);
+            self.sd_folder = folder;
+            self.variants_of = None;
+            self.loaded = None;
+            self.picture = None;
+        }
+    }
+
+    /// The files that a variant is read from.
+    fn files_of(&self, sd: bool) -> Option<&dyn Files> {
+        if sd {
+            self.sd_models.as_ref().map(|m| m as &dyn Files)
+        } else {
+            self.archive.as_ref().map(|a| a as &dyn Files)
+        }
+    }
+
+    /// The models of a species: the models of the game, or the models that the packs gave (a species of a pack, or more models for a
+    /// species of the game: the list of the SD card then has the whole list of that species).
+    fn models_of(&self, species: usize) -> Vec<Variant> {
+        let Some(archive) = &self.archive else { return Vec::new() };
+        if species > crate::SPECIES.len() {
+            return self.pack_models(species);
+        }
+        if let Some(sd) = &self.sd_models {
+            let game = model_list(archive, species).map(|(first, count, _)| (first, count));
+            if sd.entry(species).is_some_and(|entry| Some(entry) != game && entry.1 > 0) {
+                return variants_in(sd, species, true);
+            }
+        }
+        variants(archive, species)
+    }
+
+    /// The models of a species of a pack: the model of the species, and the models of its forms.
+    fn pack_models(&self, species: usize) -> Vec<Variant> {
+        let mut entries: Vec<(u8, u16)> = Vec::new();
+        if let Some(model_form) = crate::extras::model_form(species, 0) {
+            entries.push((0, model_form));
+        }
+        for form in crate::extras::pack_forms(species) {
+            if form.model_form != 0 {
+                entries.push((form.form as u8, form.model_form));
+            }
+        }
+        let (Some(archive), sd) = (&self.archive, &self.sd_models) else { return Vec::new() };
+        entries
+            .into_iter()
+            .filter_map(|(slot, model_form)| {
+                let label = if slot == 0 { "Normal".to_string() } else { format!("Form {slot}") };
+                if model_form & 0x8000 != 0 {
+                    // The model of a species of the game.
+                    let own = variants(archive, (model_form & 0x7FFF) as usize).into_iter().next()?;
+                    return Some(Variant { slot, label, ..own });
+                }
+                // A form of a carrier species (Victini 494, then Volcanion 721), in the models of the SD card.
+                let sd = sd.as_ref()?;
+                let carrier = [494usize, 721].get((model_form / 256) as usize).copied()?;
+                let first = sd.entry(carrier)?.0 + (model_form % 256) as usize;
+                Some(Variant { slot, file: first * 8 + 3, label, sd: true })
+            })
+            .collect()
     }
 
     /// Reads the model of the species if it is not the one that is loaded.
@@ -236,8 +361,12 @@ impl ModelTab {
         self.dirty = true;
         self.loaded = None;
         self.error = None;
-        let Some(archive) = &self.archive else { return };
-        let Some(file) = variants(archive, species).iter().find(|v| v.slot == form).map(|v| v.file) else { return };
+        let Some(variant) = self.variants.iter().find(|v| v.slot == form).cloned() else { return };
+        let Some(archive) = self.files_of(variant.sd) else {
+            self.error = Some("The model files of the packs are not on the SD card: install the pack again in the page Packs.".into());
+            return;
+        };
+        let file = variant.file;
         match read_model(archive, file, self.shiny) {
             Ok((model, textures)) => {
                 let by_name = textures.iter().map(|texture| (texture.name.clone(), texture.clone())).collect();
@@ -262,14 +391,16 @@ impl ModelTab {
 
     /// Draws the tab. `form` is the form of the species that the page shows: the model of that form is shown first.
     pub fn ui(&mut self, ui: &mut egui::Ui, species: usize, form: usize) {
-        let Some(archive) = &self.archive else { return };
+        if self.archive.is_none() {
+            return;
+        }
         if self.variants_of != Some(species) {
-            self.variants = variants(archive, species);
+            self.variants = self.models_of(species);
             self.variants_of = Some(species);
         }
         let available = self.variants.clone();
         if available.is_empty() {
-            ui.label(widget::hint("This species has no model in the archive."));
+            ui.label(widget::hint("This species has no model in the archive and in the packs."));
             return;
         }
         if !available.iter().any(|v| v.slot == self.form) {
@@ -392,8 +523,9 @@ impl ModelTab {
             if let Some(loaded) = &self.loaded {
                 let triangles: usize = loaded.model.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
                 ui.label(widget::hint(&format!("{} bones · {} meshes · {triangles} triangles · {} pictures", loaded.model.bones.len(), loaded.model.meshes.len(), loaded.textures.len())));
-                if let Some(file) = available.iter().find(|v| v.slot == self.form).map(|v| v.file) {
-                    ui.label(widget::hint(&format!("Files {file} to {} of the archive 8", file + 7)));
+                if let Some(variant) = available.iter().find(|v| v.slot == self.form) {
+                    let (file, place) = (variant.file, if variant.sd { "of the models of the packs" } else { "of the archive 8" });
+                    ui.label(widget::hint(&format!("Files {file} to {} {place}", file + 7)));
                 }
             }
             let _ = species;
@@ -655,5 +787,49 @@ mod test {
         tab.shiny = true;
         tab.load(150, tab.form);
         assert!(tab.loaded.as_ref().unwrap().shiny);
+    }
+
+    /// With the dump: a species of a pack has its model in the files of the SD card, and the tab reads it like a model of the game.
+    #[test]
+    fn the_model_of_a_species_of_a_pack_is_read_from_the_sd_card() {
+        use sango_pack::pack::{to_hex, ModelRef, Move, PackSpecies, DATA_SIZE};
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = Dump::open(&root).unwrap();
+        let archive = Garc::open(&dump.archive(8)).unwrap();
+        // A pack whose model is the model of Pikachu.
+        let first = variants(&archive, 25)[0].file;
+        let files: Vec<Vec<u8>> = (0..8).map(|n| archive.first_file(first + n).unwrap().to_vec()).collect();
+        let outer = std::env::temp_dir().join(format!("sango_pack_model_tab_{}", std::process::id()));
+        let sdmc = outer.join("sdmc");
+        std::fs::create_dir_all(sdmc.join("sango-studio")).unwrap();
+        let sd = sango_core::SdCard::open(sdmc.to_str().unwrap()).unwrap();
+        let pack = sango_pack::Pack {
+            id: "test".into(),
+            name: "test".into(),
+            version: "1".into(),
+            species: vec![PackSpecies { name: "Zap".into(), model: ModelRef::File { file: "Zap".into() }, data: to_hex(&[1u8; DATA_SIZE]), moves: vec![Move { id: 1, level: 1 }], evolutions: Vec::new() }],
+            ..sango_pack::Pack::default()
+        };
+        let file = outer.join("test.sangopack");
+        pack.save_with_models(&file, &mut |_| Ok(files.clone())).unwrap();
+        let mut library = sango_pack::Library::default();
+        library.install(sango_pack::Pack::open(&file).unwrap()).unwrap();
+        library.apply(&sd, &dump).unwrap();
+        let table = sango_pack::Table::from_bytes(&sd.read("species/table.bin").unwrap()).unwrap();
+        crate::extras::set_for_test(table);
+
+        let mut tab = ModelTab::default();
+        tab.set_sd_folder(Some(sdmc.join("sango").join("pokemodel")), false);
+        tab.open(&dump);
+        let models = tab.models_of(724);
+        assert_eq!(models.len(), 1, "the model of the species of the pack");
+        assert!(models[0].sd && models[0].label == "Normal");
+        tab.variants = models;
+        tab.load(724, 0);
+        assert!(tab.error.is_none(), "{:?}", tab.error);
+        assert!(tab.loaded.as_ref().is_some_and(|loaded| !loaded.model.meshes.is_empty()), "the model is drawn from the files of the SD card");
+        // A species of the game keeps its models of the archive.
+        assert_eq!(tab.models_of(25).iter().map(|v| v.sd).collect::<Vec<_>>(), vec![false; variants(&archive, 25).len()]);
+        let _ = std::fs::remove_dir_all(&outer);
     }
 }

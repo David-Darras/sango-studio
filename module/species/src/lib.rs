@@ -42,10 +42,12 @@ use std::sync::Arc;
 /// The number of the archive that has the data of the species.
 const ARCHIVE: usize = 195;
 
+mod extras;
+pub use extras::{is_species, max_species, species_ids, species_name};
 pub use names::{LEVELING_RATE, SPECIES};
 pub use table::SpeciesTable;
 
-/// The number of species that the list shows.
+/// The number of species of the game. The packs add species with the numbers 724 and more (see the module `extras`).
 const SPECIES_COUNT: usize = names::SPECIES.len();
 
 /// The key, in the memory of the interface, of the species that another page asks this page to open.
@@ -70,11 +72,13 @@ pub struct SpeciesAbilities {
 pub fn species_abilities(session: &Session) -> Result<Vec<SpeciesAbilities>, String> {
     let dump = session.dump.as_ref().ok_or("The dump is not open.")?;
     let garc = Garc::open(&dump.archive(ARCHIVE))?;
+    extras::refresh(session.sd.as_ref());
     let mut all = Vec::new();
-    for species in 1..=SPECIES_COUNT {
-        for form in 0..csv::form_count(&garc, species) {
+    for species in extras::species_ids() {
+        let game_forms = if species <= SPECIES_COUNT { csv::form_count(&garc, species) } else { 1 };
+        for form in 0..extras::form_count(species, game_forms) {
             let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, form))).and_then(|b| SpeciesData::from_bytes(&b).ok());
-            let data = on_card.or_else(|| garc.first_file(file_index(&garc, species, form)).and_then(|b| SpeciesData::from_bytes(b).ok()));
+            let data = on_card.or_else(|| game_data(&garc, species, form));
             if let Some(data) = data {
                 all.push(SpeciesAbilities { species, form, abilities: [data.ability_1, data.ability_2, data.ability_hidden] });
             }
@@ -89,10 +93,14 @@ pub fn species_abilities(session: &Session) -> Result<Vec<SpeciesAbilities>, Str
 pub fn leveling_rates(session: &Session) -> Result<Vec<Option<u8>>, String> {
     let dump = session.dump.as_ref().ok_or("The dump is not open.")?;
     let garc = Garc::open(&dump.archive(ARCHIVE))?;
-    Ok((1..=SPECIES_COUNT)
+    extras::refresh(session.sd.as_ref());
+    Ok((1..=extras::max_species())
         .map(|species| {
+            if !extras::is_species(species) {
+                return None;
+            }
             let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
-            on_card.or_else(|| garc.first_file(species).and_then(|b| SpeciesData::from_bytes(b).ok())).map(|d| d.leveling_rate)
+            on_card.or_else(|| game_data(&garc, species, 0)).map(|d| d.leveling_rate)
         })
         .collect())
 }
@@ -115,6 +123,10 @@ fn build_index(garc: &Garc, pokedex: &PokedexData) -> examples::Index {
 ///
 /// A form after the first one is in the archive after all the species: the file of the species says where.
 fn file_index(garc: &Garc, species: usize, form: usize) -> usize {
+    // A species of a pack has no file in the archive: the numbers after the species of the game are files of forms.
+    if species > SPECIES_COUNT {
+        return usize::MAX;
+    }
     if form == 0 {
         return species;
     }
@@ -122,6 +134,18 @@ fn file_index(garc: &Garc, species: usize, form: usize) -> usize {
         Some(base) if base.alternate_form_file != 0 && form < base.total_form_count as usize => base.alternate_form_file as usize + form - 1,
         _ => species,
     }
+}
+
+/// The data of a species or a form in the archive of the game, or from a pack when the game has none: a species of a pack, or a
+/// form that a pack adds.
+fn game_data(garc: &Garc, species: usize, form: usize) -> Option<SpeciesData> {
+    if species <= SPECIES_COUNT {
+        let game_forms = garc.first_file(species).and_then(|b| SpeciesData::from_bytes(b).ok()).map_or(1, |b| (b.total_form_count as usize).max(1));
+        if form < game_forms {
+            return garc.first_file(file_index(garc, species, form)).and_then(|b| SpeciesData::from_bytes(b).ok());
+        }
+    }
+    extras::data(species, form)
 }
 
 /// The path in the SD card folder of the file of a species and a form.
@@ -313,7 +337,7 @@ fn sort_species(list: &mut [usize], rows: &[ListRow], column: SortColumn, descen
     list.sort_by(|&a, &b| {
         let order = match column {
             SortColumn::Number => a.cmp(&b),
-            SortColumn::Name => names::SPECIES[a - 1].cmp(&names::SPECIES[b - 1]),
+            SortColumn::Name => species_name(a).cmp(&species_name(b)),
             SortColumn::Type1 => first_type(a).cmp(&first_type(b)),
             SortColumn::Type2 => second(a).cmp(&second(b)),
             SortColumn::Stat(place) => stat(a, place).cmp(&stat(b, place)),
@@ -349,10 +373,14 @@ fn modified_species(garc: Option<&Garc>, session: &Session) -> std::collections:
 /// Reads the list data of all the species: the SD card first, then the romfs.
 fn read_list_rows(garc: Option<&Garc>, session: &Session) -> Vec<ListRow> {
     let changed = modified_species(garc, session);
-    (1..=SPECIES_COUNT)
+    (1..=extras::max_species())
         .map(|species| {
+            // The numbers between the species of the game and the species of the packs are not species: an empty row.
+            if !extras::is_species(species) {
+                return ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false };
+            }
             let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
-            let data = on_card.or_else(|| garc.and_then(|g| g.first_file(species)).and_then(|b| SpeciesData::from_bytes(b).ok()));
+            let data = on_card.or_else(|| garc.and_then(|g| game_data(g, species, 0)));
             match data {
                 Some(d) => ListRow {
                     types: [d.type_1, d.type_2],
@@ -420,7 +448,7 @@ fn paint_list_row(ui: &egui::Ui, rect: egui::Rect, number: usize, row: Option<&L
     let left = rect.left();
     ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
     let modified = row.is_some_and(|row| row.modified);
-    let name_rect = ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, names::SPECIES[number - 1], egui::FontId::proportional(13.5), if modified { color::ACCENT } else { color::TEXT });
+    let name_rect = ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, species_name(number), egui::FontId::proportional(13.5), if modified { color::ACCENT } else { color::TEXT });
     if modified {
         ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
     }
@@ -477,13 +505,13 @@ fn match_species(raw_query: &str) -> Vec<usize> {
     let num_query = raw_query.trim().trim_start_matches('#').trim_start_matches('0');
 
     if query.is_empty() {
-        return (1..=SPECIES_COUNT).collect();
+        return extras::species_ids();
     }
 
     let mut starts_with = Vec::new();
     let mut contains = Vec::new();
-    for number in 1..=SPECIES_COUNT {
-        let name = clean(names::SPECIES[number - 1]);
+    for number in extras::species_ids() {
+        let name = clean(&species_name(number));
         let num_str = number.to_string();
         let formatted = format!("#{:04}", number);
         let is_num_match = !num_query.is_empty() && num_str == num_query;
@@ -501,8 +529,7 @@ impl Species {
     /// Reads the data from the romfs.
     fn read_romfs(&self) -> Result<SpeciesData, String> {
         let garc = self.garc.as_ref().ok_or("The archive is not open.")?;
-        let id = file_index(garc, self.species, self.form);
-        SpeciesData::from_bytes(garc.first_file(id).ok_or_else(|| format!("The file {id} is missing."))?)
+        game_data(garc, self.species, self.form).ok_or_else(|| format!("The species {} form {} has no data.", self.species, self.form))
     }
 
     /// Reads the data of the chosen species and form: the SD card first, then the romfs.
@@ -514,6 +541,17 @@ impl Species {
         let file = self.garc.as_ref().map_or(self.species, |garc| file_index(garc, self.species, self.form));
         self.learnset.load(session.sd.as_ref(), self.species, self.form, file);
         self.evolution.load(session.sd.as_ref(), self.species, self.form, file);
+        // A species of a pack has its moves and its evolutions in the pack, until the user changes them.
+        if self.form == 0 && self.species > SPECIES_COUNT {
+            if let Some(record) = extras::pack_species(self.species) {
+                if !self.learnset.from_card() {
+                    self.learnset.load_pack(&record.moves);
+                }
+                if !self.evolution.from_card() {
+                    self.evolution.load_pack(&record.evolutions);
+                }
+            }
+        }
         match on_card.map(Ok).unwrap_or_else(|| self.read_romfs()) {
             Ok(data) => {
                 self.baseline = Some(data.clone());
@@ -551,8 +589,8 @@ impl Species {
 
     /// The number of forms of the chosen species (at least one).
     fn total_form_count(&self) -> usize {
-        let base = self.garc.as_ref().and_then(|g| g.first_file(self.species)).and_then(|b| SpeciesData::from_bytes(b).ok());
-        base.map_or(1, |b| (b.total_form_count as usize).max(1))
+        let base = self.garc.as_ref().filter(|_| self.species <= SPECIES_COUNT).and_then(|g| g.first_file(self.species)).and_then(|b| SpeciesData::from_bytes(b).ok());
+        extras::form_count(self.species, base.map_or(1, |b| (b.total_form_count as usize).max(1)))
     }
 
     /// The menus, the two buttons and the state.
@@ -564,7 +602,7 @@ impl Species {
         let before = (self.species, self.form);
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                let species_text = format!("#{:04} {}", self.species, name_from(&names::SPECIES, self.species, 1));
+                let species_text = format!("#{:04} {}", self.species, species_name(self.species));
                 let species_id = ui.make_persistent_id("species_menu");
                 let popup_id = species_id.with("popup");
                 let is_popup_open = ui.memory(|m| m.is_popup_open(popup_id));
@@ -762,8 +800,10 @@ impl Species {
                         let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
                             - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
                         if step != 0 {
-                            let total = names::SPECIES.len() as isize;
-                            self.species = (self.species as isize + step).clamp(1, total) as usize;
+                            // The next species in the list: the numbers between the species of the game and of the packs are skipped.
+                            let ids = extras::species_ids();
+                            let place = ids.iter().position(|&n| n == self.species).unwrap_or(0) as isize;
+                            self.species = ids[(place + step).clamp(0, ids.len() as isize - 1) as usize];
                         }
                     });
                 }
@@ -2254,9 +2294,17 @@ impl Module for Species {
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {
         widget::set_page_focus(ui.ctx(), session.focus_page);
         widget::update_navigation(ui);
+        // The packs may have added or removed species: the lists, the data and the models are read again.
+        let packs_changed = extras::refresh(session.sd.as_ref());
+        if packs_changed {
+            self.list_rows = None;
+            self.loaded = None;
+        }
+        let models_folder = session.sd.as_ref().and_then(|sd| sd.root().parent()).map(|sdmc| sdmc.join("sango").join("pokemodel"));
+        self.model_tab.set_sd_folder(models_folder, packs_changed);
         // Another page asked for a species.
         if let Some(species) = ui.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(OPEN_SPECIES))) {
-            self.species = species.clamp(1, SPECIES_COUNT);
+            self.species = if extras::is_species(species) { species } else { species.clamp(1, SPECIES_COUNT) };
             self.form = 0;
             self.tab = 0;
             self.loaded = None;
@@ -2441,7 +2489,8 @@ mod test {
 
     #[test]
     fn species_can_be_searched_by_name_or_number() {
-        assert_eq!(match_species("").len(), 721);
+        // The packs may have added species (the tests share them): the species of the game are always there.
+        assert!(match_species("").len() >= 721);
         assert_eq!(match_species("pika")[0], 25);
         assert_eq!(match_species("char")[0], 4);
         assert_eq!(match_species("25")[0], 25);
@@ -2512,6 +2561,73 @@ mod test {
                 });
             });
         }
+    }
+
+    /// With the dump: the species and the forms that a pack adds are in the list, in the data, in the forms of the page and in the
+    /// tabs, like the ones of the game.
+    #[test]
+    fn the_species_and_the_forms_of_the_packs_are_shown_like_the_ones_of_the_game() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        use sango_pack::table::{FormRecord, SpeciesRecord};
+        let mut rowlet = vec![0u8; 0x50];
+        rowlet[0] = 68;
+        rowlet[1] = 55;
+        let mut mega = vec![0u8; 0x50];
+        mega[0] = 99;
+        extras::set_for_test(sango_pack::Table {
+            species: vec![SpeciesRecord { id: 724, model_form: 1, name: "Rowlet".into(), data: rowlet, moves: vec![(33, 1), (45, 4)], evolutions: vec![(4, 17, 725)] }, SpeciesRecord { id: 725, model_form: 2, name: "Dartrix".into(), data: vec![1; 0x50], moves: Vec::new(), evolutions: Vec::new() }],
+            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: mega }],
+        });
+        let folder = std::env::temp_dir().join(format!("sango_species_packs_{}", std::process::id()));
+        std::fs::create_dir_all(folder.join("sdmc").join("sango-studio")).unwrap();
+        let mut session = Session { dump: Some(sango_core::Dump::open(&root).unwrap()), sd: Some(sango_core::SdCard::open(folder.join("sdmc").to_str().unwrap()).unwrap()), focus_page: true, ..Session::default() };
+        let mut page = Species::default();
+        let ctx = egui::Context::default();
+        let frame = |page: &mut Species, session: &mut Session| {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut page, &mut session);
+        }
+        // The list: the numbers 722 and 723 are not species.
+        assert_eq!(species_name(724), "Rowlet");
+        let ids = species_ids();
+        assert!(ids.contains(&724) && ids.contains(&725) && !ids.contains(&722));
+        let rows = read_list_rows(page.garc.as_ref(), &session);
+        assert_eq!(rows.len(), 725, "the rows go to the last species of the packs");
+        assert_eq!((rows[723].stats[0], rows[722].total), (68, 0));
+        assert_eq!(match_species("row")[0], 724, "a species of a pack is found by its name, first when its name starts like that");
+        // The data and the forms of the page.
+        page.species = 724;
+        page.form = 0;
+        page.loaded = None;
+        for _ in 0..3 {
+            frame(&mut page, &mut session);
+        }
+        assert_eq!(page.data.as_ref().map(|d| d.base_hp), Some(68));
+        assert_eq!(page.learnset.level_up_moves().len(), 2, "the moves of the pack");
+        assert_eq!(page.evolution.count(), 1);
+        page.species = 3;
+        page.form = 0;
+        assert_eq!(page.total_form_count(), 3, "Venusaur has the forms of the game and the form of the pack");
+        page.form = 2;
+        page.loaded = None;
+        for _ in 0..3 {
+            frame(&mut page, &mut session);
+        }
+        assert_eq!(page.data.as_ref().map(|d| d.base_hp), Some(99), "the data of the form of the pack");
+        // The other tabs draw for a species of a pack too.
+        page.species = 724;
+        page.form = 0;
+        for tab in 0..TABS.len() {
+            page.tab = tab;
+            page.loaded = None;
+            frame(&mut page, &mut session);
+            frame(&mut page, &mut session);
+        }
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// Opens the species list with a click on its button, then moves the choice with the keys.

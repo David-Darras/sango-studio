@@ -172,3 +172,13 @@ imports it back; a pack made by someone else uses the same layout. The steps:
   possible later (a JSON index at an URL).
 - **Third-party models.** Keep the credit and the licence of each model in the manifest. Studio
   shows them before the user installs a pack.
+
+## How the pages of Studio show the packs
+
+`module/species/src/extras.rs` reads `species/table.bin` (it looks at the file again every second and a half) and gives the pages the
+species of the packs (numbers 724 and more) and their forms. The Species page lists them with the species of the game (the numbers 722
+and 723 are not listed), searches and sorts them by name, and shows their data, their forms (the forms that a pack adds to a species of
+the game too), their moves and evolutions (from the pack, until the user changes them) and their 3D model (read from
+`sango/pokemodel` of the SD card). The Leveling rate page, the Ability page (the species that have an ability) and the evolution
+choices use the same list. A change that the user makes to a species of a pack is saved like any other: `pokemon/data/<number>_<form>.bin`.
+The text tab, the CSV files and the icons of the species of the packs are not done.

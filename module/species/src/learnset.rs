@@ -312,7 +312,26 @@ impl Learnset {
         self.level_up_archive.as_ref()?.first_file(file).and_then(|b| LevelUp::from_bytes(b).ok())
     }
 
+    /// The level-up moves that the tab shows (for the tests).
+    #[cfg(test)]
+    pub fn level_up_moves(&self) -> &[LevelUpMove] {
+        &self.level_up.moves
+    }
+
+    /// Takes the level-up moves that a pack gives to a species of the pack (move and level).
+    pub fn load_pack(&mut self, moves: &[(u16, u8)]) {
+        self.level_up = LevelUp { moves: moves.iter().map(|&(id, level)| LevelUpMove { id, level: level as u16 }).collect() };
+        self.eggs = EggMoves::default();
+        self.level_up_saved = self.level_up.clone();
+        self.eggs_saved = self.eggs.clone();
+        self.needs_sort = false;
+    }
+
     fn read_romfs_eggs(&self, species: usize) -> Option<EggMoves> {
+        // A species of a pack has no egg moves in the archive: the number after the species of the game is a file of something else.
+        if species > crate::SPECIES.len() {
+            return None;
+        }
         self.egg_archive.as_ref()?.first_file(species).and_then(|b| EggMoves::from_bytes(b).ok())
     }
 

@@ -65,6 +65,18 @@ impl EvolutionTab {
         self.icon_textures.clear();
     }
 
+    /// The number of evolutions that the tab shows (for the tests).
+    #[cfg(test)]
+    pub fn count(&self) -> usize {
+        self.evolutions.list.len()
+    }
+
+    /// Takes the evolutions that a pack gives to a species of the pack (method, argument and species).
+    pub fn load_pack(&mut self, evolutions: &[(u8, u16, u16)]) {
+        self.evolutions = Evolutions { list: evolutions.iter().map(|&(method, argument, species)| Evolution { method: method as u16, argument, species }).collect() };
+        self.saved = self.evolutions.clone();
+    }
+
     fn read_romfs(&self, file: usize) -> Option<Evolutions> {
         self.archive.as_ref()?.first_file(file).and_then(|bytes| Evolutions::from_bytes(bytes).ok())
     }
@@ -107,7 +119,7 @@ impl EvolutionTab {
 
     /// The choices for the species that it evolves into.
     fn species_choices() -> Vec<Choice> {
-        Self::names_choices(&names::SPECIES, 1)
+        crate::species_ids().into_iter().map(|number| Choice { label: crate::species_name(number), kind: None, value: number }).collect()
     }
 
     /// Draws the tab.
@@ -207,7 +219,7 @@ impl EvolutionTab {
             ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
         }
         ui.painter().text(egui::pos2(cell.left() + 52.0, cell.center().y), egui::Align2::LEFT_CENTER, format!("#{species:04}"), egui::FontId::proportional(12.0), color::MUTED);
-        ui.painter().text(egui::pos2(cell.left() + 104.0, cell.center().y), egui::Align2::LEFT_CENTER, crate::name_from(&names::SPECIES, species, 1), egui::FontId::proportional(15.0), color::TEXT);
+        ui.painter().text(egui::pos2(cell.left() + 104.0, cell.center().y), egui::Align2::LEFT_CENTER, crate::species_name(species), egui::FontId::proportional(15.0), color::TEXT);
         let choices = if popup_open { Self::species_choices() } else { Vec::new() };
         if let Some(value) = choose(ui, id, &response, &choices, Some(species)) {
             entry.species = value as u16;
@@ -241,7 +253,7 @@ impl EvolutionTab {
         let list: Option<(Vec<Choice>, String)> = match kind {
             Argument::Item => Some((if popup_open { Self::names_choices(&names::ITEM, 1) } else { Vec::new() }, crate::name_from(&names::ITEM, entry.argument as usize, 1))),
             Argument::Move => Some((if popup_open { Self::names_choices(&MOVE, 1) } else { Vec::new() }, crate::name_from(&MOVE, entry.argument as usize, 1))),
-            Argument::Species => Some((if popup_open { Self::species_choices() } else { Vec::new() }, crate::name_from(&names::SPECIES, entry.argument as usize, 1))),
+            Argument::Species => Some((if popup_open { Self::species_choices() } else { Vec::new() }, crate::species_name(entry.argument as usize))),
             Argument::Type => Some((if popup_open { Self::names_choices(&names::TYPE, 0) } else { Vec::new() }, crate::name_from(&names::TYPE, entry.argument as usize, 0))),
             _ => None,
         };

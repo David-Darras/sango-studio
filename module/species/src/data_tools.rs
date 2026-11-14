@@ -17,7 +17,7 @@
 use crate::pokedex_data::{self, PokedexData};
 use crate::text_csv;
 use crate::text_tab::FIELDS;
-use crate::{csv, icon_tab, names, Species};
+use crate::{csv, icon_tab, Species};
 use sango_core::text::{self, TextFile, LANGUAGES};
 use sango_core::{evolution, learnset, Backup, Garc, SdCard};
 use sango_ui::theme::color;
@@ -285,8 +285,8 @@ impl Species {
         }
         let names_of: Vec<&str> = parts.iter().map(|part| part.label()).collect();
         let place = match scope {
-            Scope::Form => format!("#{:04} {} form {}", self.species, names::SPECIES[self.species - 1], self.form),
-            Scope::Species => format!("#{:04} {}", self.species, names::SPECIES[self.species - 1]),
+            Scope::Form => format!("#{:04} {} form {}", self.species, crate::species_name(self.species), self.form),
+            Scope::Species => format!("#{:04} {}", self.species, crate::species_name(self.species)),
             Scope::All => "all the species".to_string(),
         };
         let label = format!("Reset {} of {place}", names_of.join(", "));
@@ -334,7 +334,8 @@ impl Species {
         let mut open = true;
         let mut run = false;
         let mut close = false;
-        let species_name = names::SPECIES[self.species - 1];
+        let species_name = crate::species_name(self.species);
+        let species_name = species_name.as_str();
         egui::Window::new("Reset to the romfs").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
             ui.set_max_width(520.0);
             ui.label(egui::RichText::new("How much").strong());

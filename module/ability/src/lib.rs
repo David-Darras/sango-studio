@@ -312,7 +312,7 @@ impl Ability {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                         for (species, form) in list {
-                            let name = sango_species::SPECIES.get(species - 1).copied().unwrap_or("?");
+                            let name = sango_species::species_name(species);
                             let label = if form == 0 { format!("#{species:03} {name}") } else { format!("#{species:03} {name} (form {form})") };
                             if widget::button(ui, label) {
                                 sango_species::open_species(ui.ctx(), species);

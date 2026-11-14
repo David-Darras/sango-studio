@@ -4,7 +4,6 @@
 //! They do not change when the user edits a species.
 
 use crate::data::SpeciesData;
-use crate::names;
 
 /// The most species that the help lists for one value.
 pub const MAX_LISTED: usize = 5;
@@ -148,8 +147,8 @@ pub struct Examples {
 
 impl Examples {
     /// The name of a species of the list.
-    pub fn name(species: usize) -> &'static str {
-        species.checked_sub(1).and_then(|i| names::SPECIES.get(i)).copied().unwrap_or("-")
+    pub fn name(species: usize) -> String {
+        crate::species_name(species)
     }
 
     /// True when there is nothing to show.
