@@ -18,6 +18,7 @@ mod machines;
 pub mod battle_icons;
 pub mod custom_moves;
 mod model_export;
+mod model_import;
 mod model_tab;
 mod move_names;
 mod pokedex_data;
@@ -493,7 +494,7 @@ fn icon_texture<'a>(
             let image = Clim::parse(&bytes).ok()?;
             let rgba = image.to_rgba().ok()?;
             let pixels = egui::ColorImage::from_rgba_unmultiplied([image.width(), image.height()], &rgba);
-            Some(ctx.load_texture(format!("species_icon_{species}"), pixels, egui::TextureOptions::NEAREST))
+            Some(sango_ui::textures::load(ctx, format!("species_icon_{species}"), pixels, egui::TextureOptions::NEAREST))
         })
         .as_ref()
 }
@@ -2302,6 +2303,7 @@ impl Module for Species {
         }
         let models_folder = session.sd.as_ref().and_then(|sd| sd.root().parent()).map(|sdmc| sdmc.join("sango").join("pokemodel"));
         self.model_tab.set_sd_folder(models_folder, packs_changed);
+        self.model_tab.set_sd_root(session.sd.as_ref().map(|sd| sd.root().to_string_lossy().to_string()));
         // Another page asked for a species.
         if let Some(species) = ui.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(OPEN_SPECIES))) {
             self.species = if extras::is_species(species) { species } else { species.clamp(1, SPECIES_COUNT) };

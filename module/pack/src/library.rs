@@ -15,7 +15,7 @@
 //! table as empty entries, so the numbers of the other species and the save files stay valid. Installing the same pack
 //! again gives its numbers back.
 
-use crate::pack::{ModelRef, Pack, Ref, MODEL_FILES};
+use crate::pack::{ModelRef, ModelReplacement, Pack, Ref, MODEL_FILES};
 use crate::table::{FormRecord, SpeciesRecord, Table, FIRST_SPECIES};
 use sango_core::{Dump, Garc, SdCard};
 use serde::{Deserialize, Serialize};
@@ -50,6 +50,12 @@ const SPECIES_ENTRIES: usize = 722;
 pub fn carrier_form(index: usize) -> u16 {
     ((index / MODELS_PER_CARRIER) * 256 + index % MODELS_PER_CARRIER + 1) as u16
 }
+
+/// The pack that holds the replacements of the models of the species of the game.
+pub const REPLACEMENT_PACK: &str = "studio-models";
+
+/// The ending of the name of an imported model: the model `x` that the pack shipped is replaced by `x+import`.
+pub const IMPORTED_SUFFIX: &str = "+import";
 
 fn pack_path(id: &str) -> String {
     format!("{FOLDER}/packs/{id}.sangopack")
@@ -229,6 +235,121 @@ impl Library {
         }
     }
 
+    /// Replaces the model of a species of a pack (`form` 0) or of a form of a pack by an imported model, or puts the model that the pack
+    /// shipped back (`imported` is None). The pack file on the SD card is written again, with the original model kept in it.
+    ///
+    /// The 8 files of the imported model are the ones that the importer makes. Nothing changes when this returns an error.
+    pub fn set_model(&mut self, sd: &SdCard, species: &Ref, form: u16, imported: Option<Vec<Vec<u8>>>) -> Result<(), String> {
+        if let Some(files) = &imported {
+            if files.len() != MODEL_FILES {
+                return Err(format!("A model has {MODEL_FILES} files, not {}.", files.len()));
+            }
+        }
+        let place = self
+            .packs
+            .iter()
+            .position(|pack| {
+                self.is_active(&pack.id)
+                    && match (species, form) {
+                        (Ref::Key(name), 0) => pack.species.iter().any(|s| s.name == *name),
+                        _ => pack.forms.iter().any(|f| f.species == *species && f.form == form),
+                    }
+            })
+            .ok_or("No installed pack owns this model.")?;
+        let old = self.packs[place].clone();
+        let mut pack = old.clone();
+        let current = match (species, form) {
+            (Ref::Key(name), 0) => pack.species.iter_mut().find(|s| s.name == *name).map(|s| &mut s.model),
+            _ => pack.forms.iter_mut().find(|f| f.species == *species && f.form == form).and_then(|f| f.model.as_mut()),
+        };
+        let Some(ModelRef::File { file }) = current else { return Err("This model is not a model of the pack: only the models of the species and the forms of the packs can be replaced.".into()) };
+        let base = file.strip_suffix(IMPORTED_SUFFIX).unwrap_or(file).to_string();
+        let replaced = format!("{base}{IMPORTED_SUFFIX}");
+        let mut new_files: Option<(String, Vec<Vec<u8>>)> = None;
+        match imported {
+            Some(files) => {
+                if replaced.chars().count() > 60 {
+                    return Err(format!("The name of the model '{base}' is too long to be replaced."));
+                }
+                *file = replaced.clone();
+                new_files = Some((replaced.clone(), files));
+            }
+            None => {
+                if *file == base {
+                    return Err("This is already the model of the pack.".into());
+                }
+                *file = base.clone();
+            }
+        }
+        // The original stays in the file of the pack while no species and no form use it.
+        pack.kept_models.retain(|name| *name != replaced);
+        if !pack.model_refs().iter().any(|m| matches!(m, ModelRef::File { file } if *file == base)) && !pack.kept_models.contains(&base) {
+            pack.kept_models.push(base);
+        }
+        let target = sd.path(&pack_path(&pack.id))?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        let temporary = target.with_extension("sangopack.new");
+        pack.save_with_models(&temporary, &mut |name| match &new_files {
+            Some((new_name, files)) if new_name == name => Ok(files.clone()),
+            _ => old.read_model(name),
+        })?;
+        std::fs::rename(&temporary, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+        pack.file = Some(target);
+        let before = (self.registry.clone(), self.packs.clone());
+        if let Err(message) = self.install(pack) {
+            (self.registry, self.packs) = before;
+            return Err(message);
+        }
+        Ok(())
+    }
+
+    /// Replaces a model of a species of the game (slot 0 is the normal model) by an imported one, or puts the model of the game
+    /// back (`imported` is None). The replacements are kept in a pack of their own, `studio-models`, that this creates.
+    pub fn replace_game_model(&mut self, sd: &SdCard, species: u16, slot: u8, imported: Option<Vec<Vec<u8>>>) -> Result<(), String> {
+        if !(1..=721).contains(&species) || CARRIERS.contains(&species) {
+            return Err(format!("The model of the species {species} cannot be replaced: Studio uses its model slots for the models of the packs."));
+        }
+        if let Some(files) = &imported {
+            if files.len() != MODEL_FILES {
+                return Err(format!("A model has {MODEL_FILES} files, not {}.", files.len()));
+            }
+        }
+        let old = self.packs.iter().find(|p| p.id == REPLACEMENT_PACK).cloned();
+        let mut pack = old.clone().unwrap_or_else(|| Pack { id: REPLACEMENT_PACK.into(), name: "My models".into(), version: "1".into(), ..Pack::default() });
+        let name = format!("species-{species:04}-slot-{slot:02}");
+        pack.replacements.retain(|r| !(r.species == species && r.slot == slot));
+        let mut new_files = None;
+        match imported {
+            Some(files) => {
+                pack.replacements.push(ModelReplacement { species, slot, model: name.clone() });
+                new_files = Some(files);
+            }
+            None if old.as_ref().is_none_or(|p| !p.replacements.iter().any(|r| r.species == species && r.slot == slot)) => {
+                return Err("This is already the model of the game.".into());
+            }
+            None => {}
+        }
+        let target = sd.path(&pack_path(&pack.id))?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        let temporary = target.with_extension("sangopack.new");
+        pack.save_with_models(&temporary, &mut |model| match &new_files {
+            Some(files) if model == name => Ok(files.clone()),
+            _ => old.as_ref().ok_or_else(|| format!("The model '{model}' has no files.").to_string())?.read_model(model),
+        })?;
+        std::fs::rename(&temporary, &target).map_err(|e| format!("{}: {e}", target.display()))?;
+        pack.file = Some(target);
+        let before = (self.registry.clone(), self.packs.clone());
+        if let Err(message) = self.install(pack) {
+            (self.registry, self.packs) = before;
+            return Err(message);
+        }
+        Ok(())
+    }
+
     /// The `model_form` of a model of a pack, as the plugin reads it.
     fn model_form(&self, pack: &str, model: Option<&ModelRef>) -> u16 {
         match model {
@@ -313,7 +434,8 @@ impl Library {
     /// its slot but no files.
     pub fn write_models(&self, sdmc: &Path, dump: &Dump) -> Result<usize, String> {
         let folder = sdmc.join("sango").join("pokemodel");
-        if self.registry.models.is_empty() && self.registry.forms.iter().all(|f| f.slots == 0) {
+        let replacements: Vec<(&Pack, &ModelReplacement)> = self.packs.iter().filter(|p| self.is_active(&p.id)).flat_map(|p| p.replacements.iter().map(move |r| (p, r))).collect();
+        if self.registry.models.is_empty() && self.registry.forms.iter().all(|f| f.slots == 0) && replacements.is_empty() {
             return Ok(0);
         }
         let archive = Garc::open(&dump.archive(MODEL_ARCHIVE)).map_err(|e| format!("Archive {MODEL_ARCHIVE}: {e}"))?;
@@ -345,7 +467,12 @@ impl Library {
             data.extend_from_slice(bytes);
             let path = folder.join(format!("{id}.pc"));
             std::fs::write(&path, data).map_err(|e| format!("{}: {e}", path.display()))?;
-            index.push((id as u32, bytes.len() as u32));
+            // A file that is written again (a replaced model over the model of the game) keeps one entry: the list of the plugin
+            // looks a file up by its number and must find the size of the file that is on the SD card.
+            match index.iter_mut().find(|entry| entry.0 == id as u32) {
+                Some(entry) => entry.1 = bytes.len() as u32,
+                None => index.push((id as u32, bytes.len() as u32)),
+            }
             Ok(())
         };
 
@@ -389,6 +516,11 @@ impl Library {
                 }
             }
         }
+        for (_, replacement) in &replacements {
+            if !extended.contains(&replacement.species) {
+                extended.push(replacement.species);
+            }
+        }
         for species in extended {
             let (first, count, flags) = entry(&list, species as usize).ok_or_else(|| format!("The species {species} is not in the list of the models."))?;
             let owned: Vec<&RegisteredForm> = self.registry.forms.iter().filter(|f| f.slots > 0 && f.species == Ref::Game(species)).collect();
@@ -421,11 +553,22 @@ impl Library {
                 }
                 offset += registered.slots as usize;
             }
+            // The models that replace the models of the game: they come last, so they win over the models of the forms.
+            for (pack, replacement) in replacements.iter().filter(|(_, r)| r.species == species && (r.slot as usize) < total) {
+                for (file, bytes) in pack.read_model(&replacement.model)?.iter().enumerate() {
+                    write((start + replacement.slot as usize) * 8 + 3 + file, bytes)?;
+                }
+                written += 1;
+            }
             next += total;
         }
 
         for (index_in_registry, model) in self.registry.models.iter().enumerate() {
             let Some(pack) = self.packs.iter().find(|p| p.id == model.pack && self.is_active(&p.id)) else { continue };
+            // A model that the pack does not have any more (an imported model that was reset) keeps its slot, empty.
+            if !pack.model_names().contains(&model.name) {
+                continue;
+            }
             let (carrier, form) = (index_in_registry / MODELS_PER_CARRIER, index_in_registry % MODELS_PER_CARRIER + 1);
             let files = pack.read_model(&model.name)?;
             for (file, bytes) in files.iter().enumerate() {

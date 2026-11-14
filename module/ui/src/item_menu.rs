@@ -60,14 +60,14 @@ impl IconCache {
             return found.clone();
         }
         if item >= sango_core::custom_item::FIRST_ID {
-            let made = self.custom.get(&item).map(|rgba| ctx.load_texture(format!("custom_item_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], rgba), egui::TextureOptions::NEAREST));
+            let made = self.custom.get(&item).map(|rgba| crate::textures::load(ctx, format!("custom_item_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], rgba), egui::TextureOptions::NEAREST));
             self.textures.insert(item, made.clone());
             return made;
         }
         let made = item_icons::file_of(item)
             .and_then(|file| self.garc.as_ref()?.first_file(file))
             .and_then(|bytes| item_icons::decode(bytes).ok())
-            .map(|rgba| ctx.load_texture(format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], &rgba), egui::TextureOptions::NEAREST));
+            .map(|rgba| crate::textures::load(ctx, format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], &rgba), egui::TextureOptions::NEAREST));
         self.textures.insert(item, made.clone());
         made
     }

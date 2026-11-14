@@ -1,0 +1,10 @@
+[package]
+name = "sango-modelport"
+version.workspace = true
+edition.workspace = true
+description = "Turns a glTF model into the files of a Pokemon model of the game (the importer of Sango Studio)."
+
+[dependencies]
+sango-core.workspace = true
+serde_json = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

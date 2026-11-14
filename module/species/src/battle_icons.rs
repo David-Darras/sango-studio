@@ -101,7 +101,7 @@ fn texture(ctx: &egui::Context, kind: &str, number: usize, pick: impl Fn(&Icons)
         return Some(handle);
     }
     let image = pick(icons)?;
-    let handle = ctx.load_texture(format!("battle_icon_{kind}_{number}"), egui::ColorImage::from_rgba_unmultiplied([image.width, image.height], &image.rgba), egui::TextureOptions::NEAREST);
+    let handle = sango_ui::textures::load(ctx, format!("battle_icon_{kind}_{number}"), egui::ColorImage::from_rgba_unmultiplied([image.width, image.height], &image.rgba), egui::TextureOptions::NEAREST);
     ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
     Some(handle)
 }
@@ -152,7 +152,7 @@ fn custom_type_texture(ctx: &egui::Context, kind: u8) -> Option<egui::TextureHan
         return Some(handle);
     }
     let rgba = custom.list.iter().find(|t| t.id == kind as usize)?.icon.as_ref()?;
-    let handle = ctx.load_texture(format!("custom_type_{kind}"), egui::ColorImage::from_rgba_unmultiplied([sango_core::custom_type::ICON_WIDTH, sango_core::custom_type::ICON_HEIGHT], rgba), egui::TextureOptions::NEAREST);
+    let handle = sango_ui::textures::load(ctx, format!("custom_type_{kind}"), egui::ColorImage::from_rgba_unmultiplied([sango_core::custom_type::ICON_WIDTH, sango_core::custom_type::ICON_HEIGHT], rgba), egui::TextureOptions::NEAREST);
     ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
     Some(handle)
 }

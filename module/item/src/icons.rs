@@ -124,7 +124,7 @@ impl ItemIcons {
         if let Some(found) = self.textures.get(&item) {
             return found.clone();
         }
-        let made = self.rgba(item).map(|rgba| ctx.load_texture(format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([SIZE, SIZE], &rgba), egui::TextureOptions::NEAREST));
+        let made = self.rgba(item).map(|rgba| sango_ui::textures::load(ctx, format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([SIZE, SIZE], &rgba), egui::TextureOptions::NEAREST));
         self.textures.insert(item, made.clone());
         made
     }

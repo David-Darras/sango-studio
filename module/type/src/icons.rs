@@ -112,7 +112,7 @@ impl TypeIcons {
         if let Some(found) = self.textures.get(&(id, language)) {
             return found.clone();
         }
-        let made = self.rgba(id, language).map(|rgba| ctx.load_texture(format!("type_icon_{id}_{language}"), egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
+        let made = self.rgba(id, language).map(|rgba| sango_ui::textures::load(ctx, format!("type_icon_{id}_{language}"), egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
         self.textures.insert((id, language), made.clone());
         made
     }

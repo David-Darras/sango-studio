@@ -71,67 +71,7 @@ const SHINY_TEXTURE_OFFSET: usize = 3;
 const BATTLE_MOTION_OFFSET: usize = 5;
 const AMIE_MOTION_OFFSET: usize = 6;
 
-/// The names of the battle motions, in the order of the file.
-const BATTLE_MOTIONS: [&str; 18] = [
-    "Idle A",
-    "Idle B",
-    "Idle C",
-    "Entrance 1: jump out",
-    "Entrance 1: falling loop",
-    "Entrance 1: landing",
-    "Entrance 2",
-    "Mega Evolution pose",
-    "Physical attack 1",
-    "Physical attack 2",
-    "Physical attack 3",
-    "Physical attack 4",
-    "Special attack 1",
-    "Special attack 2",
-    "Special attack 3",
-    "Special attack 4",
-    "Damage",
-    "Faint",
-];
-
-/// The names of the Pokémon-Amie motions, in the order of the file.
-const AMIE_MOTIONS: [&str; 26] = [
-    "Idle",
-    "React",
-    "Turn A",
-    "Turn B",
-    "Doze off: start",
-    "Doze off: loop",
-    "Doze off: wake up",
-    "Sleep: loop",
-    "Sleep: wake up",
-    "Dislike",
-    "Confused",
-    "Happy A",
-    "Happy B",
-    "Happy C",
-    "Habit A",
-    "Habit B",
-    "Habit C",
-    "Habit D",
-    "Lonely",
-    "Want to play A",
-    "Want to play B",
-    "Angry",
-    "Bite: start",
-    "Bite: loop",
-    "Bite: end",
-    "Touch",
-];
-
-/// The name of a motion: the files hold more motions than the list of the game (they control the loops and the blinks).
-fn motion_name(battle: bool, index: usize) -> String {
-    let names: &[&str] = if battle { &BATTLE_MOTIONS } else { &AMIE_MOTIONS };
-    let file = if battle { "Battle" } else { "Pokémon-Amie" };
-    match names.get(index) {
-        Some(name) => format!("{file} · {name}"),
-        None => format!("{file} · control motion {index}"),
-    }
-}
+use sango_modelport::animate::motion_name;
 
 /// A model of a species: the normal one, the female one or a form.
 #[derive(Clone, Debug, PartialEq)]
@@ -189,6 +129,42 @@ fn variants_in(archive: &dyn Files, species: usize, sd: bool) -> Vec<Variant> {
         .collect()
 }
 
+/// The models of a species in the files of the SD card.
+#[cfg(test)]
+pub(crate) fn variants_of_sd(models: &SdModels, species: usize) -> Vec<Variant> {
+    variants_in(models, species, true)
+}
+
+/// Reads a model of the files for a test.
+#[cfg(test)]
+pub(crate) fn read_model_for_test(files: &dyn Files, first: usize, shiny: bool) -> Result<(Model, Vec<Texture>), String> {
+    read_model(files, first, shiny)
+}
+
+/// What an import replaces.
+enum Target {
+    /// The model of a species or a form of a pack.
+    Pack(sango_pack::Ref, u16),
+    /// A model of a species of the game: the species and the slot.
+    Game(u16, u8),
+}
+
+/// The .glb file that the Model tab exports for the first model of a species of the archive (for the tests).
+#[cfg(test)]
+pub(crate) fn glb_of_game_model(archive: &Garc, species: usize) -> Result<Vec<u8>, String> {
+    let variant = variants(archive, species).into_iter().next().ok_or("The species has no model.")?;
+    let (model, textures) = read_model(archive, variant.file, false)?;
+    let by_name = textures.iter().map(|t| (t.name.clone(), t.clone())).collect();
+    let (battle, amie) = (read_motions(archive, variant.file + BATTLE_MOTION_OFFSET), read_motions(archive, variant.file + AMIE_MOTION_OFFSET));
+    glb_of(&Loaded { species, form: 0, shiny: false, model, textures, by_name, battle, amie })
+}
+
+/// The battle motions of the first model of a species of the archive, and the same read from other files (for the tests).
+#[cfg(test)]
+pub(crate) fn battle_motions_for_test(files: &dyn Files, first: usize) -> Option<MotionPack> {
+    read_motions(files, first + BATTLE_MOTION_OFFSET)
+}
+
 /// What is loaded: the model of a species and a form, and its pictures.
 struct Loaded {
     species: usize,
@@ -229,6 +205,8 @@ pub struct ModelTab {
     dirty: bool,
     /// The small pictures of the list, by name.
     thumbnails: HashMap<String, egui::TextureHandle>,
+    /// The textures that were forgotten: they live on a few frames, because a frame that is being drawn may still use them.
+    retired: sango_ui::retired::Retired,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
     /// The motion that the model plays, and its frame (the game plays 30 each second).
@@ -243,11 +221,18 @@ pub struct ModelTab {
     /// The models of the species that the tab shows, and the species.
     variants: Vec<Variant>,
     variants_of: Option<usize>,
+    /// The import or the reset that runs in a thread.
+    job: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    /// The folders of the SD card (the one of Studio) and of the dump, for the import.
+    sd_root: Option<String>,
+    dump_root: Option<String>,
+    /// The size factor of an imported model.
+    import_scale: f32,
 }
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, variants: Vec::new(), variants_of: None }
+        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
     }
 }
 
@@ -273,15 +258,51 @@ fn read_model(archive: &dyn Files, first: usize, shiny: bool) -> Result<(Model, 
     Ok((model, textures))
 }
 
+/// The .glb file of a loaded model: its meshes, its skeleton and its motions (one clip for each motion of the files).
+fn glb_of(loaded: &Loaded) -> Result<Vec<u8>, String> {
+    let mut clips = Vec::new();
+    for (battle, pack) in [(true, &loaded.battle), (false, &loaded.amie)] {
+        let Some(pack) = pack else { continue };
+        for index in (0..pack.len()).filter(|&i| pack.has(i)) {
+            let Ok(motion) = pack.motion(index) else { continue };
+            let frames = (0..motion.frames.max(1)).map(|f| sango_core::posing::bone_values(&loaded.model, pack, &motion.pose(pack.joints.len(), f as f32))).collect();
+            clips.push(crate::model_export::Clip { name: motion_name(battle, index), frames });
+        }
+    }
+    crate::model_export::glb(&loaded.model, &loaded.by_name, &clips)
+}
+
 impl ModelTab {
     /// Opens the archive of a dump.
     pub fn open(&mut self, dump: &Dump) {
+        self.dump_root = Some(dump.root().to_string_lossy().to_string());
         self.archive = Garc::open(&dump.archive(8)).ok();
         self.sd_models = self.sd_folder.as_deref().and_then(SdModels::open);
         self.variants_of = None;
         self.loaded = None;
-        self.picture = None;
-        self.thumbnails.clear();
+        self.forget_textures();
+    }
+
+    /// Forgets the small pictures of the list.
+    fn forget_thumbnails(&mut self) {
+        for (_, thumbnail) in self.thumbnails.drain() {
+            self.retired.keep(thumbnail);
+        }
+    }
+
+    /// Forgets the picture of the model and the small pictures: they are kept for a few frames before they are destroyed.
+    fn forget_textures(&mut self) {
+        if let Some(picture) = self.picture.take() {
+            self.retired.keep(picture);
+        }
+        for (_, thumbnail) in self.thumbnails.drain() {
+            self.retired.keep(thumbnail);
+        }
+    }
+
+    /// Tells the tab where the SD card of Studio is: the import writes the packs there.
+    pub fn set_sd_root(&mut self, root: Option<String>) {
+        self.sd_root = root;
     }
 
     /// Tells the tab where the model files of the packs are (`sango/pokemodel` of the SD card): they are read again when the
@@ -292,7 +313,7 @@ impl ModelTab {
             self.sd_folder = folder;
             self.variants_of = None;
             self.loaded = None;
-            self.picture = None;
+            self.forget_textures();
         }
     }
 
@@ -357,7 +378,7 @@ impl ModelTab {
         if same {
             return;
         }
-        self.thumbnails.clear();
+        self.forget_thumbnails();
         self.dirty = true;
         self.loaded = None;
         self.error = None;
@@ -391,6 +412,8 @@ impl ModelTab {
 
     /// Draws the tab. `form` is the form of the species that the page shows: the model of that form is shown first.
     pub fn ui(&mut self, ui: &mut egui::Ui, species: usize, form: usize) {
+        self.retired.tick(ui.ctx());
+        self.poll_job(ui.ctx());
         if self.archive.is_none() {
             return;
         }
@@ -461,7 +484,10 @@ impl ModelTab {
                     _ => render(&loaded.model, &loaded.by_name, &self.camera, VIEW_SIZE, VIEW_SIZE),
                 };
                 let image = egui::ColorImage::from_rgba_unmultiplied([VIEW_SIZE, VIEW_SIZE], &pixels);
-                self.picture = Some(ui.ctx().load_texture("species_model_view", image, egui::TextureOptions::LINEAR));
+                if let Some(old) = self.picture.take() {
+                    self.retired.keep(old);
+                }
+                self.picture = Some(sango_ui::textures::load(ui.ctx(), "species_model_view", image, egui::TextureOptions::LINEAR));
             }
             self.dirty = false;
         }
@@ -520,6 +546,7 @@ impl ModelTab {
                     self.import_pictures();
                 }
             });
+            self.import_row(ui, species);
             if let Some(loaded) = &self.loaded {
                 let triangles: usize = loaded.model.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
                 ui.label(widget::hint(&format!("{} bones · {} meshes · {triangles} triangles · {} pictures", loaded.model.bones.len(), loaded.model.meshes.len(), loaded.textures.len())));
@@ -528,12 +555,90 @@ impl ModelTab {
                     ui.label(widget::hint(&format!("Files {file} to {} {place}", file + 7)));
                 }
             }
-            let _ = species;
         });
         ui.add_space(8.0);
         self.motions(ui);
         ui.add_space(8.0);
         self.pictures(ui);
+    }
+
+    /// What an import replaces: a model of a species of the game (its species and slot), or the model of a species or a form of a
+    /// pack. The second value is the name of the model in the files, which must differ from the names of the models of the game.
+    fn import_target(&self, species: usize) -> Option<(Target, String)> {
+        if !self.variants.iter().any(|v| v.slot == self.form) {
+            return None;
+        }
+        if species <= crate::SPECIES.len() {
+            return Some((Target::Game(species as u16, self.form), format!("pm{species:04}_{:02}", 80 + u16::from(self.form))));
+        }
+        let name = crate::extras::pack_species(species)?.name;
+        Some((Target::Pack(sango_pack::Ref::key(&name), u16::from(self.form)), format!("pm{species:04}_{:02}", self.form)))
+    }
+
+    /// Takes the result of the import when the thread is done.
+    fn poll_job(&mut self, ctx: &egui::Context) {
+        let Some(receiver) = &self.job else { return };
+        match receiver.try_recv() {
+            Ok(result) => {
+                self.job = None;
+                self.status = Some(match result {
+                    Ok(message) => (true, message),
+                    Err(message) => (false, message),
+                });
+                // The files of the SD card changed.
+                let folder = self.sd_folder.clone();
+                self.set_sd_folder(folder, true);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(200)),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.job = None;
+                self.status = Some((false, "The import stopped without an answer.".to_string()));
+            }
+        }
+    }
+
+    /// The buttons that replace the model by one from a file, and bring the model of the pack back.
+    fn import_row(&mut self, ui: &mut egui::Ui, species: usize) {
+        let target = self.import_target(species);
+        let (Some(sd_root), Some(dump_root)) = (self.sd_root.clone(), self.dump_root.clone()) else { return };
+        if self.job.is_some() {
+            ui.label(widget::hint("Working: the model is converted and the files of the packs are written…"));
+            return;
+        }
+        let Some((target, model_name)) = target else { return };
+        let mut request = None;
+        ui.horizontal(|ui| {
+            if widget::button(ui, "Import model…") {
+                if let Some(file) = rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file() {
+                    let scale = f64::from(self.import_scale);
+                    request = Some(match &target {
+                        Target::Pack(species, form) => crate::model_import::Request::Import { file, species: species.clone(), form: *form, model_name, scale },
+                        Target::Game(species, slot) => crate::model_import::Request::ImportGame { file, species: *species, slot: *slot, model_name, scale },
+                    });
+                }
+            }
+            let back = match &target {
+                Target::Pack(..) => "Back to the model of the pack",
+                Target::Game(..) => "Back to the model of the game",
+            };
+            if widget::button(ui, back) {
+                request = Some(match &target {
+                    Target::Pack(species, form) => crate::model_import::Request::Reset { species: species.clone(), form: *form },
+                    Target::Game(species, slot) => crate::model_import::Request::ResetGame { species: *species, slot: *slot },
+                });
+            }
+            ui.label(widget::hint("Scale"));
+            ui.add(egui::DragValue::new(&mut self.import_scale).speed(0.01).range(0.05..=20.0));
+        });
+        ui.label(widget::hint("A model without animation stays in its rest pose (T-pose). Restart the game after a change."));
+        if let Some(request) = request {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = sender.send(crate::model_import::run(&sd_root, &dump_root, &request));
+            });
+            self.job = Some(receiver);
+            self.status = None;
+        }
     }
 
     /// Writes the model as a .glb file and its pictures as PNG files, in a folder that the user chooses.
@@ -542,16 +647,7 @@ impl ModelTab {
         let Some(folder) = rfd::FileDialog::new().set_title("Folder for the exported model").pick_folder() else { return };
         let base = format!("pm{:04}_{}", loaded.species, loaded.form);
         let result = (|| -> Result<usize, String> {
-            let mut clips = Vec::new();
-            for (battle, pack) in [(true, &loaded.battle), (false, &loaded.amie)] {
-                let Some(pack) = pack else { continue };
-                for index in (0..pack.len()).filter(|&i| pack.has(i)) {
-                    let Ok(motion) = pack.motion(index) else { continue };
-                    let frames = (0..motion.frames.max(1)).map(|f| sango_core::posing::bone_values(&loaded.model, pack, &motion.pose(pack.joints.len(), f as f32))).collect();
-                    clips.push(crate::model_export::Clip { name: motion_name(battle, index), frames });
-                }
-            }
-            let file = crate::model_export::glb(&loaded.model, &loaded.by_name, &clips)?;
+            let file = glb_of(loaded)?;
             std::fs::write(folder.join(format!("{base}.glb")), file).map_err(|e| e.to_string())?;
             let pictures = folder.join("textures");
             std::fs::create_dir_all(&pictures).map_err(|e| format!("{}: {e}", pictures.display()))?;
@@ -589,7 +685,7 @@ impl ModelTab {
         for texture in &loaded.textures {
             loaded.by_name.insert(texture.name.clone(), texture.clone());
         }
-        self.thumbnails.clear();
+        self.forget_thumbnails();
         self.dirty = true;
         self.status = Some(if changed.is_empty() {
             (false, format!("No PNG file named like a picture of the model in {}.", folder.display()))
@@ -677,7 +773,7 @@ impl ModelTab {
                     ui.horizontal(|ui| {
                         let handle = self.thumbnails.entry(texture.name.clone()).or_insert_with(|| {
                             let image = egui::ColorImage::from_rgba_unmultiplied([texture.width, texture.height], &texture.rgba);
-                            ui.ctx().load_texture(format!("model_picture_{}", texture.name), image, egui::TextureOptions::LINEAR)
+                            sango_ui::textures::load(ui.ctx(), format!("model_picture_{}", texture.name), image, egui::TextureOptions::LINEAR)
                         });
                         let side = 56.0;
                         let (rect, _) = ui.allocate_exact_size(egui::vec2(side, side), egui::Sense::hover());

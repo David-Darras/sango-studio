@@ -111,6 +111,15 @@ pub struct PackForm {
     pub data: String,
 }
 
+/// A model that replaces one of the models of a species of the game: the slot `slot` of its list of models (0 is the normal model).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModelReplacement {
+    pub species: u16,
+    pub slot: u8,
+    /// The name of the model in the pack (the folder `models/<model>`).
+    pub model: String,
+}
+
 /// The description of a pack and its content.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pack {
@@ -130,6 +139,13 @@ pub struct Pack {
     pub species: Vec<PackSpecies>,
     #[serde(default)]
     pub forms: Vec<PackForm>,
+    /// Models that no species and no form uses now, and that the pack keeps: the original of a model that the user replaced by an
+    /// imported one, so that the original can come back.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept_models: Vec<String>,
+    /// The models of the species of the game that this pack replaces.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replacements: Vec<ModelReplacement>,
     /// The file that the pack was read from: the models are read from it when they are needed.
     #[serde(skip)]
     pub file: Option<PathBuf>,
@@ -204,6 +220,11 @@ impl Pack {
                 if !names.contains(file) {
                     names.push(file.clone());
                 }
+            }
+        }
+        for kept in self.kept_models.iter().chain(self.replacements.iter().map(|r| &r.model)) {
+            if !names.contains(kept) {
+                names.push(kept.clone());
             }
         }
         names

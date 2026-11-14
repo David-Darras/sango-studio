@@ -199,6 +199,7 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        sango_ui::textures::sweep(ctx);
         self.update_ctx(ctx);
         self.warm_up(ctx);
     }

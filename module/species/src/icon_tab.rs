@@ -59,6 +59,8 @@ pub struct IconTab {
     /// What the picture shows: the file, and the compressed bytes that it was made from.
     shown: Option<(usize, Vec<u8>)>,
     texture: Option<egui::TextureHandle>,
+    /// The textures that were forgotten: they live on a few frames, because a frame that is being drawn may still use them.
+    retired: sango_ui::retired::Retired,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
 }
@@ -70,7 +72,9 @@ impl IconTab {
         self.pending.clear();
         self.from_card.clear();
         self.shown = None;
-        self.texture = None;
+        if let Some(old) = self.texture.take() {
+            self.retired.keep(old);
+        }
     }
 
     /// The compressed file as the romfs has it.
@@ -120,7 +124,9 @@ impl IconTab {
         self.pending.clear();
         self.from_card.clear();
         self.shown = None;
-        self.texture = None;
+        if let Some(old) = self.texture.take() {
+            self.retired.keep(old);
+        }
     }
 
     /// Gives an icon a new picture: 40 × 30 pixels of RGBA. Returns the compressed file.
@@ -142,6 +148,7 @@ impl IconTab {
 
     /// Draws the tab.
     pub fn ui(&mut self, ui: &mut egui::Ui, session: &Session, species: usize, form: usize) {
+        self.retired.tick(ui.ctx());
         let sd = session.sd.as_ref();
         if !has_female_icon(species) {
             self.female = false;
@@ -154,7 +161,10 @@ impl IconTab {
         // The picture is made again when the file or its bytes change.
         let same = matches!((&self.shown, &bytes), (Some((shown_file, shown_bytes)), Some(now)) if *shown_file == file && shown_bytes == now);
         if !same || self.texture.is_none() {
-            self.texture = bytes.as_deref().and_then(|bytes| decode(bytes).ok()).map(|rgba| ui.ctx().load_texture("species_icon_editor", egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
+            if let Some(old) = self.texture.take() {
+                self.retired.keep(old);
+            }
+            self.texture = bytes.as_deref().and_then(|bytes| decode(bytes).ok()).map(|rgba| sango_ui::textures::load(ui.ctx(), "species_icon_editor", egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
             self.shown = bytes.clone().map(|bytes| (file, bytes));
         }
         widget::card(ui, |ui| {

@@ -191,6 +191,47 @@ mod test {
         assert_eq!(got, compare, "the data of the packs is the data of the plugin files");
     }
 
+    /// A model that the user imports replaces the one of the pack, and the original comes back with the reset.
+    #[test]
+    fn an_imported_model_replaces_the_model_of_a_species_and_the_original_comes_back() {
+        let outer = std::env::temp_dir().join(format!("sango_pack_import_{}", std::process::id()));
+        let sdmc = outer.join("sdmc");
+        std::fs::create_dir_all(sdmc.join("sango-studio")).unwrap();
+        let sd = SdCard::open(sdmc.to_str().unwrap()).unwrap();
+        let mut pack = pack("modeled", &["Alpha", "Beta"]);
+        pack.species[0].model = ModelRef::File { file: "Alpha".into() };
+        pack.species[1].model = ModelRef::File { file: "Beta".into() };
+        let files_of = |name: &str| -> Vec<Vec<u8>> { (0..8u8).map(|n| vec![name.as_bytes()[0], n, 9, 9]).collect() };
+        let file = sdmc.join("modeled.sangopack");
+        pack.save_with_models(&file, &mut |name| Ok(files_of(name))).unwrap();
+        let mut library = Library::default();
+        library.install(Pack::open(&file).unwrap()).unwrap();
+        library.save(&sd).unwrap();
+
+        // Import: the species uses the new model, and the file of the pack still has the original.
+        library.set_model(&sd, &Ref::key("Alpha"), 0, Some(files_of("Imported"))).unwrap();
+        let pack = &library.packs[0];
+        assert_eq!(pack.species[0].model, ModelRef::File { file: "Alpha+import".into() });
+        assert_eq!(pack.read_model("Alpha+import").unwrap(), files_of("Imported"));
+        assert_eq!(pack.read_model("Alpha").unwrap(), files_of("Alpha"), "the original is kept");
+        assert_eq!(pack.read_model("Beta").unwrap(), files_of("Beta"));
+        // The file of the SD card is the one that was written, and it opens again.
+        let on_card = Pack::open(&sd.path("species/packs/modeled.sangopack").unwrap()).unwrap();
+        assert_eq!(on_card.species[0].model, pack.species[0].model);
+        // Importing again replaces the imported model.
+        library.set_model(&sd, &Ref::key("Alpha"), 0, Some(files_of("Second"))).unwrap();
+        assert_eq!(library.packs[0].read_model("Alpha+import").unwrap(), files_of("Second"));
+        // Reset: the original model is back, and the imported one leaves the file.
+        library.set_model(&sd, &Ref::key("Alpha"), 0, None).unwrap();
+        assert_eq!(library.packs[0].species[0].model, ModelRef::File { file: "Alpha".into() });
+        assert!(library.packs[0].read_model("Alpha+import").is_err());
+        assert_eq!(library.packs[0].read_model("Alpha").unwrap(), files_of("Alpha"));
+        assert!(library.set_model(&sd, &Ref::key("Alpha"), 0, None).is_err(), "nothing to reset");
+        // The model of a game species cannot be replaced, and a species that no pack has is refused.
+        assert!(library.set_model(&sd, &Ref::key("Nobody"), 0, Some(files_of("X"))).is_err());
+        let _ = std::fs::remove_dir_all(&outer);
+    }
+
     /// With the dump of the game: the models of a pack go to `sango/pokemodel`, in the form that the plugin reads.
     #[test]
     fn the_models_of_a_pack_are_written_where_the_plugin_reads_them() {

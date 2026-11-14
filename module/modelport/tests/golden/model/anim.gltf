@@ -1,0 +1,268 @@
+{
+ "asset": {
+  "version": "2.0"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0,
+    3
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "Origin",
+   "children": [
+    1
+   ]
+  },
+  {
+   "name": "Waist",
+   "translation": [
+    0,
+    0.2,
+    0
+   ],
+   "children": [
+    2
+   ]
+  },
+  {
+   "name": "Head",
+   "translation": [
+    0,
+    1.0,
+    0
+   ]
+  },
+  {
+   "name": "Body",
+   "mesh": 0,
+   "skin": 0
+  }
+ ],
+ "skins": [
+  {
+   "inverseBindMatrices": 6,
+   "joints": [
+    0,
+    1,
+    2
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "name": "Body",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1,
+      "TEXCOORD_0": 2,
+      "JOINTS_0": 3,
+      "WEIGHTS_0": 4
+     },
+     "indices": 5,
+     "material": 0
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "Body",
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0
+    }
+   }
+  }
+ ],
+ "textures": [
+  {
+   "source": 0
+  }
+ ],
+ "images": [
+  {
+   "uri": "body.png"
+  }
+ ],
+ "animations": [
+  {
+   "name": "battlewait01_loop",
+   "samplers": [
+    {
+     "input": 8,
+     "output": 9,
+     "interpolation": "LINEAR"
+    },
+    {
+     "input": 8,
+     "output": 10,
+     "interpolation": "LINEAR"
+    }
+   ],
+   "channels": [
+    {
+     "sampler": 0,
+     "target": {
+      "node": 1,
+      "path": "rotation"
+     }
+    },
+    {
+     "sampler": 1,
+     "target": {
+      "node": 2,
+      "path": "translation"
+     }
+    }
+   ]
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 48,
+   "type": "VEC3",
+   "min": [
+    -0.30000001192092896,
+    0.0,
+    -0.25
+   ],
+   "max": [
+    0.30000001192092896,
+    1.5499999523162842,
+    0.25
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5126,
+   "count": 48,
+   "type": "VEC3"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5126,
+   "count": 48,
+   "type": "VEC2"
+  },
+  {
+   "bufferView": 3,
+   "componentType": 5123,
+   "count": 48,
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 4,
+   "componentType": 5126,
+   "count": 48,
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 5,
+   "componentType": 5125,
+   "count": 72,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 6,
+   "componentType": 5126,
+   "count": 3,
+   "type": "MAT4"
+  },
+  {
+   "bufferView": 7,
+   "componentType": 5126,
+   "count": 4,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 8,
+   "componentType": 5126,
+   "count": 4,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 9,
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC4"
+  },
+  {
+   "bufferView": 10,
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC3"
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 576
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 576,
+   "byteLength": 576
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 1152,
+   "byteLength": 384
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 1536,
+   "byteLength": 384
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 1920,
+   "byteLength": 768
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 2688,
+   "byteLength": 288
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 2976,
+   "byteLength": 192
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 3168,
+   "byteLength": 16
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 3184,
+   "byteLength": 16
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 3200,
+   "byteLength": 64
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 3264,
+   "byteLength": 48
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "anim.bin",
+   "byteLength": 3312
+  }
+ ]
+}
