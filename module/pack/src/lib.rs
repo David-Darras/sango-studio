@@ -281,7 +281,16 @@ mod test {
         // The own model of the carrier is the file of the game.
         let archive = sango_core::Garc::open(&dump.archive(library::MODEL_ARCHIVE)).unwrap();
         let victini_first = u16::from_le_bytes([archive.first_file(0).unwrap()[(494 - 1) * 4], archive.first_file(0).unwrap()[(494 - 1) * 4 + 1]]) as usize;
-        assert_eq!(&slot_file(0, 0)[4..], archive.first_file(victini_first * 8 + 3).unwrap());
+        // The plugin compresses the files of the SD card for the game, so the copies of the files of the game are not compressed.
+        let plain = |id: usize| {
+            let bytes = archive.first_file(id).unwrap();
+            if sango_core::lz::is_compressed(bytes) {
+                sango_core::lz::decompress(bytes).unwrap()
+            } else {
+                bytes.to_vec()
+            }
+        };
+        assert_eq!(&slot_file(0, 0)[4..], plain(victini_first * 8 + 3).as_slice());
         let index = std::fs::read(folder.join("index.bin")).unwrap();
         let entries = u32::from_le_bytes(index[..4].try_into().unwrap()) as usize;
         assert_eq!(index.len(), 4 + 8 * entries);
@@ -295,7 +304,7 @@ mod test {
         let v_file = |slot: usize, file: usize| std::fs::read(folder.join(format!("{}.pc", (v_first + slot) * 8 + 3 + file))).unwrap();
         assert_eq!(&v_file(3, 2)[4..], files_of("Gigantamax")[2].as_slice());
         let game_first = u16::from_le_bytes([archive.first_file(0).unwrap()[2 * 4], archive.first_file(0).unwrap()[2 * 4 + 1]]) as usize;
-        assert_eq!(&v_file(1, 0)[4..], archive.first_file((game_first + 1) * 8 + 3).unwrap(), "the models of the game are copied");
+        assert_eq!(&v_file(1, 0)[4..], plain((game_first + 1) * 8 + 3).as_slice(), "the models of the game are copied, not compressed");
         // A model of a removed pack has its place but no files.
         library.remove("modeled").unwrap();
         assert_eq!(library.write_models(&sdmc, &dump).unwrap(), 0);

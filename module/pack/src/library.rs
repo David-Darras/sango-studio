@@ -57,6 +57,17 @@ pub const REPLACEMENT_PACK: &str = "studio-models";
 /// The ending of the name of an imported model: the model `x` that the pack shipped is replaced by `x+import`.
 pub const IMPORTED_SUFFIX: &str = "+import";
 
+/// A file of the model archive as the plugin serves it from the SD card: not compressed (the plugin compresses it again for the game, so a
+/// file that is copied compressed would reach the game compressed two times).
+fn game_file(archive: &Garc, id: usize) -> Option<Vec<u8>> {
+    let bytes = archive.first_file(id)?;
+    if sango_core::lz::is_compressed(bytes) {
+        sango_core::lz::decompress(bytes).ok()
+    } else {
+        Some(bytes.to_vec())
+    }
+}
+
 fn pack_path(id: &str) -> String {
     format!("{FOLDER}/packs/{id}.sangopack")
 }
@@ -439,7 +450,7 @@ impl Library {
             return Ok(0);
         }
         let archive = Garc::open(&dump.archive(MODEL_ARCHIVE)).map_err(|e| format!("Archive {MODEL_ARCHIVE}: {e}"))?;
-        let mut list = archive.first_file(0).ok_or("The list of the models is missing in the archive.")?.to_vec();
+        let mut list = game_file(&archive, 0).ok_or("The list of the models is missing in the archive.")?;
         let entry = |list: &[u8], species: usize| -> Option<(usize, usize, u8)> {
             let at = species.checked_sub(1)? * 4;
             let bytes = list.get(at..at + 4)?;
@@ -498,8 +509,8 @@ impl Library {
             let own = [slot_entries[2 * first], slot_entries[2 * first + 1]];
             slot_entries[2 * next..2 * next + 2].copy_from_slice(&own);
             for file in 0..MODEL_FILES {
-                let bytes = archive.first_file(first * 8 + 3 + file).ok_or_else(|| format!("The model of the species {species} is cut."))?;
-                write(next * 8 + 3 + file, bytes)?;
+                let bytes = game_file(&archive, first * 8 + 3 + file).ok_or_else(|| format!("The model of the species {species} is cut."))?;
+                write(next * 8 + 3 + file, &bytes)?;
             }
             next += 1 + used;
         }
@@ -531,8 +542,8 @@ impl Library {
             for slot in 0..count {
                 slot_entries.copy_within(2 * (first + slot)..2 * (first + slot) + 2, 2 * (start + slot));
                 for file in 0..MODEL_FILES {
-                    let bytes = archive.first_file((first + slot) * 8 + 3 + file).ok_or_else(|| format!("The model of the species {species} is cut."))?;
-                    write((start + slot) * 8 + 3 + file, bytes)?;
+                    let bytes = game_file(&archive, (first + slot) * 8 + 3 + file).ok_or_else(|| format!("The model of the species {species} is cut."))?;
+                    write((start + slot) * 8 + 3 + file, &bytes)?;
                 }
             }
             let at = (species as usize - 1) * 4;

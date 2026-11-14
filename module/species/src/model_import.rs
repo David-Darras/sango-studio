@@ -253,6 +253,11 @@ mod test {
         assert_eq!(ids, unique, "the index lists a file two times");
         let models = crate::model_tab::SdModels::open(&sdmc.join("sango").join("pokemodel")).unwrap();
         let venusaur = crate::model_tab::variants_of_sd(&models, 3);
+        // The files of the models of the game that Studio copies are not compressed: the plugin compresses them for the game.
+        for slot in &venusaur[1..3] {
+            let first = crate::model_tab::Files::get(&models, slot.file).unwrap();
+            assert!(!sango_core::lz::is_compressed(&first), "the copy of a model of the game is still compressed");
+        }
         assert!(venusaur.len() >= 2, "the species keeps all its models");
         let (replaced, _) = crate::model_tab::read_model_for_test(&models, venusaur[0].file, false).unwrap();
         assert_eq!(replaced.bones.len(), 4, "the normal model is the imported one");
