@@ -1,0 +1,11 @@
+[package]
+name = "sango-cry"
+version.workspace = true
+edition.workspace = true
+description = "The cries of the Pokemon: the files of the game, sound files, and the conversions between them (Sango Studio)."
+
+[dependencies]
+puremp3 = "0.1"
+
+[dev-dependencies]
+sango-core.workspace = true

@@ -36,10 +36,11 @@ pub enum Part {
     Evolutions,
     Texts,
     Icons,
+    Cries,
 }
 
 impl Part {
-    pub const ALL: [Part; 5] = [Part::Data, Part::Moves, Part::Evolutions, Part::Texts, Part::Icons];
+    pub const ALL: [Part; 6] = [Part::Data, Part::Moves, Part::Evolutions, Part::Texts, Part::Icons, Part::Cries];
 
     fn label(self) -> &'static str {
         match self {
@@ -48,6 +49,7 @@ impl Part {
             Part::Evolutions => "Evolutions",
             Part::Texts => "Texts",
             Part::Icons => "Icons",
+            Part::Cries => "Cries",
         }
     }
 
@@ -59,6 +61,7 @@ impl Part {
             Part::Evolutions => "Evolution tab.",
             Part::Texts => "Text tab: name, category, entry, form name, height and weight, in every language.",
             Part::Icons => "The icon card of the General tab: the pictures of the species in the lists.",
+            Part::Cries => "The cry card of the General tab: the sound of the species.",
         }
     }
 
@@ -66,10 +69,12 @@ impl Part {
     fn folders(self) -> &'static [&'static str] {
         match self {
             Part::Data => &["pokemon/data"],
-            Part::Moves => &["pokemon/learnset", "pokemon/egg_moves"],
-            Part::Evolutions => &["pokemon/evolution"],
-            Part::Texts => &["text"],
+            // The copies that the plugin reads (see `sango_core::archive_files`) go with the files that they come from.
+            Part::Moves => &["pokemon/learnset", "pokemon/egg_moves", "archive/191", "archive/190"],
+            Part::Evolutions => &["pokemon/evolution", "archive/192"],
+            Part::Texts => &["text", "archive/71", "archive/72", "archive/73", "archive/74", "archive/75", "archive/76", "archive/77", "archive/78"],
             Part::Icons => &["pokemon/icon"],
+            Part::Cries => &["archive/100"],
         }
     }
 
@@ -181,6 +186,13 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
                 }
             }
             (Part::Texts, _) => reset_texts(sd, species, &forms, library)?,
+            (Part::Cries, Scope::All) => sango_core::archive_files::clear(sd, sango_cry::ARCHIVE)?,
+            (Part::Cries, _) => {
+                let waves: BTreeSet<u32> = forms.iter().flat_map(|&f| (0..sango_cry::table::KINDS.len()).filter_map(move |kind| sango_cry::table::voice(species, f, kind))).map(|voice| voice.wave).collect();
+                for wave in waves {
+                    sango_core::archive_files::remove(sd, sango_cry::ARCHIVE, wave as usize)?;
+                }
+            }
         }
     }
     Ok(())

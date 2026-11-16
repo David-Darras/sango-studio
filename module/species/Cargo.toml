@@ -8,6 +8,8 @@ description = "The species editor of Sango Studio."
 sango-core.workspace = true
 sango-pack.workspace = true
 sango-modelport.workspace = true
+sango-cry.workspace = true
+rodio = { version = "0.20", default-features = false }
 rfd.workspace = true
 sango-ui.workspace = true
 zerocopy.workspace = true

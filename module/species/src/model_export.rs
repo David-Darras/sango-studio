@@ -18,12 +18,6 @@ pub fn png(texture: &Texture) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-/// A picture read from PNG bytes, with a name.
-pub fn texture_from_png(name: &str, bytes: &[u8]) -> Result<Texture, String> {
-    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).map_err(|e| format!("{name}: {e}"))?.to_rgba8();
-    Ok(Texture { name: name.to_string(), width: image.width() as usize, height: image.height() as usize, rgba: image.into_raw() })
-}
-
 /// The rotation of a matrix as a quaternion (x, y, z, w).
 fn quaternion(m: &[[f32; 4]; 3]) -> [f32; 4] {
     // The scale is taken out of the columns first.
@@ -331,13 +325,6 @@ mod test {
         // The text is valid JSON: the quotes and the brackets are balanced.
         assert_eq!(json.matches('{').count(), json.matches('}').count());
         assert_eq!(json.matches('[').count(), json.matches(']').count());
-    }
-
-    #[test]
-    fn a_picture_goes_to_png_and_comes_back() {
-        let texture = Texture { name: "t".into(), width: 2, height: 1, rgba: vec![1, 2, 3, 255, 4, 5, 6, 128] };
-        let back = texture_from_png("t", &png(&texture).unwrap()).unwrap();
-        assert_eq!(back, texture);
     }
 
     #[test]

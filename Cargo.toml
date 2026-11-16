@@ -26,6 +26,7 @@ sango-code = { path = "module/code" }
 sango-pack = { path = "module/pack" }
 sango-packs = { path = "module/packs" }
 sango-modelport = { path = "module/modelport" }
+sango-cry = { path = "module/cry" }
 
 [profile.dev]
 opt-level = 2

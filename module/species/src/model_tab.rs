@@ -542,9 +542,6 @@ impl ModelTab {
                 if widget::button(ui, "Export…") {
                     self.export_model();
                 }
-                if widget::button(ui, "Import pictures…") {
-                    self.import_pictures();
-                }
             });
             self.import_row(ui, species);
             if let Some(loaded) = &self.loaded {
@@ -641,56 +638,16 @@ impl ModelTab {
         }
     }
 
-    /// Writes the model as a .glb file and its pictures as PNG files, in a folder that the user chooses.
+    /// Writes the model as one .glb file (the skeleton, the meshes, the pictures and the motions are all in it), in a place that the
+    /// user chooses.
     fn export_model(&mut self) {
         let Some(loaded) = &self.loaded else { return };
-        let Some(folder) = rfd::FileDialog::new().set_title("Folder for the exported model").pick_folder() else { return };
         let base = format!("pm{:04}_{}", loaded.species, loaded.form);
-        let result = (|| -> Result<usize, String> {
-            let file = glb_of(loaded)?;
-            std::fs::write(folder.join(format!("{base}.glb")), file).map_err(|e| e.to_string())?;
-            let pictures = folder.join("textures");
-            std::fs::create_dir_all(&pictures).map_err(|e| format!("{}: {e}", pictures.display()))?;
-            for texture in &loaded.textures {
-                std::fs::write(pictures.join(format!("{}.png", texture.name)), crate::model_export::png(texture)?).map_err(|e| e.to_string())?;
-            }
-            Ok(loaded.textures.len())
-        })();
+        let Some(path) = rfd::FileDialog::new().set_title("Export the model").set_file_name(format!("{base}.glb")).add_filter("3D model", &["glb"]).save_file() else { return };
+        let result = glb_of(loaded).and_then(|file| std::fs::write(&path, file).map_err(|e| format!("{}: {e}", path.display())));
         self.status = Some(match result {
-            Ok(count) => (true, format!("Exported {base}.glb and {count} pictures to {}.", folder.display())),
+            Ok(()) => (true, format!("Exported {}.", path.display())),
             Err(message) => (false, message),
-        });
-    }
-
-    /// Reads PNG files that the user chooses (a folder with a PNG file named like each picture to change, or its
-    /// `textures` folder) and shows them on the model. Nothing is written to the game files or the SD card.
-    fn import_pictures(&mut self) {
-        let Some(folder) = rfd::FileDialog::new().set_title("Folder of the changed pictures").pick_folder() else { return };
-        let Some(loaded) = &mut self.loaded else { return };
-        let mut changed = Vec::new();
-        for texture in loaded.textures.iter_mut() {
-            let candidates = [folder.join(format!("{}.png", texture.name)), folder.join("textures").join(format!("{}.png", texture.name))];
-            let Some(path) = candidates.iter().find(|p| p.is_file()) else { continue };
-            match std::fs::read(path).map_err(|e| format!("{}: {e}", path.display())).and_then(|bytes| crate::model_export::texture_from_png(&texture.name, &bytes)) {
-                Ok(picture) => {
-                    *texture = picture;
-                    changed.push(texture.name.clone());
-                }
-                Err(message) => {
-                    self.status = Some((false, message));
-                    return;
-                }
-            }
-        }
-        for texture in &loaded.textures {
-            loaded.by_name.insert(texture.name.clone(), texture.clone());
-        }
-        self.forget_thumbnails();
-        self.dirty = true;
-        self.status = Some(if changed.is_empty() {
-            (false, format!("No PNG file named like a picture of the model in {}.", folder.display()))
-        } else {
-            (true, format!("{} picture(s) replaced in the view (the game files are not changed): {}.", changed.len(), changed.join(", ")))
         });
     }
 

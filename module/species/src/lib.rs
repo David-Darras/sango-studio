@@ -10,6 +10,7 @@ mod evolution;
 mod evolution_csv;
 mod examples;
 mod icon_files;
+mod cry_tab;
 mod icon_tab;
 mod icons;
 mod learnset;
@@ -215,6 +216,7 @@ pub struct Species {
     text: text_tab::TextTab,
     /// The state of the icon card of the General tab.
     icon_tab: icon_tab::IconTab,
+    cry_tab: cry_tab::CryTab,
     /// The state of the Model tab.
     model_tab: model_tab::ModelTab,
     /// The list of items (the rows and the pictures) that the fields of held items use.
@@ -255,6 +257,7 @@ impl Default for Species {
             evolution: evolution::EvolutionTab::default(),
             text: text_tab::TextTab::default(),
             icon_tab: icon_tab::IconTab::default(),
+            cry_tab: cry_tab::CryTab::default(),
             model_tab: model_tab::ModelTab::default(),
             item_list: Default::default(),
             tools: data_tools::Tools::default(),
@@ -860,9 +863,9 @@ impl Species {
                 .response
                 .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
-                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed()) {
+                if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
-                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() {
+                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() || self.cry_tab.from_card() {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
@@ -922,6 +925,8 @@ impl Species {
             } else if let Err(message) = self.text.save(sd) {
                 result = Err(message);
             } else if let Err(message) = self.icon_tab.save(sd) {
+                result = Err(message);
+            } else if let Err(message) = self.cry_tab.save(sd) {
                 result = Err(message);
             }
         }
@@ -2336,6 +2341,7 @@ impl Module for Species {
             self.evolution.open(&dump);
             self.text.open(&dump);
             self.icon_tab.open(&dump);
+            self.cry_tab.open(&dump);
             self.model_tab.open(&dump);
             battle_icons::load(&dump);
             if let Ok(mut list) = self.item_list.lock() {
@@ -2430,7 +2436,11 @@ impl Module for Species {
                 // The data leaves the page while the tab is drawn: the icon card can read the files again.
                 if let Some(mut data) = self.data.take() {
                     let mut shape = self.shape;
-                    general_tab(ui, &mut data, &mut shape, |ui| self.icon_tab.ui(ui, session, self.species, self.form));
+                    general_tab(ui, &mut data, &mut shape, |ui| {
+                        self.icon_tab.ui(ui, session, self.species, self.form);
+                        ui.add_space(8.0);
+                        self.cry_tab.ui(ui, session, self.species, self.form);
+                    });
                     if self.loaded.is_some() {
                         self.data = Some(data);
                         self.shape = shape;
