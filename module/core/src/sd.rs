@@ -32,6 +32,9 @@ const PUBLISHED: [&str; 17] = [
     "type/",
 ];
 
+/// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs).
+const CARD_ONLY: [&str; 1] = ["species/model/"];
+
 /// The places of the files in the older versions of the studio, and where they are now. A folder ends with `/`.
 const OLD_PLACES: [(&str, &str); 7] = [
     ("pokemon/data/", "species/data/"),
@@ -73,7 +76,7 @@ pub struct Erased {
     pub computer: (usize, u64),
     /// The files and the bytes of the folder of the studio on the SD card.
     pub card: (usize, u64),
-    /// The files and the bytes of the 3D models that the studio wrote on the SD card (`sango/pokemodel`).
+    /// The files and the bytes of the 3D models that the studio wrote on the SD card (`species/model`, inside the folder of the studio).
     pub models: (usize, u64),
 }
 
@@ -135,9 +138,10 @@ impl SdCard {
         &self.root
     }
 
-    /// The folder of the 3D models of the packs: `sango/pokemodel`, next to the folder of the studio (in the folder `sdmc` of the emulator).
-    pub fn models_folder(&self) -> Option<PathBuf> {
-        Some(self.root.parent()?.join("sango").join("pokemodel"))
+    /// The folder of the 3D models of the packs, in the folder of the studio of the SD card: `species/model`. The plugin reads the models
+    /// from there. They are only on the SD card.
+    pub fn models_folder(&self) -> PathBuf {
+        self.root.join("species").join("model")
     }
 
     /// What [`SdCard::erase_everything`] would remove.
@@ -148,10 +152,11 @@ impl SdCard {
             let bytes = found.iter().map(|file| std::fs::metadata(folder.join(file.trim_start_matches('/'))).map_or(0, |m| m.len())).sum();
             (found.len(), bytes)
         };
+        let (all, models) = (count(&self.root), count(&self.models_folder()));
         Erased {
             computer: if self.is_split() { count(&self.local) } else { (0, 0) },
-            card: count(&self.root),
-            models: self.models_folder().map_or((0, 0), |folder| count(&folder)),
+            card: (all.0 - models.0, all.1 - models.1),
+            models,
         }
     }
 
@@ -170,11 +175,6 @@ impl SdCard {
                 let path = entry.path();
                 let result = if entry.file_type().is_ok_and(|kind| kind.is_dir()) { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
                 result.map_err(|e| format!("{}: {e}", path.display()))?;
-            }
-        }
-        if let Some(models) = self.models_folder() {
-            if models.is_dir() {
-                std::fs::remove_dir_all(&models).map_err(|e| format!("{}: {e}", models.display()))?;
             }
         }
         ERASED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -200,10 +200,11 @@ impl SdCard {
     /// At each opening: the files that the studio wrote on the SD card before the workspace existed come to the computer, and the SD card
     /// keeps only the files that the plugin reads (all of them, as the computer has them).
     fn move_files_to_the_computer(&self) -> Result<(), String> {
+        self.move_the_old_models()?;
         let mut found = Vec::new();
         Self::collect(&self.root, "", &mut found);
         for relative in found.iter().map(|f| f.trim_start_matches('/').to_string()) {
-            if relative == ".sango_write_test" {
+            if relative == ".sango_write_test" || CARD_ONLY.iter().any(|prefix| relative.starts_with(prefix)) {
                 continue;
             }
             let (from, to) = (self.root.join(&relative), self.local.join(&relative));
@@ -234,6 +235,19 @@ impl SdCard {
                 }
                 std::fs::copy(&from, &to).map_err(|e| format!("{} to {}: {e}", from.display(), to.display()))?;
             }
+        }
+        Ok(())
+    }
+
+    /// The models that the older versions wrote in `sango/pokemodel` (next to the folder of the studio) come into the folder of the studio.
+    fn move_the_old_models(&self) -> Result<(), String> {
+        let Some(old) = self.root.parent().map(|sdmc| sdmc.join("sango").join("pokemodel")) else { return Ok(()) };
+        let new = self.models_folder();
+        if old.is_dir() && !new.exists() {
+            if let Some(folder) = new.parent() {
+                std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+            }
+            std::fs::rename(&old, &new).map_err(|e| format!("{} to {}: {e}", old.display(), new.display()))?;
         }
         Ok(())
     }
@@ -564,17 +578,32 @@ mod test {
         let sd = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
         sd.write("species/table.bin", b"table").unwrap();
         sd.write("species/registry.json", b"{}").unwrap();
-        fs::create_dir_all(card.join("sango/pokemodel")).unwrap();
-        fs::write(card.join("sango/pokemodel/0.raw"), b"models").unwrap();
+        fs::create_dir_all(card.join("sango-studio/species/model")).unwrap();
+        fs::write(card.join("sango-studio/species/model/0.raw"), b"models").unwrap();
         fs::create_dir_all(card.join("sango/maker")).unwrap();
         fs::write(card.join("sango/maker/names.bin"), b"names").unwrap();
         let before = erase_count();
         let counted = sd.count_everything();
         assert_eq!((counted.computer.0, counted.card.0, counted.models.0), (2, 1, 1));
         assert_eq!(sd.erase_everything().unwrap(), counted);
-        assert!(sd.files_in("species").is_empty() && !card.join("sango/pokemodel").exists());
+        assert!(sd.files_in("species").is_empty() && !card.join("sango-studio/species/model").exists());
         assert!(card.join("sango/maker/names.bin").exists(), "the other files of the plugin stay");
         assert!(sd.root().is_dir() && work.is_dir(), "the folders stay");
         assert_eq!(erase_count(), before + 1);
+    }
+
+    #[test]
+    fn the_models_stay_on_the_sd_card_and_an_older_folder_of_models_comes_in() {
+        let card = folder("models").join("sdmc");
+        fs::create_dir_all(card.join("sango/pokemodel")).unwrap();
+        fs::write(card.join("sango/pokemodel/0.raw"), b"models").unwrap();
+        let work = folder("models_work");
+        let sd = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
+        assert_eq!(fs::read(sd.models_folder().join("0.raw")).unwrap(), b"models", "the older folder moved in");
+        assert!(!card.join("sango/pokemodel").exists());
+        assert!(!work.join("species").exists(), "the models are not copied to the computer");
+        // The next opening does not copy them either.
+        let _again = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
+        assert!(!work.join("species/model").exists() && sd.models_folder().join("0.raw").is_file());
     }
 }

@@ -15,7 +15,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// Where the files of the models come from: the archive 8 of the game, or the folder `sango/pokemodel` of the SD card (the
+/// Where the files of the models come from: the archive 8 of the game, or the folder `species/model` of the SD card (the
 /// models of the packs, and the species of the game that a pack gave more models).
 pub trait Files {
     /// The file with this number. The file 0 is the list of the models.
@@ -28,7 +28,7 @@ impl Files for Garc {
     }
 }
 
-/// The model files that Studio wrote on the SD card for the packs (`sango/pokemodel`): the list `0.raw` and the files `<number>.pc`,
+/// The model files that Studio wrote on the SD card for the packs (`species/model`): the list `0.raw` and the files `<number>.pc`,
 /// each with its size (4 bytes) in front.
 pub struct SdModels {
     folder: PathBuf,
@@ -305,7 +305,7 @@ impl ModelTab {
         self.sd_root = root;
     }
 
-    /// Tells the tab where the model files of the packs are (`sango/pokemodel` of the SD card): they are read again when the
+    /// Tells the tab where the model files of the packs are (`species/model` of the SD card): they are read again when the
     /// folder changes or when `changed` is true (a pack was installed).
     pub fn set_sd_folder(&mut self, folder: Option<PathBuf>, changed: bool) {
         if self.sd_folder != folder || changed {
@@ -872,7 +872,7 @@ mod test {
         crate::extras::set_for_test(table);
 
         let mut tab = ModelTab::default();
-        tab.set_sd_folder(Some(sdmc.join("sango").join("pokemodel")), false);
+        tab.set_sd_folder(Some(sd.models_folder()), false);
         tab.open(&dump);
         let models = tab.models_of(724);
         assert_eq!(models.len(), 1, "the model of the species of the pack");

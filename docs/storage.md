@@ -18,9 +18,10 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `leveling_rate/<rate>.bin` | The experience tables (archive 194). | yes |
 | `game_text/<language>/<file>.bin` | The texts that you changed (archives 71 to 78): `ja`, `ja_kanji`, `en`, `fr`, `it`, `de`, `es`, `ko`. | yes |
 | `ability/`, `move/data/`, `move/custom/`, `item/data/`, `item/custom/`, `type/` | The new and the changed abilities, moves, items and types. | yes |
+| `species/model/` | The 3D models of the packs: the list `0.raw`, `index.bin` and the files `<n>.pc` (8 for each model). Made again from the packs. | yes, and only there |
 | `code/`, `move/code/` | The code of the Code page. | no |
 | `reload.bin` | The counter that tells the plugin that a file changed. | yes |
 
-The models of the packs go to `sango/pokemodel` of the SD card, next to the folder `sango-studio`: the plugin reads them from there.
+All that the studio writes is in the folder `sango-studio`, the 3D models too (they are only on the SD card, not on the computer). The older models in `sango/pokemodel` move in at the next opening.
 
 When the studio opens the SD card, the files that older versions wrote there come to the workspace and get their new place (`pokemon/data` is now `species/data`, `pokemon/experience` is `leveling_rate`, `text` is `game_text`, the files by species and form of the moves and of the evolutions get the number of their file), and the SD card keeps only the files of the list above.

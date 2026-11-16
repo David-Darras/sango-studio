@@ -228,9 +228,7 @@ impl Home {
                 ui.label(line("On the SD card", count.card));
                 ui.label(widget::hint(&format!("({})", sd.root().display())));
                 ui.label(line("3D models on the SD card", count.models));
-                if let Some(models) = sd.models_folder() {
-                    ui.label(widget::hint(&format!("({})", models.display())));
-                }
+                ui.label(widget::hint(&format!("({})", sd.models_folder().display())));
                 ui.add_space(6.0);
                 ui.checkbox(&mut self.understood, "I understand that this cannot be undone: the packs have to be installed again.");
                 ui.add_space(4.0);

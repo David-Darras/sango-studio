@@ -230,7 +230,7 @@ mod test {
         let message = run(sdmc.join("sango-studio").to_str().unwrap(), &dump_root, &request).unwrap();
         assert!(message.starts_with("Imported"), "{message}");
 
-        let models = crate::model_tab::SdModels::open(&sdmc.join("sango").join("pokemodel")).unwrap();
+        let models = crate::model_tab::SdModels::open(&sd.models_folder()).unwrap();
         let carrier = crate::model_tab::variants_of_sd(&models, 494);
         // The model of the pack that was replaced keeps its slot (the second one); the imported model has the next one.
         let own = carrier.first().expect("the carrier has its own model");
@@ -245,13 +245,13 @@ mod test {
         let request = Request::ImportGame { file: glb, species: 3, slot: 0, model_name: "pm0003_80".into(), scale: 1.0 };
         run(sd_root.to_str().unwrap(), &dump_root, &request).unwrap();
         // The index of the files has one entry for each file: a replaced file must not be there two times.
-        let index = std::fs::read(sdmc.join("sango").join("pokemodel").join("index.bin")).unwrap();
+        let index = std::fs::read(sd.models_folder().join("index.bin")).unwrap();
         let count = u32::from_le_bytes(index[..4].try_into().unwrap()) as usize;
         let ids: Vec<u32> = (0..count).map(|i| u32::from_le_bytes(index[4 + 8 * i..8 + 8 * i].try_into().unwrap())).collect();
         let mut unique = ids.clone();
         unique.dedup();
         assert_eq!(ids, unique, "the index lists a file two times");
-        let models = crate::model_tab::SdModels::open(&sdmc.join("sango").join("pokemodel")).unwrap();
+        let models = crate::model_tab::SdModels::open(&sd.models_folder()).unwrap();
         let venusaur = crate::model_tab::variants_of_sd(&models, 3);
         // The files of the models of the game that Studio copies are not compressed: the plugin compresses them for the game.
         for slot in &venusaur[1..3] {

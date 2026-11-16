@@ -232,7 +232,7 @@ mod test {
         let _ = std::fs::remove_dir_all(&outer);
     }
 
-    /// With the dump of the game: the models of a pack go to `sango/pokemodel`, in the form that the plugin reads.
+    /// With the dump of the game: the models of a pack go to `species/model`, in the form that the plugin reads.
     #[test]
     fn the_models_of_a_pack_are_written_where_the_plugin_reads_them() {
         let Ok(root) = std::env::var("SANGO_DUMP") else { return };
@@ -263,7 +263,7 @@ mod test {
         let table = Table::from_bytes(&sd.read(library::TABLE_PATH).unwrap()).unwrap();
         assert_eq!((table.species[0].model_form, table.species[1].model_form, table.forms[0].model_form), (1, 2, 1));
         // The files: the list, the index and the files of the slots.
-        let folder = sdmc.join("sango/pokemodel");
+        let folder = sd.models_folder();
         let raw = std::fs::read(folder.join("0.raw")).unwrap();
         assert_eq!(u32::from_le_bytes(raw[..4].try_into().unwrap()) as usize, raw.len() - 4);
         // The list has an entry for each slot, the new ones too: 722 species of 4 bytes, then 2 bytes for each slot.
@@ -307,7 +307,7 @@ mod test {
         assert_eq!(&v_file(1, 0)[4..], plain((game_first + 1) * 8 + 3).as_slice(), "the models of the game are copied, not compressed");
         // A model of a removed pack has its place but no files.
         library.remove("modeled").unwrap();
-        assert_eq!(library.write_models(&sdmc, &dump).unwrap(), 0);
+        assert_eq!(library.write_models(&sd.models_folder(), &dump).unwrap(), 0);
         let _ = std::fs::remove_dir_all(&outer);
     }
 }

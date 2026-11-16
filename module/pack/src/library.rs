@@ -8,7 +8,7 @@
 //! | `packs/<id>.sangopack` | a copy of each installed pack, with its models |
 //! | `table.bin` | the table that the plugin reads (see [`crate::table`]) |
 //!
-//! The models of the packs go to `sango/pokemodel` of the SD card (beside `sango-studio`), in the form that the plugin reads:
+//! The models of the packs go to `species/model` of the folder of the studio of the SD card, in the form that the plugin reads:
 //! see [`Library::write_models`].
 //!
 //! A number never changes. A removed pack keeps its places in the registry: the species and the forms of the pack stay in the
@@ -427,7 +427,7 @@ impl Library {
         sd.mark_changed(TABLE_PATH)
     }
 
-    /// Writes the models of the active packs in `sango/pokemodel` (in `sdmc`, the folder of the SD card), where the plugin
+    /// Writes the models of the active packs in `folder` (`species/model` of the SD card, see `SdCard::models_folder`), where the plugin
     /// reads them. Gives the number of models written.
     ///
     /// The plugin reads a model of a Pokémon as 8 files of the archive 8, and the file 0 of the archive is the list that
@@ -443,8 +443,8 @@ impl Library {
     ///
     /// The folder is made again each time: the files that were there are removed. A model of a pack that was removed has
     /// its slot but no files.
-    pub fn write_models(&self, sdmc: &Path, dump: &Dump) -> Result<usize, String> {
-        let folder = sdmc.join("sango").join("pokemodel");
+    pub fn write_models(&self, folder: &Path, dump: &Dump) -> Result<usize, String> {
+        let folder = folder.to_path_buf();
         let replacements: Vec<(&Pack, &ModelReplacement)> = self.packs.iter().filter(|p| self.is_active(&p.id)).flat_map(|p| p.replacements.iter().map(move |r| (p, r))).collect();
         if self.registry.models.is_empty() && self.registry.forms.iter().all(|f| f.slots == 0) && replacements.is_empty() {
             return Ok(0);
@@ -608,7 +608,6 @@ impl Library {
     /// [`Library::write_models`]).
     pub fn apply(&mut self, sd: &SdCard, dump: &Dump) -> Result<usize, String> {
         self.save(sd)?;
-        let sdmc = sd.root().parent().ok_or("The folder of the SD card has no parent.")?;
-        self.write_models(sdmc, dump)
+        self.write_models(&sd.models_folder(), dump)
     }
 }

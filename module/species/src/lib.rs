@@ -2310,7 +2310,7 @@ impl Module for Species {
             self.list_rows = None;
             self.loaded = None;
         }
-        let models_folder = session.sd.as_ref().and_then(|sd| sd.root().parent()).map(|sdmc| sdmc.join("sango").join("pokemodel"));
+        let models_folder = session.sd.as_ref().map(|sd| sd.models_folder());
         self.model_tab.set_sd_folder(models_folder, packs_changed);
         self.model_tab.set_sd_root(session.sd.as_ref().map(|sd| sd.root().to_string_lossy().to_string()));
         // Another page asked for a species.
