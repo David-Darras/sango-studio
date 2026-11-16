@@ -32,6 +32,8 @@ pub struct Packs {
     /// The folder of the SD card that the library was read from.
     root: Option<PathBuf>,
     library: Library,
+    /// How many times the files were all erased when the library was read.
+    erased: u32,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
     job: Option<Job>,
@@ -261,7 +263,8 @@ impl Module for Packs {
         }
         let session: &Session = session;
         let Some(sd) = session.sd.as_ref() else { return };
-        if self.root.as_deref() != Some(sd.root()) {
+        if self.root.as_deref() != Some(sd.root()) || self.erased != sango_core::erase_count() {
+            self.erased = sango_core::erase_count();
             self.load(sd);
         }
         self.poll(ui.ctx(), sd);

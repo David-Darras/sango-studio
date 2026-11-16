@@ -59,7 +59,7 @@ pub const LANGUAGES: [Language; 8] = [
 /// The place on the SD card of a file of texts, for a language (0 to 7) and the number of the file in the
 /// archive. The file has the layout of the romfs.
 pub fn sd_path(language: usize, file: usize) -> String {
-    format!("text/{}/{file}.bin", LANGUAGES[language].folder)
+    format!("game_text/{}/{file}.bin", LANGUAGES[language].folder)
 }
 
 /// The line that starts a tag.

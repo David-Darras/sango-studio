@@ -8,11 +8,11 @@
 //!
 //! | Part | Folder or file of the SD card |
 //! | --- | --- |
-//! | Data | `pokemon/data`, `pokemon/pokedex_data.bin` |
-//! | Moves | `pokemon/learnset`, `pokemon/egg_moves` |
-//! | Evolutions | `pokemon/evolution` |
+//! | Data | `species/data`, `species/pokedex_data.bin` |
+//! | Moves | `species/level_up_moves`, `species/egg_moves` |
+//! | Evolutions | `species/evolution` |
 //! | Texts | `text` |
-//! | Icons | `pokemon/icon` |
+//! | Icons | `species/icon` |
 
 use crate::pokedex_data::{self, PokedexData};
 use crate::text_csv;
@@ -68,13 +68,12 @@ impl Part {
     /// The folders of the SD card that the part uses.
     fn folders(self) -> &'static [&'static str] {
         match self {
-            Part::Data => &["pokemon/data"],
-            // The copies that the plugin reads (see `sango_core::archive_files`) go with the files that they come from.
-            Part::Moves => &["pokemon/learnset", "pokemon/egg_moves", "archive/191", "archive/190"],
-            Part::Evolutions => &["pokemon/evolution", "archive/192"],
-            Part::Texts => &["text", "archive/71", "archive/72", "archive/73", "archive/74", "archive/75", "archive/76", "archive/77", "archive/78"],
-            Part::Icons => &["pokemon/icon"],
-            Part::Cries => &["archive/100"],
+            Part::Data => &["species/data"],
+            Part::Moves => &["species/level_up_moves", "species/egg_moves"],
+            Part::Evolutions => &["species/evolution"],
+            Part::Texts => &["game_text"],
+            Part::Icons => &["species/icon"],
+            Part::Cries => &["species/cry"],
         }
     }
 
@@ -143,7 +142,7 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
     for part in parts {
         match (part, scope) {
             (Part::Data, Scope::All) => {
-                remove(sd.files_in("pokemon/data"))?;
+                remove(sd.files_in("species/data"))?;
                 remove(vec![pokedex_data::SD_PATH.to_string()])?;
             }
             (Part::Data, _) => {
@@ -151,31 +150,24 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
                 reset_shapes(sd, species, &forms, library)?;
             }
             (Part::Moves, Scope::All) => {
-                remove(sd.files_in("pokemon/learnset"))?;
-                remove(sd.files_in("pokemon/egg_moves"))?;
-                sango_core::archive_files::clear(sd, learnset::LEVEL_UP_ARCHIVE)?;
+                remove(sd.files_in("species/level_up_moves"))?;
+                remove(sd.files_in("species/egg_moves"))?;
             }
             (Part::Moves, _) => {
-                remove(forms.iter().map(|&f| learnset::level_up_sd_path(species, f)).collect())?;
-                for &f in forms.iter().filter(|_| species <= crate::SPECIES.len()) {
-                    sango_core::archive_files::remove(sd, learnset::LEVEL_UP_ARCHIVE, crate::file_index(library.species, species, f))?;
-                }
+                // A species of a pack has no file in the archive.
+                remove(forms.iter().filter(|_| species <= crate::SPECIES.len()).map(|&f| learnset::level_up_sd_path(crate::file_index(library.species, species, f))).collect())?;
                 // The egg moves belong to the species: the first form takes them with it.
                 if forms.contains(&0) {
                     remove(vec![learnset::egg_sd_path(species)])?;
                 }
             }
             (Part::Evolutions, Scope::All) => {
-                remove(sd.files_in("pokemon/evolution"))?;
-                sango_core::archive_files::clear(sd, evolution::ARCHIVE)?;
+                remove(sd.files_in("species/evolution"))?;
             }
             (Part::Evolutions, _) => {
-                remove(forms.iter().map(|&f| evolution::sd_path(species, f)).collect())?;
-                for &f in forms.iter().filter(|_| species <= crate::SPECIES.len()) {
-                    sango_core::archive_files::remove(sd, evolution::ARCHIVE, crate::file_index(library.species, species, f))?;
-                }
+                remove(forms.iter().filter(|_| species <= crate::SPECIES.len()).map(|&f| evolution::sd_path(crate::file_index(library.species, species, f))).collect())?;
             }
-            (Part::Icons, Scope::All) => remove(sd.files_in("pokemon/icon"))?,
+            (Part::Icons, Scope::All) => remove(sd.files_in("species/icon"))?,
             (Part::Icons, _) => {
                 let files: BTreeSet<usize> = forms.iter().flat_map(|&f| [false, true].into_iter().filter_map(move |female| icon_tab::icon_file(species, f, female))).collect();
                 remove(files.into_iter().map(icon_tab::sd_path).collect())?;
@@ -186,12 +178,10 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
                 }
             }
             (Part::Texts, _) => reset_texts(sd, species, &forms, library)?,
-            (Part::Cries, Scope::All) => sango_core::archive_files::clear(sd, sango_cry::ARCHIVE)?,
+            (Part::Cries, Scope::All) => remove(sd.files_in("species/cry"))?,
             (Part::Cries, _) => {
                 let waves: BTreeSet<u32> = forms.iter().flat_map(|&f| (0..sango_cry::table::KINDS.len()).filter_map(move |kind| sango_cry::table::voice(species, f, kind))).map(|voice| voice.wave).collect();
-                for wave in waves {
-                    sango_core::archive_files::remove(sd, sango_cry::ARCHIVE, wave as usize)?;
-                }
+                remove(waves.into_iter().map(crate::cry_tab::cry_path).collect())?;
             }
         }
     }
@@ -522,7 +512,7 @@ impl Species {
                     let (species, form) = name.split_once('_')?;
                     garc.first_file(crate::file_index(garc, species.parse().ok()?, form.parse().ok()?)).map(|bytes| bytes.to_vec())
                 };
-                sango_core::modified::remove_unchanged(sd, "pokemon/data", &romfs)?;
+                sango_core::modified::remove_unchanged(sd, "species/data", &romfs)?;
                 Ok(report.written + report.shape_written as usize)
             }
             Part::Moves => self.learnset.csv_import(sd, text),
@@ -556,18 +546,18 @@ mod test {
         let rom_pokedex = Garc::open(&dump.archive(pokedex_data::ARCHIVE)).ok().and_then(|g| g.first_file(pokedex_data::FILE).and_then(|b| PokedexData::from_bytes(b.to_vec()).ok()));
         let library = RomLibrary { species: &species, pokedex: rom_pokedex.as_ref(), texts: &texts };
         let sd = card("reset");
-        for file in ["pokemon/data/1_0.bin", "pokemon/data/2_0.bin", "pokemon/learnset/1_0.bin", "pokemon/learnset/2_0.bin", "pokemon/evolution/1_0.bin"] {
+        for file in ["species/data/1_0.bin", "species/data/2_0.bin", "species/level_up_moves/1.bin", "species/level_up_moves/2.bin", "species/evolution/1.bin"] {
             sd.write(file, b"x").unwrap();
         }
         // The data of one form only.
         reset(&sd, Scope::Form, &[Part::Data], 1, 0, &library).unwrap();
-        assert!(sd.read("pokemon/data/1_0.bin").is_none());
-        assert!(sd.read("pokemon/data/2_0.bin").is_some());
-        assert!(sd.read("pokemon/learnset/1_0.bin").is_some(), "the moves are another part");
+        assert!(sd.read("species/data/1_0.bin").is_none());
+        assert!(sd.read("species/data/2_0.bin").is_some());
+        assert!(sd.read("species/level_up_moves/1.bin").is_some(), "the moves are another part");
         // The moves of all the species.
         reset(&sd, Scope::All, &[Part::Moves], 1, 0, &library).unwrap();
-        assert!(sd.files_in("pokemon/learnset").is_empty());
-        assert!(sd.read("pokemon/data/2_0.bin").is_some());
+        assert!(sd.files_in("species/level_up_moves").is_empty());
+        assert!(sd.read("species/data/2_0.bin").is_some());
         // A text of one species goes back, the others stay.
         let mut file = TextFile::from_bytes(texts(2, 98).unwrap().to_bytes().as_slice()).unwrap();
         file.set_text(1, "Changed").unwrap();

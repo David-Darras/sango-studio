@@ -43,32 +43,7 @@ pub fn has_female_icon(species: usize) -> bool {
 
 /// The place on the SD card of an icon file.
 pub fn sd_path(file: usize) -> String {
-    format!("pokemon/icon/{file}.bin")
-}
-
-/// The path of the list of the icon files: the plugin reads it to know which icons of the game the SD card replaces.
-pub const INDEX_PATH: &str = "pokemon/icon/index.bin";
-
-/// Writes the list of the icon files of the SD card: the number of files, then the number and the size of each, sorted by number.
-pub fn write_index(sd: &SdCard) -> Result<(), String> {
-    let folder = sd.path("pokemon/icon")?;
-    let mut files: Vec<(u32, u32)> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&folder) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            let Some(number) = name.strip_suffix(".bin").and_then(|n| n.parse::<u32>().ok()) else { continue };
-            let size = entry.metadata().map_err(|e| format!("{}: {e}", name))?.len();
-            files.push((number, size as u32));
-        }
-    }
-    files.sort_unstable();
-    let mut bytes = (files.len() as u32).to_le_bytes().to_vec();
-    for (number, size) in &files {
-        bytes.extend_from_slice(&number.to_le_bytes());
-        bytes.extend_from_slice(&size.to_le_bytes());
-    }
-    sd.write(INDEX_PATH, &bytes)?;
-    sd.mark_changed(INDEX_PATH)
+    format!("species/icon/{file}.bin")
 }
 
 /// The state of the icon card.
@@ -140,9 +115,6 @@ impl IconTab {
             self.pending.remove(&file);
             self.from_card.insert(file);
             written.push(path);
-        }
-        if !written.is_empty() {
-            write_index(sd)?;
         }
         Ok(written)
     }
@@ -265,7 +237,7 @@ impl IconTab {
             let path = sd_path(file);
             match sd.remove(&path) {
                 Ok(true) => {
-                    if let Err(message) = sd.mark_changed(&path).and_then(|_| write_index(sd)) {
+                    if let Err(message) = sd.mark_changed(&path) {
                         return (false, message);
                     }
                 }
@@ -319,7 +291,7 @@ mod test {
         assert!(!has_female_icon(1));
         assert_eq!(icon_file(0, 0, false), Some(ICON_FILES[0] as usize));
         assert_eq!(icon_file(9999, 0, false), None);
-        assert_eq!(sd_path(7), "pokemon/icon/7.bin");
+        assert_eq!(sd_path(7), "species/icon/7.bin");
     }
 
     #[test]
@@ -395,19 +367,5 @@ mod test {
         again.reload();
         assert!(!again.from_card() && !again.changed());
         let _ = std::fs::remove_dir_all(&folder);
-    }
-
-    #[test]
-    fn the_list_of_the_icon_files_is_written_for_the_plugin() {
-        let outer = std::env::temp_dir().join(format!("sango_icon_index_{}", std::process::id()));
-        std::fs::create_dir_all(outer.join("sango-studio")).unwrap();
-        let sd = SdCard::open(outer.to_str().unwrap()).unwrap();
-        sd.write(&sd_path(40), &[1; 10]).unwrap();
-        sd.write(&sd_path(7), &[2; 20]).unwrap();
-        write_index(&sd).unwrap();
-        let bytes = sd.read(INDEX_PATH).unwrap();
-        let numbers: Vec<u32> = bytes.chunks(4).map(|c| u32::from_le_bytes(c.try_into().unwrap())).collect();
-        assert_eq!(numbers, vec![2, 7, 20, 40, 10], "two files, sorted by number, with their sizes");
-        let _ = std::fs::remove_dir_all(&outer);
     }
 }

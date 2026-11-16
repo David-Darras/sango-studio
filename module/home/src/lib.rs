@@ -35,6 +35,10 @@ pub struct Home {
     plugin: Field,
     /// True once the fields took the folders of the session.
     filled: bool,
+    /// The card "Start from zero": the user asked and did not answer yet, the box of the answer, and what happened.
+    asking: bool,
+    understood: bool,
+    erased: Option<(bool, String)>,
 }
 
 /// Draws a card with a folder: a title, an explanation, the field, and the state.
@@ -148,7 +152,7 @@ impl Home {
         let apply = folder_card(
             ui,
             "SD card folder",
-            &format!("The folder {SD_FOLDER_NAME} in the sdmc folder of the emulator or of the console. The files that you change go here, and the game loads them again while it runs."),
+            &format!("The folder {SD_FOLDER_NAME} in the sdmc folder of the emulator or of the console. Only the files that the plugin reads go here (the data that you change, the icons, the texts, the cries), and the game loads them again while it runs. The other files of the studio stay on this computer."),
             &format!("C:\\...\\sdmc\\{SD_FOLDER_NAME}"),
             "Folder of the SD card",
             &mut self.sd,
@@ -156,6 +160,14 @@ impl Home {
         );
         if apply {
             self.sd.error = session.set_sd(&self.sd.text).err();
+        }
+        if let Some(sd) = session.sd.as_ref().filter(|sd| sd.is_split()) {
+            ui.add_space(4.0);
+            ui.label(widget::hint(&format!("The files of the studio on this computer (the packs, the files by species, the code): {}", sd.local().display())));
+        }
+        if let Some(sd) = session.sd.clone() {
+            ui.add_space(12.0);
+            self.zero_card(ui, &sd);
         }
 
         ui.add_space(12.0);
@@ -189,6 +201,59 @@ impl Home {
         if apply {
             self.plugin.error = session.set_plugin(&self.plugin.text).err();
         }
+    }
+}
+
+impl Home {
+    /// The card that removes all the files of the studio, to start again from zero.
+    fn zero_card(&mut self, ui: &mut egui::Ui, sd: &sango_core::SdCard) {
+        widget::card(ui, |ui| {
+            ui.set_width(680.0_f32.min(ui.available_width()));
+            ui.label(widget::title("Start from zero"));
+            ui.label(widget::hint("Removes all the files of the studio: the changes that you made, the installed packs, the 3D models, the cries, the texts. The game goes back to its own data. The dump of the game, the settings of the program and the other files of the plugin (the maps, the names) stay."));
+            ui.add_space(6.0);
+            if !self.asking {
+                if widget::button(ui, "Start from zero…") {
+                    self.asking = true;
+                    self.understood = false;
+                    self.erased = None;
+                }
+            } else {
+                let count = sd.count_everything();
+                let line = |what: &str, (files, bytes): (usize, u64)| format!("{what}: {files} files, {:.1} MB", bytes as f64 / 1_048_576.0);
+                if sd.is_split() {
+                    ui.label(line("On this computer", count.computer));
+                    ui.label(widget::hint(&format!("({})", sd.local().display())));
+                }
+                ui.label(line("On the SD card", count.card));
+                ui.label(widget::hint(&format!("({})", sd.root().display())));
+                ui.label(line("3D models on the SD card", count.models));
+                if let Some(models) = sd.models_folder() {
+                    ui.label(widget::hint(&format!("({})", models.display())));
+                }
+                ui.add_space(6.0);
+                ui.checkbox(&mut self.understood, "I understand that this cannot be undone: the packs have to be installed again.");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(self.understood, |ui| {
+                        if widget::button_styled(ui, egui::RichText::new("Erase everything").color(color::WHITE), Some(color::ROSE)) {
+                            self.erased = Some(match sd.erase_everything() {
+                                Ok(done) => (true, format!("Done: {} files removed on the computer, {} on the SD card, {} models. Restart the game.", done.computer.0, done.card.0, done.models.0)),
+                                Err(message) => (false, message),
+                            });
+                            self.asking = false;
+                        }
+                    });
+                    if widget::button(ui, "Cancel") {
+                        self.asking = false;
+                    }
+                });
+            }
+            if let Some((ok, message)) = &self.erased {
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }));
+            }
+        });
     }
 }
 

@@ -1,7 +1,7 @@
 //! The species editor: one form for the data of a species or of a form.
 //!
 //! The data comes from the archive 195 of the romfs. The file of the SD card
-//! `pokemon/data/<species>_<form>.bin` takes the place of the romfs when it exists.
+//! `species/data/<species>_<form>.bin` takes the place of the romfs when it exists.
 
 mod csv;
 mod data_tools;
@@ -20,7 +20,7 @@ pub mod battle_icons;
 pub mod custom_moves;
 mod model_export;
 mod model_import;
-mod plugin_files;
+mod old_layout;
 mod model_tab;
 mod move_names;
 mod pokedex_data;
@@ -153,7 +153,7 @@ fn game_data(garc: &Garc, species: usize, form: usize) -> Option<SpeciesData> {
 
 /// The path in the SD card folder of the file of a species and a form.
 fn sd_path(species: usize, form: usize) -> String {
-    format!("pokemon/data/{species}_{form}.bin")
+    format!("species/data/{species}_{form}.bin")
 }
 
 /// The name in a list from a number. The first number of the list is `first`.
@@ -363,14 +363,17 @@ fn modified_species(garc: Option<&Garc>, session: &Session) -> std::collections:
     };
     let mut found = std::collections::HashSet::new();
     let mut note = |names: Vec<String>| found.extend(names.iter().filter_map(|name| name.split('_').next()?.parse::<usize>().ok()));
-    note(sango_core::modified::changed_files(sd, "pokemon/data", &|name| garc.first_file(form_file(name)?).map(|bytes| bytes.to_vec())));
-    for (folder, archive) in [("pokemon/learnset", sango_core::learnset::LEVEL_UP_ARCHIVE), ("pokemon/evolution", sango_core::evolution::ARCHIVE)] {
+    note(sango_core::modified::changed_files(sd, "species/data", &|name| garc.first_file(form_file(name)?).map(|bytes| bytes.to_vec())));
+    // The files of the moves and of the evolutions are named by the place of the form in the archive: this finds the species of a place.
+    let species_of_file: std::collections::HashMap<usize, usize> = (1..=SPECIES_COUNT).flat_map(|species| (0..csv::form_count(garc, species)).map(move |form| (file_index(garc, species, form), species))).collect();
+    for (folder, archive) in [("species/level_up_moves", sango_core::learnset::LEVEL_UP_ARCHIVE), ("species/evolution", sango_core::evolution::ARCHIVE)] {
         if let Ok(other) = Garc::open(&dump.archive(archive)) {
-            note(sango_core::modified::changed_files(sd, folder, &|name| other.first_file(form_file(name)?).map(|bytes| bytes.to_vec())));
+            let names = sango_core::modified::changed_files(sd, folder, &|name| other.first_file(name.parse().ok()?).map(|bytes| bytes.to_vec()));
+            note(names.iter().filter_map(|name| species_of_file.get(&name.parse::<usize>().ok()?).map(|species| species.to_string())).collect());
         }
     }
     if let Ok(eggs) = Garc::open(&dump.archive(sango_core::learnset::EGG_ARCHIVE)) {
-        note(sango_core::modified::changed_files(sd, "pokemon/egg_moves", &|name| eggs.first_file(name.parse().ok()?).map(|bytes| bytes.to_vec())));
+        note(sango_core::modified::changed_files(sd, "species/egg_moves", &|name| eggs.first_file(name.parse().ok()?).map(|bytes| bytes.to_vec())));
     }
     found
 }
@@ -2348,9 +2351,9 @@ impl Module for Species {
                 list.open(&dump);
             }
             self.icon_textures.clear();
-            // The files that were written before the plugin read them by number get their copy.
+            // The files that older versions wrote by species and form get the number of their file.
             if let (Some(sd), Some(garc)) = (session.sd.as_ref(), self.garc.as_ref()) {
-                if let Err(message) = plugin_files::sync(sd, garc) {
+                if let Err(message) = old_layout::migrate(sd, garc) {
                     self.status = Some((false, message));
                 }
             }

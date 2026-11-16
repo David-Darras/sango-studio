@@ -386,7 +386,7 @@ mod test {
         // The name of the Bag goes back with the reset of the id, and the file is the romfs file again.
         reset_ability(&sd, 1, &romfs).unwrap();
         assert!(export(&library).contains("\n1,name,fr,Puanteur\n"));
-        assert!(sd.files_in("text").is_empty());
+        assert!(sd.files_in("game_text").is_empty());
 
         assert!(parse("species,form\n").is_err());
         assert!(parse(&format!("{HEADER}\n1,name,xx,Stench\n")).unwrap_err().starts_with("Line 2, column language"));

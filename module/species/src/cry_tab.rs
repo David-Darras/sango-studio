@@ -2,10 +2,9 @@
 //! file (WAV or MP3).
 //!
 //! A cry is two files of the archive 100 (see `sango_cry`). The studio replaces the wave archive: it writes it on the SD card as
-//! `archive/100/<file>.bin`, where the plugin reads it in place of the file of the game. Some cries share their file: a change shows for all
+//! `species/cry/<file>.bin`, where the plugin reads it in place of the file of the game. Some cries share their file: a change shows for all
 //! of them.
 
-use sango_core::archive_files;
 use sango_core::{Dump, Garc, SdCard};
 use sango_cry::table::{self, Voice, KINDS};
 use sango_cry::{archive, sound, Sound, ARCHIVE};
@@ -14,6 +13,11 @@ use sango_ui::{egui, widget, Session};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+
+/// The place of the wave archive of a cry on the SD card: the plugin reads it in place of the file of the game.
+pub fn cry_path(file: u32) -> String {
+    format!("species/cry/{file}.bin")
+}
 
 /// The rate of the sounds of the game: an imported sound is brought to it.
 const RATE: u32 = 32728;
@@ -68,7 +72,7 @@ impl CryTab {
         if let Some(bytes) = self.pending.get(&file) {
             return Some(bytes.clone());
         }
-        if let Some(bytes) = sd.and_then(|sd| sd.read(&archive_files::path(ARCHIVE, file as usize))).filter(|bytes| archive::read_archive(bytes).is_ok()) {
+        if let Some(bytes) = sd.and_then(|sd| sd.read(&cry_path(file))).filter(|bytes| archive::read_archive(bytes).is_ok()) {
             self.from_card.insert(file);
             return Some(bytes);
         }
@@ -90,7 +94,7 @@ impl CryTab {
         let mut files: Vec<u32> = self.pending.keys().copied().collect();
         files.sort_unstable();
         for file in files {
-            archive_files::write(sd, ARCHIVE, file as usize, &self.pending[&file])?;
+            sd.write(&cry_path(file), &self.pending[&file])?;
             self.pending.remove(&file);
             self.from_card.insert(file);
         }
@@ -242,7 +246,7 @@ impl CryTab {
         self.from_card.remove(&file);
         self.shown = None;
         if let Some(sd) = sd {
-            if let Err(message) = archive_files::remove(sd, ARCHIVE, file as usize) {
+            if let Err(message) = sd.remove(&cry_path(file)).map(|_| ()) {
                 return (false, message);
             }
         }
@@ -278,11 +282,11 @@ mod test {
         assert!(tab.changed());
         tab.save(&sd).unwrap();
         assert!(!tab.changed() && tab.from_card());
-        let written = sd.read(&archive_files::path(ARCHIVE, 3776)).unwrap();
+        let written = sd.read(&cry_path(3776)).unwrap();
         let back = archive::read_archive(&written).unwrap();
         assert_eq!(back.rate, RATE);
         assert!((back.seconds() - 0.5).abs() < 0.01);
-        let list = sd.read("archive/100/index.bin").unwrap();
+        let list = sd.read("species/cry/index.bin").unwrap();
         assert_eq!(u32::from_le_bytes(list[..4].try_into().unwrap()), 1);
         // A sound that is too long is refused.
         let long = sound::write_wav(&Sound { rate: 8000, samples: vec![0; 8000 * 4] });
@@ -290,7 +294,7 @@ mod test {
         assert!(tab.import(&file, 3776).unwrap_err().contains("seconds"));
         // The reset removes the file and the entry of the list.
         assert!(tab.reset(Some(&sd), 3776).0);
-        assert!(sd.read(&archive_files::path(ARCHIVE, 3776)).is_none());
+        assert!(sd.read(&cry_path(3776)).is_none());
         let _ = std::fs::remove_dir_all(&outer);
     }
 }

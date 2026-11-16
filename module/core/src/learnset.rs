@@ -21,14 +21,14 @@ pub const MAX_LEVEL_UP_MOVES: usize = 26;
 /// The end of a file of level-up moves.
 const END: u16 = 0xFFFF;
 
-/// The place on the SD card of the level-up moves of a species and a form.
-pub fn level_up_sd_path(species: usize, form: usize) -> String {
-    format!("pokemon/learnset/{species}_{form}.bin")
+/// The place on the SD card of the level-up moves of a species and a form: `file` is the place of the form in the archive.
+pub fn level_up_sd_path(file: usize) -> String {
+    format!("species/level_up_moves/{file}.bin")
 }
 
 /// The place on the SD card of the egg moves of a species.
 pub fn egg_sd_path(species: usize) -> String {
-    format!("pokemon/egg_moves/{species}.bin")
+    format!("species/egg_moves/{species}.bin")
 }
 
 /// A move that is learned at a level.

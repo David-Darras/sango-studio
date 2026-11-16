@@ -6,7 +6,6 @@ mod dump;
 mod sd;
 mod setting;
 
-pub mod archive_files;
 pub mod backup;
 pub mod bundle;
 pub mod clim;
@@ -16,6 +15,7 @@ pub mod custom_item;
 pub mod custom_type;
 pub mod evolution;
 pub mod experience;
+pub mod file_lists;
 pub mod garc;
 pub mod item_icons;
 pub mod learnset;
@@ -33,7 +33,7 @@ pub use bundle::Bundle;
 pub use clim::Clim;
 pub use dump::Dump;
 pub use garc::Garc;
-pub use sd::{SdCard, SD_FOLDER_NAME};
+pub use sd::{default_workspace, erase_count, set_workspace, Erased, SdCard, SD_FOLDER_NAME};
 
 /// The name of the application.
 pub const NAME: &str = "Sango Studio";

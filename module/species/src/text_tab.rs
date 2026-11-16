@@ -284,7 +284,7 @@ mod test {
 
         // Only the file that changed is written, and it comes back.
         let written = tab.save(&sd).unwrap();
-        assert_eq!(written, ["text/fr/98.bin"]);
+        assert_eq!(written, ["game_text/fr/98.bin"]);
         assert!(!tab.changed() && tab.from_card());
         assert_eq!(tab.save(&sd).unwrap(), Vec::<String>::new());
         let mut again = TextTab::default();

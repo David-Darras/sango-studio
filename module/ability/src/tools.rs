@@ -39,7 +39,7 @@ impl Default for Tools {
 
 /// Copies the files of texts.
 fn snapshot(sd: &SdCard, label: String) -> Backup {
-    Backup::snapshot(sd, &["text"], &[], label)
+    Backup::snapshot(sd, &["game_text"], &[], label)
 }
 
 impl Ability {
@@ -224,9 +224,9 @@ mod test {
         assert_eq!(after.text(1).as_deref(), Some("Stench"));
         assert_eq!(after.text(2).as_deref(), Some("Rain"), "the other ability keeps its text");
         page.run_reset(&session, Scope::All);
-        assert!(sd.files_in("text").is_empty());
+        assert!(sd.files_in("game_text").is_empty());
         page.undo(&session);
-        assert!(!sd.files_in("text").is_empty(), "the second reset is undone");
+        assert!(!sd.files_in("game_text").is_empty(), "the second reset is undone");
         page.undo(&session);
         let first = sango_core::text::TextFile::from_bytes(&sd.read(&sango_core::text::sd_path(texts::ENGLISH, texts::FIELDS[0].file)).unwrap()).unwrap();
         assert_eq!(first.text(1).as_deref(), Some("Smell"), "the first reset is undone");

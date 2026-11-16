@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 /// The number of files of a model.
 pub const MODEL_FILES: usize = 8;
 
-/// The size of the data of a species, in bytes (the file `pokemon/data/<n>.bin` of the game).
+/// The size of the data of a species, in bytes (the file `species/data/<n>.bin` of the game).
 pub const DATA_SIZE: usize = 0x50;
 
 /// The most moves that a species of a pack learns by level. The plugin keeps this number of places.

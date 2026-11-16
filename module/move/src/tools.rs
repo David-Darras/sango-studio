@@ -45,7 +45,7 @@ impl Part {
     fn folder(self) -> &'static str {
         match self {
             Part::Data => data::SD_FOLDER,
-            Part::Texts => "text",
+            Part::Texts => "game_text",
         }
     }
 }
@@ -351,13 +351,13 @@ mod test {
         for id in [1, 2, 3] {
             sd.write(&data::sd_path(id), &[0; data::SIZE]).unwrap();
         }
-        sd.write("text/en/14.bin", b"not a real file").unwrap();
+        sd.write("game_text/en/14.bin", b"not a real file").unwrap();
 
         page.id = 2;
         page.run_reset(&session, Scope::Move, &[Part::Data]);
         assert!(sd.read(&data::sd_path(2)).is_none());
         assert!(sd.read(&data::sd_path(1)).is_some() && sd.read(&data::sd_path(3)).is_some());
-        assert!(sd.read("text/en/14.bin").is_some(), "the texts are another part");
+        assert!(sd.read("game_text/en/14.bin").is_some(), "the texts are another part");
         assert_eq!(page.tools.history.len(), 1);
 
         page.run_reset(&session, Scope::All, &[Part::Data]);

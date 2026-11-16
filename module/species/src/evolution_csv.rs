@@ -58,7 +58,7 @@ impl Library<'_> {
 
     /// The evolutions of a species and a form: the SD card first, then the romfs.
     fn current(&self, species: usize, form: usize) -> Option<Evolutions> {
-        let on_card = self.sd.and_then(|sd| sd.read(&evolution::sd_path(species, form))).and_then(|b| Evolutions::from_bytes(&b).ok());
+        let on_card = self.sd.and_then(|sd| sd.read(&evolution::sd_path(file_index(self.species, species, form)))).and_then(|b| Evolutions::from_bytes(&b).ok());
         on_card.or_else(|| self.evolutions.first_file(file_index(self.species, species, form)).and_then(|b| Evolutions::from_bytes(b).ok()))
     }
 }
@@ -199,7 +199,7 @@ pub fn apply(rows: &[Row], library: &Library, sd: &SdCard) -> Result<usize, Stri
         if library.current(row.species, row.form).as_ref() == Some(&row.evolutions) {
             continue;
         }
-        let path = evolution::sd_path(row.species, row.form);
+        let path = evolution::sd_path(file_index(library.species, row.species, row.form));
         sd.write(&path, &row.evolutions.to_bytes()).and_then(|_| sd.mark_changed(&path))?;
         written += 1;
     }

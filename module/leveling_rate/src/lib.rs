@@ -2,7 +2,7 @@
 //! and the Pokémon that use each rate.
 //!
 //! The experience tables come from the archive 194 of the romfs. A table that the user changes goes on the
-//! SD card as `pokemon/experience/<rate>.bin` (same layout as the file of the romfs). The Leveling rate of each
+//! SD card as `leveling_rate/<rate>.bin` (same layout as the file of the romfs). The Leveling rate of each
 //! species comes from its data (the SD card first, then the romfs).
 //!
 //! The graph has two views: the total experience of each level (like the graph of Bulbapedia), and the
@@ -674,7 +674,7 @@ impl LevelingRate {
                 }
             }
         }
-        self.status = Some((true, format!("Saved {} file(s) in pokemon/experience. The game loads them again by itself.", written.len())));
+        self.status = Some((true, format!("Saved {} file(s) in leveling_rate. The game loads them again by itself.", written.len())));
     }
 }
 
@@ -961,7 +961,7 @@ mod test {
         // Save writes the files of the two rates that changed, and a new page reads them.
         page.save(&session);
         assert!(!page.changed(0) && !page.changed(1));
-        let written = |rate: usize| folder.join("pokemon").join("experience").join(format!("{rate}.bin"));
+        let written = |rate: usize| folder.join("leveling_rate").join(format!("{rate}.bin"));
         assert!(written(0).exists() && written(1).exists() && !written(2).exists());
         let mut again = LevelingRate::default();
         again.load_tables(&session);

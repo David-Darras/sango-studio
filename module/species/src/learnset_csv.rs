@@ -112,7 +112,7 @@ impl Library<'_> {
     }
 
     fn level_up(&self, species: usize, form: usize) -> Option<LevelUp> {
-        let on_card = self.sd.and_then(|sd| sd.read(&learnset::level_up_sd_path(species, form))).and_then(|b| LevelUp::from_bytes(&b).ok());
+        let on_card = self.sd.and_then(|sd| sd.read(&learnset::level_up_sd_path(file_index(self.species, species, form)))).and_then(|b| LevelUp::from_bytes(&b).ok());
         on_card.or_else(|| self.level_up.first_file(file_index(self.species, species, form)).and_then(|b| LevelUp::from_bytes(b).ok()))
     }
 
@@ -313,7 +313,7 @@ pub fn apply(rows: &[Row], library: &Library, sd: &SdCard) -> Result<Report, Str
             let mut new = LevelUp { moves: moves.clone() };
             new.sort();
             if library.level_up(species, form) != Some(new.clone()) {
-                write(learnset::level_up_sd_path(species, form), new.to_bytes())?;
+                write(learnset::level_up_sd_path(file_index(library.species, species, form)), new.to_bytes())?;
                 report.level_up_files += 1;
             }
         }

@@ -262,7 +262,7 @@ pub struct Store {
 impl Store {
     /// Reads the files of the SD card the first time, and when the folder of the card changes.
     pub fn ensure(&mut self, sd: Option<&SdCard>) {
-        let root = sd.map(|sd| sd.root().to_path_buf());
+        let root = sd.map(|sd| sd.local().to_path_buf());
         if self.loaded && self.root == root {
             return;
         }

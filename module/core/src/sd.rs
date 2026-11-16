@@ -11,19 +11,94 @@ const RELOAD_PATH_SIZE: usize = 64;
 /// The most paths in the file `reload.bin`. The oldest one goes first.
 const RELOAD_MAX_PATHS: usize = 256;
 
-/// The folder of the SD card where Sango Studio puts the files that it changed.
+/// The paths in the folder of the studio that the plugin reads: the other files stay on the computer. A folder ends with `/`.
+const PUBLISHED: [&str; 17] = [
+    "reload.bin",
+    "species/table.bin",
+    "species/data/",
+    "species/pokedex_data.bin",
+    "species/icon/",
+    "species/cry/",
+    "species/level_up_moves/",
+    "species/egg_moves/",
+    "species/evolution/",
+    "leveling_rate/",
+    "game_text/",
+    "ability/",
+    "move/data/",
+    "move/custom/",
+    "item/data/",
+    "item/custom/",
+    "type/",
+];
+
+/// The places of the files in the older versions of the studio, and where they are now. A folder ends with `/`.
+const OLD_PLACES: [(&str, &str); 7] = [
+    ("pokemon/data/", "species/data/"),
+    ("pokemon/pokedex_data.bin", "species/pokedex_data.bin"),
+    ("pokemon/icon/", "species/icon/"),
+    ("pokemon/egg_moves/", "species/egg_moves/"),
+    ("pokemon/experience/", "leveling_rate/"),
+    ("text/", "game_text/"),
+    ("archive/100/", "species/cry/"),
+];
+
+/// The folder on the computer where the studio keeps all its files. When it is set, the folder of the SD card only gets the files that the
+/// plugin reads (see [`SdCard::published`]). Set once, when the program starts.
+static WORKSPACE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Tells where the studio keeps its files on the computer.
+pub fn set_workspace(folder: PathBuf) {
+    let _ = WORKSPACE.set(folder);
+}
+
+/// The place of the files of the studio on the computer, when nothing else is chosen.
+pub fn default_workspace() -> Option<PathBuf> {
+    let base = std::env::var_os("APPDATA").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
+    Some(base.join("SangoStudio").join("workspace"))
+}
+
+/// How many times the files of the studio were all erased in this session: the pages that keep a copy of them read them again when it changes.
+static ERASED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// How many times [`SdCard::erase_everything`] ran.
+pub fn erase_count() -> u32 {
+    ERASED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// What [`SdCard::erase_everything`] removed.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Erased {
+    /// The files and the bytes of the folder of the studio on the computer.
+    pub computer: (usize, u64),
+    /// The files and the bytes of the folder of the studio on the SD card.
+    pub card: (usize, u64),
+    /// The files and the bytes of the 3D models that the studio wrote on the SD card (`sango/pokemodel`).
+    pub models: (usize, u64),
+}
+
+/// The files of the studio.
 ///
-/// The romfs dump is read only. A file that the user changes goes here, and the plugin loads it
-/// from here, also while the game runs.
+/// The studio keeps all its files in a folder of the computer (the workspace, see [`set_workspace`]). The folder of the SD card, in the
+/// folder `sdmc` of the emulator, only gets a copy of the files that the plugin reads: the plugin loads them from there, also while the
+/// game runs. The romfs dump is read only. Without a workspace, the folder of the SD card holds everything.
 #[derive(Clone, Debug)]
 pub struct SdCard {
+    /// The folder of the SD card.
     root: PathBuf,
+    /// The folder of the files of the studio on the computer: the same as `root` when there is no workspace.
+    local: PathBuf,
 }
 
 impl SdCard {
     /// Checks a folder. It can be the folder of Sango Studio itself, or the folder `sdmc`:
     /// then the folder of Sango Studio is made inside it.
     pub fn open(path: &str) -> Result<SdCard, String> {
+        Self::open_with(path, WORKSPACE.get().cloned())
+    }
+
+    /// The same, with the folder of the files of the studio on the computer (None: the SD card holds everything).
+    pub fn open_with(path: &str, workspace: Option<PathBuf>) -> Result<SdCard, String> {
         let path = path.trim().trim_matches('"');
         if path.is_empty() {
             return Err("Give the folder of the SD card.".into());
@@ -46,12 +121,176 @@ impl SdCard {
         let probe = root.join(".sango_write_test");
         std::fs::write(&probe, b"x").map_err(|e| format!("Cannot write in this folder: {e}"))?;
         let _ = std::fs::remove_file(&probe);
-        Ok(SdCard { root })
+        let local = workspace.unwrap_or_else(|| root.clone());
+        let card = SdCard { root, local };
+        if card.is_split() {
+            std::fs::create_dir_all(&card.local).map_err(|e| format!("Cannot make {}: {e}", card.local.display()))?;
+            card.move_files_to_the_computer()?;
+        }
+        Ok(card)
     }
 
-    /// The folder of the files.
+    /// The folder of the SD card (the plugin reads it).
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// The folder of the 3D models of the packs: `sango/pokemodel`, next to the folder of the studio (in the folder `sdmc` of the emulator).
+    pub fn models_folder(&self) -> Option<PathBuf> {
+        Some(self.root.parent()?.join("sango").join("pokemodel"))
+    }
+
+    /// What [`SdCard::erase_everything`] would remove.
+    pub fn count_everything(&self) -> Erased {
+        let count = |folder: &Path| -> (usize, u64) {
+            let mut found = Vec::new();
+            Self::collect(folder, "", &mut found);
+            let bytes = found.iter().map(|file| std::fs::metadata(folder.join(file.trim_start_matches('/'))).map_or(0, |m| m.len())).sum();
+            (found.len(), bytes)
+        };
+        Erased {
+            computer: if self.is_split() { count(&self.local) } else { (0, 0) },
+            card: count(&self.root),
+            models: self.models_folder().map_or((0, 0), |folder| count(&folder)),
+        }
+    }
+
+    /// Starts from zero: removes all the files of the studio on the computer and on the SD card, and the 3D models that the studio wrote on the
+    /// SD card. The folders themselves stay. The settings of the program, the dump of the game and the other files of the plugin (the maps,
+    /// the names) are not touched.
+    pub fn erase_everything(&self) -> Result<Erased, String> {
+        let done = self.count_everything();
+        let mut folders = vec![self.root.clone()];
+        if self.is_split() {
+            folders.push(self.local.clone());
+        }
+        for folder in folders {
+            let Ok(entries) = std::fs::read_dir(&folder) else { continue };
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let result = if entry.file_type().is_ok_and(|kind| kind.is_dir()) { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
+                result.map_err(|e| format!("{}: {e}", path.display()))?;
+            }
+        }
+        if let Some(models) = self.models_folder() {
+            if models.is_dir() {
+                std::fs::remove_dir_all(&models).map_err(|e| format!("{}: {e}", models.display()))?;
+            }
+        }
+        ERASED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(done)
+    }
+
+    /// The folder where the studio keeps its files on the computer.
+    pub fn local(&self) -> &Path {
+        &self.local
+    }
+
+    /// True when the files of the studio are on the computer and only a part of them goes to the SD card.
+    pub fn is_split(&self) -> bool {
+        self.local != self.root
+    }
+
+    /// True for a file that the plugin reads, so that it goes to the SD card: `reload.bin`, the table of the species, the data of the
+    /// species, the icons, the abilities, the moves, the items, the types and the files of the archives.
+    pub fn published(relative: &str) -> bool {
+        PUBLISHED.iter().any(|entry| if entry.ends_with('/') { relative.starts_with(entry) } else { relative == *entry })
+    }
+
+    /// At each opening: the files that the studio wrote on the SD card before the workspace existed come to the computer, and the SD card
+    /// keeps only the files that the plugin reads (all of them, as the computer has them).
+    fn move_files_to_the_computer(&self) -> Result<(), String> {
+        let mut found = Vec::new();
+        Self::collect(&self.root, "", &mut found);
+        for relative in found.iter().map(|f| f.trim_start_matches('/').to_string()) {
+            if relative == ".sango_write_test" {
+                continue;
+            }
+            let (from, to) = (self.root.join(&relative), self.local.join(&relative));
+            if !to.exists() {
+                if let Some(folder) = to.parent() {
+                    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+                }
+                std::fs::copy(&from, &to).map_err(|e| format!("{} to {}: {e}", from.display(), to.display()))?;
+            }
+            if !Self::published(&relative) {
+                std::fs::remove_file(&from).map_err(|e| format!("{}: {e}", from.display()))?;
+            }
+        }
+        Self::remove_empty_folders(&self.root);
+        self.move_to_the_new_places()?;
+        // The files that the plugin reads are on the SD card, as the computer has them.
+        let mut local_files = Vec::new();
+        Self::collect(&self.local, "", &mut local_files);
+        for relative in local_files.iter().map(|f| f.trim_start_matches('/').to_string()).filter(|f| Self::published(f)) {
+            let (from, to) = (self.local.join(&relative), self.root.join(&relative));
+            let same = match (std::fs::read(&from), std::fs::read(&to)) {
+                (Ok(a), Ok(b)) => a == b,
+                _ => false,
+            };
+            if !same {
+                if let Some(folder) = to.parent() {
+                    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+                }
+                std::fs::copy(&from, &to).map_err(|e| format!("{} to {}: {e}", from.display(), to.display()))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The files of the older versions of the studio get their new places (the data of the species in `species`, the experience tables in
+    /// `leveling_rate`, the texts in `game_text`...), and the lists of the folders are written. The copies by archive are dropped.
+    fn move_to_the_new_places(&self) -> Result<(), String> {
+        let mut found = Vec::new();
+        Self::collect(&self.local, "", &mut found);
+        let mut moved = false;
+        for relative in found.iter().map(|f| f.trim_start_matches('/').to_string()) {
+            let old = self.local.join(&relative);
+            if relative.starts_with("archive/") && !relative.starts_with("archive/100/") {
+                // A copy that the studio makes again from its files.
+                let _ = std::fs::remove_file(&old);
+                continue;
+            }
+            let Some(new) = OLD_PLACES.iter().find_map(|(from, to)| {
+                if from.ends_with('/') {
+                    relative.strip_prefix(from).map(|rest| format!("{to}{rest}"))
+                } else {
+                    (relative == *from).then(|| to.to_string())
+                }
+            }) else {
+                continue;
+            };
+            let target = self.local.join(&new);
+            if !relative.ends_with("/index.bin") && !target.exists() {
+                if let Some(folder) = target.parent() {
+                    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+                }
+                std::fs::rename(&old, &target).map_err(|e| format!("{} to {}: {e}", old.display(), target.display()))?;
+            } else {
+                let _ = std::fs::remove_file(&old);
+            }
+            moved = true;
+        }
+        Self::remove_empty_folders(&self.local);
+        if moved {
+            for (folder, _) in crate::file_lists::folders() {
+                if self.local.join(&folder).is_dir() {
+                    crate::file_lists::write_index(self, &folder)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes the folders that have nothing in them (the folder itself stays).
+    fn remove_empty_folders(folder: &Path) {
+        let Ok(entries) = std::fs::read_dir(folder) else { return };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                Self::remove_empty_folders(&entry.path());
+                let _ = std::fs::remove_dir(entry.path());
+            }
+        }
     }
 
     /// The full path of a file, from its path in the folder (like `land/42.bin`).
@@ -63,7 +302,7 @@ impl SdCard {
         if relative.as_os_str().is_empty() || !clean {
             return Err(format!("{} is not a path inside the folder.", relative.display()));
         }
-        Ok(self.root.join(relative))
+        Ok(self.local.join(relative))
     }
 
     /// Writes a file. The folders on the way are made.
@@ -73,8 +312,16 @@ impl SdCard {
             std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
         }
         std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+        // The plugin reads some files from the SD card.
+        if self.is_split() && Self::published(relative) {
+            let copy = self.root.join(relative);
+            if let Some(folder) = copy.parent() {
+                std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+            }
+            std::fs::write(&copy, bytes).map_err(|e| format!("{}: {e}", copy.display()))?;
+        }
         // The files that replace a file of an archive of the game are copied where the plugin reads them.
-        crate::archive_files::mirror(self, relative, Some(bytes))?;
+        crate::file_lists::update(self, relative)?;
         Ok(path)
     }
 
@@ -136,9 +383,12 @@ impl SdCard {
     /// Removes a file. A file that is not there is not an error. Gives true when a file was removed.
     pub fn remove(&self, relative: &str) -> Result<bool, String> {
         let path = self.path(relative)?;
+        if self.is_split() && Self::published(relative) {
+            let _ = std::fs::remove_file(self.root.join(relative));
+        }
         match std::fs::remove_file(&path) {
             Ok(()) => {
-                crate::archive_files::mirror(self, relative, None)?;
+                crate::file_lists::update(self, relative)?;
                 Ok(true)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -258,5 +508,73 @@ mod test {
         assert!(sd.write("a/../../outside.bin", b"x").is_err());
         assert!(sd.path("C:/absolute.bin").is_err());
         assert!(sd.path("").is_err());
+    }
+
+    #[test]
+    fn with_a_workspace_the_sd_card_only_gets_the_files_that_the_plugin_reads() {
+        let (card, work) = (folder("split_card"), folder("split_work"));
+        let sd = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
+        assert!(sd.is_split());
+        sd.write("species/registry.json", b"{}").unwrap();
+        sd.write("species/table.bin", b"table").unwrap();
+        sd.write("pokemon/learnset/1_0.bin", b"moves").unwrap();
+        sd.write("species/cry/5.bin", b"copy").unwrap();
+        // Everything is on the computer.
+        assert!(work.join("species/registry.json").is_file() && work.join("pokemon/learnset/1_0.bin").is_file());
+        // The SD card has what the plugin reads.
+        assert_eq!(fs::read(card.join("species/table.bin")).unwrap(), b"table");
+        assert_eq!(fs::read(card.join("species/cry/5.bin")).unwrap(), b"copy");
+        assert!(card.join("species/cry/index.bin").is_file(), "the list goes with the files");
+        assert!(!card.join("species/registry.json").exists() && !card.join("pokemon/learnset").exists());
+        // A removal goes to both.
+        assert_eq!(sd.remove("species/cry/5.bin"), Ok(true));
+        assert!(!work.join("species/cry/5.bin").exists() && !card.join("species/cry/5.bin").exists());
+        // The reads and the lists use the computer.
+        assert_eq!(sd.read("species/registry.json").unwrap(), b"{}");
+        assert_eq!(sd.files_in("pokemon"), ["pokemon/learnset/1_0.bin"]);
+    }
+
+    #[test]
+    fn the_files_that_the_sd_card_had_before_come_to_the_computer() {
+        let (card, work) = (folder("move_card"), folder("move_work"));
+        fs::create_dir_all(card.join("species/packs")).unwrap();
+        fs::create_dir_all(card.join("code/src")).unwrap();
+        fs::write(card.join("species/packs/a.sangopack"), b"pack").unwrap();
+        fs::write(card.join("code/src/x.cc"), b"code").unwrap();
+        fs::write(card.join("species/table.bin"), b"table").unwrap();
+        let _sd = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
+        // The files of the studio moved, the table of the plugin stayed (and is on the computer too).
+        assert_eq!(fs::read(work.join("species/packs/a.sangopack")).unwrap(), b"pack");
+        assert_eq!(fs::read(work.join("code/src/x.cc")).unwrap(), b"code");
+        assert_eq!(fs::read(work.join("species/table.bin")).unwrap(), b"table");
+        assert!(!card.join("species/packs").exists() && !card.join("code").exists());
+        assert_eq!(fs::read(card.join("species/table.bin")).unwrap(), b"table");
+        // A file that the plugin reads and that only the computer has goes to the SD card at the next opening.
+        fs::write(work.join("pokemon/data_new.bin"), b"x").ok();
+        fs::create_dir_all(work.join("ability")).unwrap();
+        fs::write(work.join("ability/192.bin"), b"ability").unwrap();
+        let _again = SdCard::open_with(&card.to_string_lossy(), Some(work)).unwrap();
+        assert_eq!(fs::read(card.join("ability/192.bin")).unwrap(), b"ability");
+    }
+
+    #[test]
+    fn starting_from_zero_removes_the_files_of_the_studio_and_the_models_only() {
+        let (card, work) = (folder("zero").join("sdmc"), folder("zero_work"));
+        fs::create_dir_all(&card).unwrap();
+        let sd = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
+        sd.write("species/table.bin", b"table").unwrap();
+        sd.write("species/registry.json", b"{}").unwrap();
+        fs::create_dir_all(card.join("sango/pokemodel")).unwrap();
+        fs::write(card.join("sango/pokemodel/0.raw"), b"models").unwrap();
+        fs::create_dir_all(card.join("sango/maker")).unwrap();
+        fs::write(card.join("sango/maker/names.bin"), b"names").unwrap();
+        let before = erase_count();
+        let counted = sd.count_everything();
+        assert_eq!((counted.computer.0, counted.card.0, counted.models.0), (2, 1, 1));
+        assert_eq!(sd.erase_everything().unwrap(), counted);
+        assert!(sd.files_in("species").is_empty() && !card.join("sango/pokemodel").exists());
+        assert!(card.join("sango/maker/names.bin").exists(), "the other files of the plugin stay");
+        assert!(sd.root().is_dir() && work.is_dir(), "the folders stay");
+        assert_eq!(erase_count(), before + 1);
     }
 }

@@ -21,7 +21,7 @@ pub const ARCHIVE: usize = 132;
 pub const FILE: usize = 1;
 
 /// The place of the file on the SD card.
-pub const SD_PATH: &str = "pokemon/pokedex_data.bin";
+pub const SD_PATH: &str = "species/pokedex_data.bin";
 
 const NEXT_FORM: usize = 0;
 const SHAPE: usize = 1;

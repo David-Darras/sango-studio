@@ -297,10 +297,10 @@ impl Learnset {
 
     /// Reads the moves of a species and a form: the SD card first, then the romfs.
     /// `file` is the place of the form in the archive of the level-up moves.
-    pub fn load(&mut self, sd: Option<&SdCard>, species: usize, form: usize, file: usize) {
+    pub fn load(&mut self, sd: Option<&SdCard>, species: usize, _form: usize, file: usize) {
         let on_card = |path: String| sd.and_then(|sd| sd.read(&path));
         self.file = file;
-        let level_card = on_card(learnset::level_up_sd_path(species, form)).and_then(|b| LevelUp::from_bytes(&b).ok());
+        let level_card = on_card(learnset::level_up_sd_path(file)).and_then(|b| LevelUp::from_bytes(&b).ok());
         let egg_card = on_card(learnset::egg_sd_path(species)).and_then(|b| EggMoves::from_bytes(&b).ok());
         self.from_card = level_card.is_some() || egg_card.is_some();
         let (level_up, eggs) = (self.read_romfs_level_up(file), self.read_romfs_eggs(species));
@@ -349,15 +349,12 @@ impl Learnset {
     }
 
     /// Writes the files that changed on the SD card, and tells the game. Returns the paths that were written.
-    pub fn save(&mut self, sd: &SdCard, species: usize, form: usize) -> Result<Vec<String>, String> {
+    pub fn save(&mut self, sd: &SdCard, species: usize, _form: usize) -> Result<Vec<String>, String> {
         let mut written = Vec::new();
         if self.level_up != self.level_up_saved {
-            let path = learnset::level_up_sd_path(species, form);
+            // The species of the packs have no file in the archive: their moves are in the table of the pack.
+            let path = learnset::level_up_sd_path(self.file);
             sd.write(&path, &self.level_up.to_bytes()).and_then(|_| sd.mark_changed(&path))?;
-            // The plugin replaces the file of the archive by its number. The species of the packs have no file in the archive.
-            if species <= crate::SPECIES.len() {
-                sango_core::archive_files::write(sd, learnset::LEVEL_UP_ARCHIVE, self.file, &self.level_up.to_bytes())?;
-            }
             self.level_up_saved = self.level_up.clone();
             written.push(path);
         }
@@ -773,7 +770,7 @@ mod test {
 
         // Only the two files that changed are written, and they come back.
         let written = learnset.save(&sd, 1, 0).unwrap();
-        assert_eq!(written, ["pokemon/learnset/1_0.bin", "pokemon/egg_moves/1.bin"]);
+        assert_eq!(written, ["species/level_up_moves/1.bin", "species/egg_moves/1.bin"]);
         assert!(!learnset.changed() && learnset.from_card());
         assert_eq!(learnset.save(&sd, 1, 0).unwrap(), Vec::<String>::new());
         let mut again = Learnset::default();

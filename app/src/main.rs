@@ -212,6 +212,12 @@ fn window_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result<()> {
+    // The files of the studio stay on the computer: the SD card only gets the files that the plugin reads (see `SdCard`). The variable
+    // SANGO_WORKSPACE chooses another folder.
+    let workspace = std::env::var_os("SANGO_WORKSPACE").map(std::path::PathBuf::from).or_else(sango_core::default_workspace);
+    if let Some(folder) = workspace {
+        sango_core::set_workspace(folder);
+    }
     let mut viewport = egui::ViewportBuilder::default().with_inner_size([1280.0, 800.0]).with_min_inner_size([720.0, 480.0]).with_title(sango_core::NAME);
     if let Some(icon) = window_icon() {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));

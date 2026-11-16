@@ -20,9 +20,10 @@ pub const FILE_SIZE: usize = SLOTS * 6;
 /// The number of evolutions that a species can have.
 pub const SLOTS: usize = 8;
 
-/// The place on the SD card of the evolutions of a species and a form. The file has the layout of the romfs.
-pub fn sd_path(species: usize, form: usize) -> String {
-    format!("pokemon/evolution/{species}_{form}.bin")
+/// The place on the SD card of the evolutions of a species and a form: `file` is the place of the form in the archive. The file has the
+/// layout of the romfs.
+pub fn sd_path(file: usize) -> String {
+    format!("species/evolution/{file}.bin")
 }
 
 /// What the argument of an evolution means.

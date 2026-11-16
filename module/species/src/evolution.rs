@@ -85,9 +85,9 @@ impl EvolutionTab {
 
     /// Reads the evolutions of a species and a form: the SD card first, then the romfs.
     /// `file` is the place of the form in the archive.
-    pub fn load(&mut self, sd: Option<&SdCard>, species: usize, form: usize, file: usize) {
+    pub fn load(&mut self, sd: Option<&SdCard>, _species: usize, _form: usize, file: usize) {
         self.file = file;
-        let on_card = sd.and_then(|sd| sd.read(&evolution::sd_path(species, form))).and_then(|bytes| Evolutions::from_bytes(&bytes).ok());
+        let on_card = sd.and_then(|sd| sd.read(&evolution::sd_path(file))).and_then(|bytes| Evolutions::from_bytes(&bytes).ok());
         self.from_card = on_card.is_some();
         self.evolutions = on_card.or_else(|| self.read_romfs(file)).unwrap_or_default();
         self.saved = self.evolutions.clone();
@@ -104,16 +104,12 @@ impl EvolutionTab {
     }
 
     /// Writes the file when it changed, and tells the game. Returns the path that was written.
-    pub fn save(&mut self, sd: &SdCard, species: usize, form: usize) -> Result<Option<String>, String> {
+    pub fn save(&mut self, sd: &SdCard, _species: usize, _form: usize) -> Result<Option<String>, String> {
         if !self.changed() {
             return Ok(None);
         }
-        let path = evolution::sd_path(species, form);
+        let path = evolution::sd_path(self.file);
         sd.write(&path, &self.evolutions.to_bytes()).and_then(|_| sd.mark_changed(&path))?;
-        // The plugin replaces the file of the archive by its number. The species of the packs have no file in the archive.
-        if species <= crate::SPECIES.len() {
-            sango_core::archive_files::write(sd, evolution::ARCHIVE, self.file, &self.evolutions.to_bytes())?;
-        }
         self.saved = self.evolutions.clone();
         self.from_card = true;
         Ok(Some(path))
@@ -343,7 +339,7 @@ mod test {
         frame(&mut tab);
 
         let path = tab.save(&sd, 133, 0).unwrap();
-        assert_eq!(path.as_deref(), Some("pokemon/evolution/133_0.bin"));
+        assert_eq!(path.as_deref(), Some("species/evolution/133.bin"));
         assert!(!tab.changed() && tab.from_card());
         assert_eq!(tab.save(&sd, 133, 0).unwrap(), None);
         let mut again = EvolutionTab::default();

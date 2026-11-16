@@ -12,7 +12,7 @@ pub const ARCHIVE: usize = 194;
 
 /// The place on the SD card of the table of a Leveling rate. It takes the place of the file of the romfs.
 pub fn sd_path(rate: usize) -> String {
-    format!("pokemon/experience/{rate}.bin")
+    format!("leveling_rate/{rate}.bin")
 }
 
 /// The number of Leveling rates in the archive.
