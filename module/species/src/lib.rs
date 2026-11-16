@@ -23,6 +23,8 @@ mod model_import;
 mod old_layout;
 mod model_tab;
 mod move_names;
+mod form_names;
+mod mega_tab;
 mod pokedex_data;
 mod table;
 mod text_csv;
@@ -109,7 +111,7 @@ pub fn leveling_rates(session: &Session) -> Result<Vec<Option<u8>>, String> {
 }
 
 /// The tabs of the page. Only the first one works for now.
-const TABS: [&str; 6] = ["General", "Model", "Learnset", "Evolution", "Text", "CSV"];
+const TABS: [&str; 7] = ["General", "Model", "Learnset", "Evolution", "Mega", "Text", "CSV"];
 
 /// The data and the shape of all the species of the romfs, form 0: the source of the examples in the help.
 fn build_index(garc: &Garc, pokedex: &PokedexData) -> examples::Index {
@@ -607,6 +609,7 @@ impl Species {
         let mut reset_more = false;
         let mut undo = false;
         let mut save = false;
+        let mut add_form = false;
         let before = (self.species, self.form);
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -817,7 +820,9 @@ impl Species {
                 }
                 let forms = self.total_form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
-                let form_text = |form: usize| if form == 0 { "Form 0 (normal)".to_string() } else { format!("Form {form}") };
+                let species_number = self.species;
+                let items: Vec<usize> = extras::pack_forms(species_number).iter().filter(|f| f.mega_item != 0).map(|f| f.form as usize).collect();
+                let form_text = |form: usize| form_names::form_label(species_number, form, items.contains(&form));
                 let form_combo = egui::ComboBox::from_id_salt("form_menu").selected_text(form_text(self.form)).width(150.0).show_ui(ui, |ui| {
                     for form in 0..forms {
                         let chosen = self.form == form;
@@ -848,6 +853,11 @@ impl Species {
                     });
                 }
                 let has_card = session.sd.is_some() && self.garc.is_some();
+                ui.add_enabled_ui(has_card && self.data.is_some(), |ui| {
+                    add_form = widget::button_styled(ui, egui::RichText::new("+ New form").color(color::WHITE), Some(color::ACCENT));
+                })
+                .response
+                .on_hover_text("Makes a new form of this species. It starts with the data that are open now. Edit it with the usual tabs.");
                 let tab_part = data_tools::tab_part(self.tab);
                 ui.add_enabled_ui(has_card && tab_part.is_some(), |ui| {
                     reset_tab = widget::button(ui, "Reset tab");
@@ -882,6 +892,9 @@ impl Species {
         if (self.species, self.form) != before {
             self.loaded = None;
         }
+        if add_form {
+            self.add_form(session);
+        }
         if reset_tab {
             if let Some(part) = data_tools::tab_part(self.tab) {
                 self.run_reset(session, data_tools::Scope::Form, &[part]);
@@ -899,6 +912,35 @@ impl Species {
         }
         if save {
             self.save(session);
+        }
+    }
+
+    /// Makes a new form of the open species with the data that are open (like the button "+ New item"): the form is kept in the pack of
+    /// the user and is open at once.
+    fn add_form(&mut self, session: &Session) {
+        self.new_form(session, 0);
+    }
+
+    /// Makes a new form of the open species with the data that are open. `mega_item` is the item that changes the Pokémon into the form
+    /// in a battle (0: it does not change). The new form is open at once.
+    fn new_form(&mut self, session: &Session, mega_item: u16) {
+        let (Some(sd), Some(data)) = (session.sd.as_ref(), self.data.as_ref()) else { return };
+        let species = self.pack_ref();
+        let form = self.total_form_count();
+        let result = u16::try_from(form).map_err(|_| "The species has too many forms.".to_string()).and_then(|number| {
+            let mut library = sango_pack::Library::open(sd)?;
+            library.add_form(sd, species, number, &data.to_bytes(), mega_item)?;
+            library.save(sd)
+        });
+        match result {
+            Ok(()) => {
+                extras::invalidate();
+                extras::refresh(Some(sd));
+                self.form = form;
+                self.loaded = None;
+                self.status = Some((true, format!("The new form {form} starts like the form that was open. Change its data with the tabs and press Save. Restart the game to see it.")));
+            }
+            Err(message) => self.status = Some((false, message)),
         }
     }
 
@@ -2452,10 +2494,11 @@ impl Module for Species {
             }
             (2, Some(data)) => self.learnset.ui(ui, data),
             (1, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
-            (5, Some(_)) => {
+            (6, Some(_)) => {
                 egui::ScrollArea::vertical().id_salt("species_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
             }
-            (4, Some(_)) => {
+            (4, Some(_)) => self.mega_tab(ui, session),
+            (5, Some(_)) => {
                 let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                 self.text.ui(ui, session, self.species, self.form, place);
             }
@@ -2598,7 +2641,7 @@ mod test {
         mega[0] = 99;
         extras::set_for_test(sango_pack::Table {
             species: vec![SpeciesRecord { id: 724, model_form: 1, name: "Rowlet".into(), data: rowlet, moves: vec![(33, 1), (45, 4)], evolutions: vec![(4, 17, 725)] }, SpeciesRecord { id: 725, model_form: 2, name: "Dartrix".into(), data: vec![1; 0x50], moves: Vec::new(), evolutions: Vec::new() }],
-            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: mega }],
+            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: mega, mega_item: 0 }],
         });
         let folder = std::env::temp_dir().join(format!("sango_species_packs_{}", std::process::id()));
         std::fs::create_dir_all(folder.join("sdmc").join("sango-studio")).unwrap();

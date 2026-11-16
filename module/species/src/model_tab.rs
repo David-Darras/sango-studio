@@ -220,6 +220,8 @@ pub struct ModelTab {
     slow: bool,
     /// The models of the species that the tab shows, and the species.
     variants: Vec<Variant>,
+    /// True when the female model of the normal form is shown.
+    female: bool,
     variants_of: Option<usize>,
     /// The import or the reset that runs in a thread.
     job: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
@@ -232,7 +234,7 @@ pub struct ModelTab {
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
+        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, female: false, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
     }
 }
 
@@ -426,9 +428,16 @@ impl ModelTab {
             ui.label(widget::hint("This species has no model in the archive and in the packs."));
             return;
         }
-        if !available.iter().any(|v| v.slot == self.form) {
-            self.form = available.iter().find(|v| v.slot as usize == form).or(available.first()).map_or(0, |v| v.slot);
-        }
+        // The model follows the form of the menu at the top of the page. A species with a female model has it after the normal model, so
+        // the models of its forms are one place later.
+        let has_female = available.iter().any(|v| v.slot == 1 && v.label == "Female");
+        let wanted = match (form, has_female) {
+            (0, true) if self.female => 1,
+            (0, _) => 0,
+            (f, true) => f + 1,
+            (f, false) => f,
+        };
+        self.form = available.iter().find(|v| v.slot as usize == wanted).or(available.first()).map_or(0, |v| v.slot);
         self.load(species, self.form);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| self.view(ui));
@@ -510,19 +519,10 @@ impl ModelTab {
         ui.set_width(380.0);
         widget::card(ui, |ui| {
             ui.label(widget::title("Model"));
-            ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Form"));
-                let selected = available.iter().find(|v| v.slot == self.form).map_or(String::new(), |v| v.label.clone());
-                egui::ComboBox::from_id_salt("model_form").selected_text(selected).width(260.0).show_ui(ui, |ui| {
-                    for variant in available {
-                        let row = ui.selectable_label(self.form == variant.slot, &variant.label);
-                        widget::scroll_to_chosen(ui, &row, self.form == variant.slot);
-                        if row.clicked() {
-                            self.form = variant.slot;
-                        }
-                    }
-                });
-            });
+            // The form is the one of the menu at the top of the page. Only the female model of the normal form has a choice of its own.
+            if self.form <= 1 && available.iter().any(|v| v.slot == 1 && v.label == "Female") {
+                ui.checkbox(&mut self.female, "Female model").on_hover_text("Shows the female model of the normal form.");
+            }
             ui.horizontal(|ui| {
                 if ui.selectable_label(!self.shiny, "Normal colours").clicked() {
                     self.shiny = false;

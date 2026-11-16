@@ -109,6 +109,11 @@ pub struct PackForm {
     pub female_model: Option<ModelRef>,
     /// The 80 bytes of data of the form, as hexadecimal text.
     pub data: String,
+    /// The item that a Pokémon of the species holds to change into this form in a battle, like a Mega Evolution (0: it does not change).
+    /// Without it, the form gets the item of its rank among the forms of its species: the Life Orb, the Choice Band, the Choice Specs, the
+    /// Choice Scarf (the rule of the first packs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mega_item: Option<u16>,
 }
 
 /// A model that replaces one of the models of a species of the game: the slot `slot` of its list of models (0 is the normal model).

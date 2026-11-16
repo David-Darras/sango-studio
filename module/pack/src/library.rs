@@ -15,7 +15,7 @@
 //! table as empty entries, so the numbers of the other species and the save files stay valid. Installing the same pack
 //! again gives its numbers back.
 
-use crate::pack::{ModelRef, ModelReplacement, Pack, Ref, MODEL_FILES};
+use crate::pack::{ModelRef, ModelReplacement, Pack, PackForm, Ref, MODEL_FILES};
 use crate::table::{FormRecord, SpeciesRecord, Table, FIRST_SPECIES};
 use sango_core::{Dump, Garc, SdCard};
 use serde::{Deserialize, Serialize};
@@ -297,23 +297,7 @@ impl Library {
         if !pack.model_refs().iter().any(|m| matches!(m, ModelRef::File { file } if *file == base)) && !pack.kept_models.contains(&base) {
             pack.kept_models.push(base);
         }
-        let target = sd.path(&pack_path(&pack.id))?;
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-        }
-        let temporary = target.with_extension("sangopack.new");
-        pack.save_with_models(&temporary, &mut |name| match &new_files {
-            Some((new_name, files)) if new_name == name => Ok(files.clone()),
-            _ => old.read_model(name),
-        })?;
-        std::fs::rename(&temporary, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-        pack.file = Some(target);
-        let before = (self.registry.clone(), self.packs.clone());
-        if let Err(message) = self.install(pack) {
-            (self.registry, self.packs) = before;
-            return Err(message);
-        }
-        Ok(())
+        self.store_user_pack(sd, Some(&old), pack, new_files)
     }
 
     /// Replaces a model of a species of the game (slot 0 is the normal model) by an imported one, or puts the model of the game
@@ -335,21 +319,58 @@ impl Library {
         match imported {
             Some(files) => {
                 pack.replacements.push(ModelReplacement { species, slot, model: name.clone() });
-                new_files = Some(files);
+                new_files = Some((name, files));
             }
             None if old.as_ref().is_none_or(|p| !p.replacements.iter().any(|r| r.species == species && r.slot == slot)) => {
                 return Err("This is already the model of the game.".into());
             }
             None => {}
         }
+        self.store_user_pack(sd, old.as_ref(), pack, new_files)
+    }
+
+    /// Adds a form to a species of the game or of a pack, with the data `data` (80 bytes) and the number `form`. The form is kept in the pack
+    /// of the user, `studio-models`, that this creates. The form shows the model that the game has for it until the user imports one.
+    pub fn add_form(&mut self, sd: &SdCard, species: Ref, form: u16, data: &[u8], mega_item: u16) -> Result<(), String> {
+        if data.len() != crate::pack::DATA_SIZE {
+            return Err(format!("The data of a form has {} bytes, not {}.", crate::pack::DATA_SIZE, crate::pack::DATA_SIZE));
+        }
+        let old = self.packs.iter().find(|p| p.id == REPLACEMENT_PACK).cloned();
+        let mut pack = old.clone().unwrap_or_else(|| Pack { id: REPLACEMENT_PACK.into(), name: "My models".into(), version: "1".into(), ..Pack::default() });
+        if pack.forms.iter().any(|f| f.species == species && f.form == form) {
+            return Err(format!("The form {form} is already one of your forms."));
+        }
+        pack.forms.push(PackForm { species, form, name: String::new(), model: None, female_model: None, data: crate::pack::to_hex(data), mega_item: Some(mega_item) });
+        self.store_user_pack(sd, old.as_ref(), pack, None)
+    }
+
+    /// Sets the item that changes a Pokémon of the species into its form `form` of a pack in a battle (0: it does not change). The pack that
+    /// owns the form is written again.
+    pub fn set_mega_item(&mut self, sd: &SdCard, species: &Ref, form: u16, item: u16) -> Result<(), String> {
+        let place = self
+            .packs
+            .iter()
+            .position(|pack| self.is_active(&pack.id) && pack.forms.iter().any(|f| f.species == *species && f.form == form))
+            .ok_or("No installed pack owns this form.")?;
+        let old = self.packs[place].clone();
+        let mut pack = old.clone();
+        if let Some(found) = pack.forms.iter_mut().find(|f| f.species == *species && f.form == form) {
+            found.mega_item = Some(item);
+        }
+        self.store_user_pack(sd, Some(&old), pack, None)
+    }
+
+    /// Writes the pack of the user on the SD card and installs it. `new_model` is a model that the pack does not have yet. Nothing changes
+    /// when this returns an error.
+    fn store_user_pack(&mut self, sd: &SdCard, old: Option<&Pack>, mut pack: Pack, new_model: Option<(String, Vec<Vec<u8>>)>) -> Result<(), String> {
         let target = sd.path(&pack_path(&pack.id))?;
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         let temporary = target.with_extension("sangopack.new");
-        pack.save_with_models(&temporary, &mut |model| match &new_files {
-            Some(files) if model == name => Ok(files.clone()),
-            _ => old.as_ref().ok_or_else(|| format!("The model '{model}' has no files.").to_string())?.read_model(model),
+        pack.save_with_models(&temporary, &mut |model| match &new_model {
+            Some((name, files)) if model == name => Ok(files.clone()),
+            _ => old.ok_or_else(|| format!("The model '{model}' has no files.").to_string())?.read_model(model),
         })?;
         std::fs::rename(&temporary, &target).map_err(|e| format!("{}: {e}", target.display()))?;
         pack.file = Some(target);
@@ -392,10 +413,12 @@ impl Library {
         for registered in &self.registry.forms {
             let found = self.is_active(&registered.pack).then(|| self.packs.iter().find(|p| p.id == registered.pack)).flatten().and_then(|pack| pack.forms.iter().find(|f| f.species == registered.species && f.form == registered.form));
             let species = self.resolve(&registered.species).unwrap_or(0);
+            let rank = table.forms.iter().filter(|other| other.species == species).count();
+            let legacy = crate::table::LEGACY_MEGA_ITEMS.get(rank).copied().unwrap_or(0);
             table.forms.push(match found {
                 // A form of a species of the game has its model in the list of that species, not in a carrier.
-                Some(form) => FormRecord { species, form: form.form, model_form: if registered.slots > 0 { 0 } else { self.model_form(&registered.pack, form.model.as_ref()) }, data: form.data_bytes()? },
-                None => FormRecord { species, form: registered.form, model_form: 0, data: vec![0; crate::pack::DATA_SIZE] },
+                Some(form) => FormRecord { species, form: form.form, model_form: if registered.slots > 0 { 0 } else { self.model_form(&registered.pack, form.model.as_ref()) }, data: form.data_bytes()?, mega_item: form.mega_item.unwrap_or(legacy) },
+                None => FormRecord { species, form: registered.form, model_form: 0, data: vec![0; crate::pack::DATA_SIZE], mega_item: 0 },
             });
         }
         Ok(table)
@@ -447,6 +470,10 @@ impl Library {
         let folder = folder.to_path_buf();
         let replacements: Vec<(&Pack, &ModelReplacement)> = self.packs.iter().filter(|p| self.is_active(&p.id)).flat_map(|p| p.replacements.iter().map(move |r| (p, r))).collect();
         if self.registry.models.is_empty() && self.registry.forms.iter().all(|f| f.slots == 0) && replacements.is_empty() {
+            // Nothing is left to write: the files of an earlier write must not stay (the plugin would still load the old models).
+            if folder.exists() {
+                std::fs::remove_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+            }
             return Ok(0);
         }
         let archive = Garc::open(&dump.archive(MODEL_ARCHIVE)).map_err(|e| format!("Archive {MODEL_ARCHIVE}: {e}"))?;

@@ -44,6 +44,13 @@ pub fn refresh(sd: Option<&SdCard>) -> bool {
     true
 }
 
+/// Makes the next `refresh` read the file again: the table was just written.
+pub fn invalidate() {
+    if let Ok(mut state) = STATE.write() {
+        state.checked = None;
+    }
+}
+
 /// Gives the table to a test: the species and the forms that the packs would add.
 #[cfg(test)]
 pub fn set_for_test(table: Table) {
@@ -133,7 +140,7 @@ mod test {
         let record = |id: u16, name: &str| SpeciesRecord { id, model_form: 1, name: name.into(), data: vec![7; 0x50], moves: vec![(33, 1)], evolutions: Vec::new() };
         Table {
             species: vec![record(724, "Rowlet"), record(725, ""), record(726, "Decidueye")],
-            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: vec![9; 0x50] }, FormRecord { species: 726, form: 1, model_form: 4, data: vec![5; 0x50] }],
+            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: vec![9; 0x50], mega_item: 0 }, FormRecord { species: 726, form: 1, model_form: 4, data: vec![5; 0x50], mega_item: 0 }],
         }
     }
 

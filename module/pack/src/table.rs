@@ -46,7 +46,13 @@ pub struct FormRecord {
     pub form: u16,
     pub model_form: u16,
     pub data: Vec<u8>,
+    /// The item that a Pokémon of the species holds to change into this form in a battle, like a Mega Evolution. 0: no change.
+    pub mega_item: u16,
 }
+
+/// The items that the first four forms of a species of the older packs use to change in a battle (rank 0 to 3): the Life Orb, the Choice
+/// Band, the Choice Specs and the Choice Scarf. A form that does not say its item gets the item of its rank.
+pub const LEGACY_MEGA_ITEMS: [u16; 4] = [0x010E, 0x00DC, 0x0129, 0x011F];
 
 /// What the file holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -107,7 +113,7 @@ impl Table {
             put_u16(&mut out, form.form);
             put_u16(&mut out, form.model_form);
             out.extend_from_slice(&form.data);
-            out.extend_from_slice(&[0, 0]);
+            put_u16(&mut out, form.mega_item);
         }
         Ok(out)
     }
@@ -143,7 +149,7 @@ impl Table {
         }
         for place in 0..form_count {
             let at = HEADER_SIZE + species_count * SPECIES_SIZE + place * FORM_SIZE;
-            table.forms.push(FormRecord { species: u16_at(at), form: u16_at(at + 2), model_form: u16_at(at + 4), data: bytes[at + 6..at + 6 + DATA_SIZE].to_vec() });
+            table.forms.push(FormRecord { species: u16_at(at), form: u16_at(at + 2), model_form: u16_at(at + 4), data: bytes[at + 6..at + 6 + DATA_SIZE].to_vec(), mega_item: u16_at(at + 6 + DATA_SIZE) });
         }
         Ok(table)
     }

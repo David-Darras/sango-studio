@@ -100,7 +100,7 @@ mod test {
     #[test]
     fn packs_that_need_other_packs_wait_for_them() {
         let mut forms = pack("forms", &[]);
-        forms.forms.push(PackForm { species: Ref::key("Beta"), form: 1, name: String::new(), model: None, female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]) });
+        forms.forms.push(PackForm { species: Ref::key("Beta"), form: 1, name: String::new(), model: None, female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]), mega_item: None });
         let mut library = Library::default();
         // The forms come first in the list but need Beta.
         let results = library.install_many(vec![forms, pack("one", &["Alpha", "Beta"]), pack("one", &["Alpha"])]);
@@ -125,8 +125,8 @@ mod test {
         let mut library = Library::default();
         library.install(pack("one", &["Alpha", "Beta"])).unwrap();
         let mut forms = pack("forms", &[]);
-        forms.forms.push(PackForm { species: Ref::key("Beta"), form: 1, name: "Big".into(), model: None, female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]) });
-        forms.forms.push(PackForm { species: Ref::Game(25), form: 2, name: String::new(), model: Some(ModelRef::Native { native: 25 }), female_model: None, data: pack::to_hex(&[6u8; pack::DATA_SIZE]) });
+        forms.forms.push(PackForm { species: Ref::key("Beta"), form: 1, name: "Big".into(), model: None, female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]), mega_item: None });
+        forms.forms.push(PackForm { species: Ref::Game(25), form: 2, name: String::new(), model: Some(ModelRef::Native { native: 25 }), female_model: None, data: pack::to_hex(&[6u8; pack::DATA_SIZE]), mega_item: None });
         library.install(forms).unwrap();
         library.save(&sd).unwrap();
         let again = Library::open(&sd).unwrap();
@@ -245,9 +245,9 @@ mod test {
         let mut pack = pack("modeled", &["Alpha", "Beta"]);
         pack.species[0].model = ModelRef::File { file: "Alpha".into() };
         pack.species[1].model = ModelRef::File { file: "Beta".into() };
-        pack.forms.push(PackForm { species: Ref::key("Alpha"), form: 1, name: String::new(), model: Some(ModelRef::File { file: "Alpha".into() }), female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]) });
+        pack.forms.push(PackForm { species: Ref::key("Alpha"), form: 1, name: String::new(), model: Some(ModelRef::File { file: "Alpha".into() }), female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]), mega_item: None });
         // A form of a species of the game with a model of its own: Venusaur gets one more slot at the end of its list.
-        pack.forms.push(PackForm { species: Ref::Game(3), form: 2, name: String::new(), model: Some(ModelRef::File { file: "Gigantamax".into() }), female_model: None, data: pack::to_hex(&[4u8; pack::DATA_SIZE]) });
+        pack.forms.push(PackForm { species: Ref::Game(3), form: 2, name: String::new(), model: Some(ModelRef::File { file: "Gigantamax".into() }), female_model: None, data: pack::to_hex(&[4u8; pack::DATA_SIZE]), mega_item: None });
         let files_of = |name: &str| -> Vec<Vec<u8>> { (0..8u8).map(|n| vec![name.as_bytes()[0], n, 9, 9]).collect() };
         let file = sdmc.join("modeled.sangopack");
         pack.save_with_models(&file, &mut |name| Ok(files_of(name))).unwrap();
@@ -309,5 +309,27 @@ mod test {
         library.remove("modeled").unwrap();
         assert_eq!(library.write_models(&sd.models_folder(), &dump).unwrap(), 0);
         let _ = std::fs::remove_dir_all(&outer);
+    }
+
+    #[test]
+    fn a_new_form_is_kept_in_the_pack_of_the_user_and_written_in_the_table() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_new_form_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let mut library = Library::open(&sd).unwrap();
+        library.add_form(&sd, Ref::Game(25), 3, &[7u8; pack::DATA_SIZE], 0x10E).unwrap();
+        library.add_form(&sd, Ref::Game(25), 4, &[8u8; pack::DATA_SIZE], 0).unwrap();
+        assert!(library.add_form(&sd, Ref::Game(25), 3, &[1u8; pack::DATA_SIZE], 0).is_err(), "a form number is used once");
+        library.save(&sd).unwrap();
+        let again = Library::open(&sd).unwrap();
+        assert_eq!(again.registry, library.registry);
+        let table = Table::from_bytes(&sd.read(library::TABLE_PATH).unwrap()).unwrap();
+        assert_eq!((table.forms.len(), table.forms[0].species, table.forms[0].form, table.forms[1].form), (2, 25, 3, 4));
+        assert_eq!(table.forms[0].data, vec![7u8; pack::DATA_SIZE]);
+        assert_eq!((table.forms[0].mega_item, table.forms[1].mega_item), (0x10E, 0), "a new form says its item");
+        library.set_mega_item(&sd, &Ref::Game(25), 4, 0xDC).unwrap();
+        assert_eq!(library.table().unwrap().forms[1].mega_item, 0xDC);
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

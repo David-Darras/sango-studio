@@ -73,7 +73,11 @@ pub fn run(sd_root: &str, dump_root: &str, request: &Request) -> Result<String, 
             "The model of the pack is back. Restart the game to see it.".to_string()
         }
         Request::ResetGame { species, slot } => {
-            library.replace_game_model(&sd, *species, *slot, None)?;
+            // When the pack has no replacement any more, the files on the SD card may still be from an earlier write: they are written again.
+            match library.replace_game_model(&sd, *species, *slot, None) {
+                Err(message) if message.starts_with("This is already") => {}
+                other => other?,
+            }
             "The model of the game is back. Restart the game to see it.".to_string()
         }
     };
@@ -264,7 +268,8 @@ mod test {
         let (other, _) = crate::model_tab::read_model_for_test(&models, venusaur[1].file, false).unwrap();
         assert!(other.bones.len() > 4, "the other models are the ones of the game");
         run(sd_root.to_str().unwrap(), &dump_root, &Request::ResetGame { species: 3, slot: 0 }).unwrap();
-        assert!(run(sd_root.to_str().unwrap(), &dump_root, &Request::ResetGame { species: 3, slot: 0 }).is_err());
+        // A second return is not an error: it writes the files again, so no old model stays on the SD card.
+        run(sd_root.to_str().unwrap(), &dump_root, &Request::ResetGame { species: 3, slot: 0 }).unwrap();
 
         // The reset gives back the model of the pack.
         let back = run(sdmc.join("sango-studio").to_str().unwrap(), &dump_root, &Request::Reset { species: Ref::key("Alpha"), form: 0 }).unwrap();
