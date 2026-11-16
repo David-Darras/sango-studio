@@ -62,14 +62,14 @@ pub fn run(sd_root: &str, dump_root: &str, request: &Request) -> Result<String, 
             let (templates, packs) = templates(&archive)?;
             let files = sango_modelport::files::model_files(&source, &templates, &packs, model_name, *scale)?;
             match request {
-                Request::Import { species, form, .. } => library.set_model(&sd, species, *form, Some(files))?,
+                Request::Import { species, form, model_name, .. } => library.set_form_model(&sd, species, *form, Some(files), model_name)?,
                 Request::ImportGame { species, slot, .. } => library.replace_game_model(&sd, *species, *slot, Some(files))?,
                 _ => unreachable!(),
             }
             format!("Imported {}. Restart the game to see it.", file.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default())
         }
         Request::Reset { species, form } => {
-            library.set_model(&sd, species, *form, None)?;
+            library.set_form_model(&sd, species, *form, None, "")?;
             "The model of the pack is back. Restart the game to see it.".to_string()
         }
         Request::ResetGame { species, slot } => {

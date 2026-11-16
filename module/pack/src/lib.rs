@@ -332,4 +332,29 @@ mod test {
         assert_eq!(library.table().unwrap().forms[1].mega_item, 0xDC);
         let _ = std::fs::remove_dir_all(&folder);
     }
+
+    #[test]
+    fn a_new_form_gets_a_model_of_its_own_and_gives_it_back() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_form_model_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let files = |name: &str| -> Vec<Vec<u8>> { (0..8u8).map(|n| vec![name.as_bytes()[0], n, 9, 9]).collect() };
+        let mut library = Library::open(&sd).unwrap();
+        library.add_form(&sd, Ref::Game(197), 1, &[7u8; pack::DATA_SIZE], 0x10E).unwrap();
+        assert_eq!(library.registry.forms[0].slots, 0, "a form without a model has no slot");
+        // The import gives only this form a model: it takes a slot after the models of the species.
+        library.set_form_model(&sd, &Ref::Game(197), 1, Some(files("Mega")), "pm0197_01").unwrap();
+        assert_eq!(library.registry.forms[0].slots, 1);
+        let form = &library.packs[0].forms[0];
+        assert_eq!(form.model, Some(ModelRef::File { file: format!("pm0197_01{}", library::USER_SUFFIX) }));
+        // A second import replaces the files and keeps the name.
+        library.set_form_model(&sd, &Ref::Game(197), 1, Some(files("Other")), "pm0197_01").unwrap();
+        assert_eq!(library.packs[0].read_model(&format!("pm0197_01{}", library::USER_SUFFIX)).unwrap()[0][0], b'O');
+        // Taking the model away gives the form back the model of the game.
+        library.set_form_model(&sd, &Ref::Game(197), 1, None, "").unwrap();
+        assert_eq!((library.registry.forms[0].slots, library.packs[0].forms[0].model.clone()), (0, None));
+        assert!(library.set_form_model(&sd, &Ref::Game(197), 1, None, "").is_err());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 }

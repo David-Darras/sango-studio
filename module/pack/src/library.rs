@@ -57,6 +57,10 @@ pub const REPLACEMENT_PACK: &str = "studio-models";
 /// The ending of the name of an imported model: the model `x` that the pack shipped is replaced by `x+import`.
 pub const IMPORTED_SUFFIX: &str = "+import";
 
+/// The ending of the name of a model that the user made for a form that had none (a new form): taking the model away gives the form back the
+/// model that the game shows for it.
+pub const USER_SUFFIX: &str = "+new";
+
 /// A file of the model archive as the plugin serves it from the SD card: not compressed (the plugin compresses it again for the game, so a
 /// file that is copied compressed would reach the game compressed two times).
 fn game_file(archive: &Garc, id: usize) -> Option<Vec<u8>> {
@@ -298,6 +302,46 @@ impl Library {
             pack.kept_models.push(base);
         }
         self.store_user_pack(sd, Some(&old), pack, new_files)
+    }
+
+    /// Gives a form of a pack its own model, or takes it away (`imported` is None). It is for the forms that have no model of the pack yet, like
+    /// a new form: the form then shows its own model and the other forms of the species keep theirs. `name` is the name of the new model.
+    /// A form that has a model of its pack is handled like in [`Library::set_model`].
+    pub fn set_form_model(&mut self, sd: &SdCard, species: &Ref, form: u16, imported: Option<Vec<Vec<u8>>>, name: &str) -> Result<(), String> {
+        if let Some(files) = &imported {
+            if files.len() != MODEL_FILES {
+                return Err(format!("A model has {MODEL_FILES} files, not {}.", files.len()));
+            }
+        }
+        // The model of a species of a pack (form 0) is not the model of a form.
+        let Some(place) = self.packs.iter().position(|pack| self.is_active(&pack.id) && pack.forms.iter().any(|f| f.species == *species && f.form == form)) else {
+            return self.set_model(sd, species, form, imported);
+        };
+        let old = self.packs[place].clone();
+        let mut pack = old.clone();
+        let Some(entry) = pack.forms.iter_mut().find(|f| f.species == *species && f.form == form) else { return Err("No installed pack owns this form.".into()) };
+        let own = match &entry.model {
+            None => None,
+            Some(ModelRef::File { file }) if file.ends_with(USER_SUFFIX) => Some(file.clone()),
+            Some(_) => return self.set_model(sd, species, form, imported),
+        };
+        let new_model = match (imported, own) {
+            (Some(files), Some(file)) => Some((file, files)),
+            (Some(files), None) => {
+                let file = format!("{name}{USER_SUFFIX}");
+                if file.chars().count() > 60 {
+                    return Err(format!("The name of the model '{name}' is too long."));
+                }
+                entry.model = Some(ModelRef::File { file: file.clone() });
+                Some((file, files))
+            }
+            (None, Some(_)) => {
+                entry.model = None;
+                None
+            }
+            (None, None) => return Err("This form has no model of its own.".into()),
+        };
+        self.store_user_pack(sd, Some(&old), pack, new_model)
     }
 
     /// Replaces a model of a species of the game (slot 0 is the normal model) by an imported one, or puts the model of the game

@@ -222,6 +222,10 @@ pub struct ModelTab {
     variants: Vec<Variant>,
     /// True when the female model of the normal form is shown.
     female: bool,
+    /// False when the form of the page has no model of its own and the model that is shown is another one.
+    shows_own_model: bool,
+    /// The form of the menu at the top of the page.
+    top_form: usize,
     variants_of: Option<usize>,
     /// The import or the reset that runs in a thread.
     job: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
@@ -234,7 +238,7 @@ pub struct ModelTab {
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, female: false, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
+        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, female: false, shows_own_model: true, top_form: 0, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
     }
 }
 
@@ -437,7 +441,11 @@ impl ModelTab {
             (f, true) => f + 1,
             (f, false) => f,
         };
-        self.form = available.iter().find(|v| v.slot as usize == wanted).or(available.first()).map_or(0, |v| v.slot);
+        let own = available.iter().find(|v| v.slot as usize == wanted);
+        // A form that has no model of its own (a new form) shows the first model, and an import gives it a model of its own.
+        self.shows_own_model = own.is_some();
+        self.top_form = form;
+        self.form = own.or(available.first()).map_or(0, |v| v.slot);
         self.load(species, self.form);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| self.view(ui));
@@ -564,6 +572,15 @@ impl ModelTab {
     fn import_target(&self, species: usize) -> Option<(Target, String)> {
         if !self.variants.iter().any(|v| v.slot == self.form) {
             return None;
+        }
+        if species <= crate::SPECIES.len() {
+            // A form that a pack adds to a species of the game (a new form): the import gives it a model of its own, the other models stay.
+            if crate::extras::pack_forms(species).iter().any(|f| f.form as usize == self.top_form) {
+                return Some((Target::Pack(sango_pack::Ref::Game(species as u16), self.top_form as u16), format!("pm{species:04}_{:02}", self.top_form)));
+            }
+            if !self.shows_own_model {
+                return None;
+            }
         }
         if species <= crate::SPECIES.len() {
             return Some((Target::Game(species as u16, self.form), format!("pm{species:04}_{:02}", 80 + u16::from(self.form))));
