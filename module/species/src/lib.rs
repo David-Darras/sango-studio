@@ -821,7 +821,7 @@ impl Species {
                 let forms = self.total_form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
                 let species_number = self.species;
-                let items: Vec<usize> = extras::pack_forms(species_number).iter().filter(|f| f.mega_item != 0).map(|f| f.form as usize).collect();
+                let items: Vec<usize> = extras::pack_forms(species_number).iter().filter(|f| f.mega.is_mega()).map(|f| f.form as usize).collect();
                 let form_text = |form: usize| form_names::form_label(species_number, form, items.contains(&form));
                 let form_combo = egui::ComboBox::from_id_salt("form_menu").selected_text(form_text(self.form)).width(150.0).show_ui(ui, |ui| {
                     for form in 0..forms {
@@ -918,18 +918,18 @@ impl Species {
     /// Makes a new form of the open species with the data that are open (like the button "+ New item"): the form is kept in the pack of
     /// the user and is open at once.
     fn add_form(&mut self, session: &Session) {
-        self.new_form(session, 0);
+        self.new_form(session, sango_pack::table::MegaCondition::Never);
     }
 
-    /// Makes a new form of the open species with the data that are open. `mega_item` is the item that changes the Pokémon into the form
-    /// in a battle (0: it does not change). The new form is open at once.
-    fn new_form(&mut self, session: &Session, mega_item: u16) {
+    /// Makes a new form of the open species with the data that are open. `mega` tells what lets the Pokémon change into the form in a
+    /// battle (`Never`: it does not change). The new form is open at once.
+    fn new_form(&mut self, session: &Session, mega: sango_pack::table::MegaCondition) {
         let (Some(sd), Some(data)) = (session.sd.as_ref(), self.data.as_ref()) else { return };
         let species = self.pack_ref();
         let form = self.total_form_count();
         let result = u16::try_from(form).map_err(|_| "The species has too many forms.".to_string()).and_then(|number| {
             let mut library = sango_pack::Library::open(sd)?;
-            library.add_form(sd, species, number, &data.to_bytes(), mega_item)?;
+            library.add_form(sd, species, number, &data.to_bytes(), mega)?;
             library.save(sd)
         });
         match result {
@@ -2641,7 +2641,7 @@ mod test {
         mega[0] = 99;
         extras::set_for_test(sango_pack::Table {
             species: vec![SpeciesRecord { id: 724, model_form: 1, name: "Rowlet".into(), data: rowlet, moves: vec![(33, 1), (45, 4)], evolutions: vec![(4, 17, 725)] }, SpeciesRecord { id: 725, model_form: 2, name: "Dartrix".into(), data: vec![1; 0x50], moves: Vec::new(), evolutions: Vec::new() }],
-            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: mega, mega_item: 0 }],
+            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: mega, mega: sango_pack::table::MegaCondition::Never }],
         });
         let folder = std::env::temp_dir().join(format!("sango_species_packs_{}", std::process::id()));
         std::fs::create_dir_all(folder.join("sdmc").join("sango-studio")).unwrap();

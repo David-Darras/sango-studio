@@ -1,7 +1,7 @@
 //! `species/table.bin`: the file that the plugin reads to add species and forms to the game.
 //!
 //! ```text
-//! Header, 16 bytes:   "SSPT", version u32 (1), species count u16, form count u16, 4 bytes of zero
+//! Header, 16 bytes:   "SSPT", version u32 (2), species count u16, form count u16, 4 bytes of zero
 //! Species, 256 bytes each, in the order of their numbers (the first one is the number FIRST_SPECIES):
 //!    0  u16  number of the species          2  u16  model form
 //!    4  24 x u16  name, UTF-16, zero at the end
@@ -18,7 +18,7 @@
 use crate::pack::{DATA_SIZE, MAX_EVOLUTIONS, MAX_MOVES, MAX_NAME};
 
 pub const SIGNATURE: &[u8; 4] = b"SSPT";
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const HEADER_SIZE: usize = 16;
 pub const SPECIES_SIZE: usize = 256;
 pub const FORM_SIZE: usize = 88;
@@ -46,13 +46,84 @@ pub struct FormRecord {
     pub form: u16,
     pub model_form: u16,
     pub data: Vec<u8>,
-    /// The item that a Pokémon of the species holds to change into this form in a battle, like a Mega Evolution. 0: no change.
-    pub mega_item: u16,
+    /// What lets a Pokémon of the species change into this form in a battle, like a Mega Evolution.
+    pub mega: MegaCondition,
+}
+
+/// What a Pokémon needs to change into a form in a battle, like a Mega Evolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum MegaCondition {
+    /// The form is not a Mega Evolution: the Pokémon never changes into it.
+    Never,
+    /// No condition: the Pokémon can always change into it.
+    Always,
+    /// The Pokémon holds this item (the number of the item).
+    Item(u16),
+    /// The Pokémon knows this move (the number of the move).
+    Move(u16),
+    /// The Pokémon has this ability (the number of the ability).
+    Ability(u16),
+}
+
+/// The largest number that a condition keeps: 13 bits in the file.
+pub const MEGA_ARGUMENT_MAX: u16 = 0x1FFF;
+
+impl MegaCondition {
+    /// The 16 bits of the file: the kind in the 3 high bits (0 never, 1 always, 2 item, 3 move, 4 ability), the number in the 13 others.
+    pub fn to_bits(self) -> u16 {
+        let (kind, number) = match self {
+            MegaCondition::Never => (0u16, 0),
+            MegaCondition::Always => (1, 0),
+            MegaCondition::Item(n) => (2, n),
+            MegaCondition::Move(n) => (3, n),
+            MegaCondition::Ability(n) => (4, n),
+        };
+        kind << 13 | (number & MEGA_ARGUMENT_MAX)
+    }
+
+    /// The condition of 16 bits of the file. A kind that this program does not know gives `Never`.
+    pub fn from_bits(bits: u16) -> MegaCondition {
+        let number = bits & MEGA_ARGUMENT_MAX;
+        match bits >> 13 {
+            1 => MegaCondition::Always,
+            2 => MegaCondition::Item(number),
+            3 => MegaCondition::Move(number),
+            4 => MegaCondition::Ability(number),
+            _ => MegaCondition::Never,
+        }
+    }
+
+    /// The number of the item, the move or the ability. 0 for the others.
+    pub fn number(self) -> u16 {
+        match self {
+            MegaCondition::Item(n) | MegaCondition::Move(n) | MegaCondition::Ability(n) => n,
+            _ => 0,
+        }
+    }
+
+    /// True when a Pokémon can change into the form.
+    pub fn is_mega(self) -> bool {
+        self != MegaCondition::Never
+    }
+
+    /// An error when the number does not fit in the file.
+    pub fn check(self) -> Result<(), String> {
+        if self.number() > MEGA_ARGUMENT_MAX {
+            return Err(format!("The number {} is too large for a condition (the largest is {MEGA_ARGUMENT_MAX}).", self.number()));
+        }
+        Ok(())
+    }
 }
 
 /// The items that the first four forms of a species of the older packs use to change in a battle (rank 0 to 3): the Life Orb, the Choice
-/// Band, the Choice Specs and the Choice Scarf. A form that does not say its item gets the item of its rank.
+/// Band, the Choice Specs and the Choice Scarf.
 pub const LEGACY_MEGA_ITEMS: [u16; 4] = [0x010E, 0x00DC, 0x0129, 0x011F];
+
+/// The condition of a form that does not say its own: the item of its rank among the forms of its species (the rule of the first packs).
+pub fn legacy_mega(rank: usize) -> MegaCondition {
+    LEGACY_MEGA_ITEMS.get(rank).map_or(MegaCondition::Never, |item| MegaCondition::Item(*item))
+}
 
 /// What the file holds.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -113,7 +184,7 @@ impl Table {
             put_u16(&mut out, form.form);
             put_u16(&mut out, form.model_form);
             out.extend_from_slice(&form.data);
-            put_u16(&mut out, form.mega_item);
+            put_u16(&mut out, form.mega.to_bits());
         }
         Ok(out)
     }
@@ -149,7 +220,7 @@ impl Table {
         }
         for place in 0..form_count {
             let at = HEADER_SIZE + species_count * SPECIES_SIZE + place * FORM_SIZE;
-            table.forms.push(FormRecord { species: u16_at(at), form: u16_at(at + 2), model_form: u16_at(at + 4), data: bytes[at + 6..at + 6 + DATA_SIZE].to_vec(), mega_item: u16_at(at + 6 + DATA_SIZE) });
+            table.forms.push(FormRecord { species: u16_at(at), form: u16_at(at + 2), model_form: u16_at(at + 4), data: bytes[at + 6..at + 6 + DATA_SIZE].to_vec(), mega: MegaCondition::from_bits(u16_at(at + 6 + DATA_SIZE)) });
         }
         Ok(table)
     }

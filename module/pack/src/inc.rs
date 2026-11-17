@@ -222,8 +222,7 @@ pub fn table_from_inc(species: &[IncSpecies], forms: &[IncForm]) -> Result<Table
     }
     for form in forms {
         let rank = table.forms.iter().filter(|other| other.species == form.species).count();
-        let mega_item = crate::table::LEGACY_MEGA_ITEMS.get(rank).copied().unwrap_or(0);
-        table.forms.push(FormRecord { species: form.species, form: form.form, model_form: form.model_form, data: form.data.clone(), mega_item });
+        table.forms.push(FormRecord { species: form.species, form: form.form, model_form: form.model_form, data: form.data.clone(), mega: crate::table::legacy_mega(rank) });
     }
     Ok(table)
 }
@@ -378,7 +377,7 @@ pub fn packs_from_inc(gen7: &[IncSpecies], gen8: &[IncSpecies], forms: &[IncForm
                 *offset += own;
             }
         }
-        made.push(PackForm { species: reference(form.species, &names)?, form: form.form, name: String::new(), model, female_model, data: to_hex(&form.data), mega_item: None });
+        made.push(PackForm { species: reference(form.species, &names)?, form: form.form, name: String::new(), model, female_model, data: to_hex(&form.data), mega: None });
     }
     extra.pack.forms = made;
     Ok(vec![seven, eight, extra])

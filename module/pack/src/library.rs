@@ -375,7 +375,8 @@ impl Library {
 
     /// Adds a form to a species of the game or of a pack, with the data `data` (80 bytes) and the number `form`. The form is kept in the pack
     /// of the user, `studio-models`, that this creates. The form shows the model that the game has for it until the user imports one.
-    pub fn add_form(&mut self, sd: &SdCard, species: Ref, form: u16, data: &[u8], mega_item: u16) -> Result<(), String> {
+    pub fn add_form(&mut self, sd: &SdCard, species: Ref, form: u16, data: &[u8], mega: crate::table::MegaCondition) -> Result<(), String> {
+        mega.check()?;
         if data.len() != crate::pack::DATA_SIZE {
             return Err(format!("The data of a form has {} bytes, not {}.", crate::pack::DATA_SIZE, crate::pack::DATA_SIZE));
         }
@@ -384,13 +385,14 @@ impl Library {
         if pack.forms.iter().any(|f| f.species == species && f.form == form) {
             return Err(format!("The form {form} is already one of your forms."));
         }
-        pack.forms.push(PackForm { species, form, name: String::new(), model: None, female_model: None, data: crate::pack::to_hex(data), mega_item: Some(mega_item) });
+        pack.forms.push(PackForm { species, form, name: String::new(), model: None, female_model: None, data: crate::pack::to_hex(data), mega: Some(mega) });
         self.store_user_pack(sd, old.as_ref(), pack, None)
     }
 
-    /// Sets the item that changes a Pokémon of the species into its form `form` of a pack in a battle (0: it does not change). The pack that
-    /// owns the form is written again.
-    pub fn set_mega_item(&mut self, sd: &SdCard, species: &Ref, form: u16, item: u16) -> Result<(), String> {
+    /// Sets what lets a Pokémon of the species change into its form `form` of a pack in a battle. The pack that owns the form is written
+    /// again.
+    pub fn set_mega(&mut self, sd: &SdCard, species: &Ref, form: u16, mega: crate::table::MegaCondition) -> Result<(), String> {
+        mega.check()?;
         let place = self
             .packs
             .iter()
@@ -399,7 +401,7 @@ impl Library {
         let old = self.packs[place].clone();
         let mut pack = old.clone();
         if let Some(found) = pack.forms.iter_mut().find(|f| f.species == *species && f.form == form) {
-            found.mega_item = Some(item);
+            found.mega = Some(mega);
         }
         self.store_user_pack(sd, Some(&old), pack, None)
     }
@@ -458,11 +460,11 @@ impl Library {
             let found = self.is_active(&registered.pack).then(|| self.packs.iter().find(|p| p.id == registered.pack)).flatten().and_then(|pack| pack.forms.iter().find(|f| f.species == registered.species && f.form == registered.form));
             let species = self.resolve(&registered.species).unwrap_or(0);
             let rank = table.forms.iter().filter(|other| other.species == species).count();
-            let legacy = crate::table::LEGACY_MEGA_ITEMS.get(rank).copied().unwrap_or(0);
+            let legacy = crate::table::legacy_mega(rank);
             table.forms.push(match found {
                 // A form of a species of the game has its model in the list of that species, not in a carrier.
-                Some(form) => FormRecord { species, form: form.form, model_form: if registered.slots > 0 { 0 } else { self.model_form(&registered.pack, form.model.as_ref()) }, data: form.data_bytes()?, mega_item: form.mega_item.unwrap_or(legacy) },
-                None => FormRecord { species, form: registered.form, model_form: 0, data: vec![0; crate::pack::DATA_SIZE], mega_item: 0 },
+                Some(form) => FormRecord { species, form: form.form, model_form: if registered.slots > 0 { 0 } else { self.model_form(&registered.pack, form.model.as_ref()) }, data: form.data_bytes()?, mega: form.mega.unwrap_or(legacy) },
+                None => FormRecord { species, form: registered.form, model_form: 0, data: vec![0; crate::pack::DATA_SIZE], mega: crate::table::MegaCondition::Never },
             });
         }
         Ok(table)

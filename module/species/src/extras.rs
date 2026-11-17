@@ -140,7 +140,7 @@ mod test {
         let record = |id: u16, name: &str| SpeciesRecord { id, model_form: 1, name: name.into(), data: vec![7; 0x50], moves: vec![(33, 1)], evolutions: Vec::new() };
         Table {
             species: vec![record(724, "Rowlet"), record(725, ""), record(726, "Decidueye")],
-            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: vec![9; 0x50], mega_item: 0 }, FormRecord { species: 726, form: 1, model_form: 4, data: vec![5; 0x50], mega_item: 0 }],
+            forms: vec![FormRecord { species: 3, form: 2, model_form: 0, data: vec![9; 0x50], mega: sango_pack::table::MegaCondition::Never }, FormRecord { species: 726, form: 1, model_form: 4, data: vec![5; 0x50], mega: sango_pack::table::MegaCondition::Never }],
         }
     }
 
