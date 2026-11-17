@@ -67,23 +67,7 @@ fn category_of(damage_kind: u8) -> Category {
     }
 }
 
-/// The accuracy as text: a percentage, or a dash when the move never misses or has no accuracy.
-fn accuracy_text(accuracy: u8) -> String {
-    if accuracy == 0 || accuracy > 100 {
-        "—".to_string()
-    } else {
-        accuracy.to_string()
-    }
-}
-
-/// The power as text: a number, or a dash when the move has no fixed power.
-fn power_text(power: u8) -> String {
-    if power <= 1 {
-        "—".to_string()
-    } else {
-        power.to_string()
-    }
-}
+use sango_core::moves::{accuracy_number_text as accuracy_text, power_text};
 
 /// A drop-down list of moves. `value` is the move number. The button is `width` points wide. Gives true when the move
 /// changed.

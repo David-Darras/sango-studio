@@ -22,6 +22,10 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         sango_ui::theme::apply(&cc.egui_ctx);
+        // The Overworld page draws in 3D with the graphics of the window.
+        if let Some(state) = cc.wgpu_render_state.clone() {
+            cc.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(sango_overworld::RENDER_STATE_KEY), state));
+        }
         let modules: Vec<Box<dyn Module>> = vec![
             Box::new(sango_home::Home::default()),
             Box::new(sango_archive::Archive::default()),
@@ -31,6 +35,7 @@ impl App {
             Box::new(sango_move::Move::default()),
             Box::new(sango_ability::Ability::default()),
             Box::new(sango_type::Type::default()),
+            Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_code::Code::default()),
         ];
@@ -143,10 +148,9 @@ impl App {
                 }
             }
         } else {
-            let key_return = ctx.input_mut(|i| {
-                i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                    || i.consume_key(egui::Modifiers::NONE, egui::Key::F6)
-            });
+            // The Overworld page uses Escape to cancel a placement: only F6 goes back to the side bar there.
+            let escape_free = self.modules.get(self.current).is_some_and(|module| module.title() == "Overworld");
+            let key_return = ctx.input_mut(|i| (!escape_free && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) || i.consume_key(egui::Modifiers::NONE, egui::Key::F6));
             if key_return || widget::take_sidebar_focus_request(ctx) {
                 self.side_bar_focus = true;
                 ctx.request_repaint();
@@ -163,7 +167,9 @@ impl App {
         self.session.focus_page = !self.side_bar_focus;
         widget::set_page_focus(ctx, self.session.focus_page);
         self.side_bar(ctx);
-        let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(18.0));
+        // The Overworld page uses all the area, for the 3D view.
+        let margin = if self.modules.get(self.current).is_some_and(|module| module.title() == "Overworld") { 0.0 } else { 18.0 };
+        let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(margin));
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             widget::update_navigation(ui);
             if let Some(module) = self.modules.get_mut(self.current) {
@@ -225,6 +231,8 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Wgpu,
+        // The Overworld page draws a 3D scene that needs a depth buffer.
+        depth_buffer: 32,
         ..Default::default()
     };
     eframe::run_native(sango_core::NAME, options, Box::new(|cc| Ok(Box::new(App::new(cc)))))

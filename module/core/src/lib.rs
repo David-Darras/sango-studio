@@ -8,6 +8,7 @@ mod setting;
 
 pub mod backup;
 pub mod bundle;
+pub mod bytes;
 pub mod clim;
 pub mod csv_text;
 pub mod custom_ability;
@@ -22,6 +23,8 @@ pub mod learnset;
 pub mod lz;
 pub mod model;
 pub mod motion;
+pub mod patricia;
+pub mod pica;
 pub mod modified;
 pub mod moves;
 pub mod posing;
@@ -33,6 +36,7 @@ pub use bundle::Bundle;
 pub use clim::Clim;
 pub use dump::Dump;
 pub use garc::Garc;
+pub use dump::archive_path;
 pub use sd::{default_workspace, erase_count, set_workspace, Erased, SdCard, SD_FOLDER_NAME};
 
 /// The name of the application.

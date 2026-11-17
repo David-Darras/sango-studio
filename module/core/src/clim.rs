@@ -332,8 +332,18 @@ impl Clim {
     }
 }
 
+/// The RGBA pixels of a picture file (compressed or not) that has the size `width` × `height`.
+pub fn decode_sized(bytes: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String> {
+    let raw = if crate::lz::is_compressed(bytes) { crate::lz::decompress(bytes)? } else { bytes.to_vec() };
+    let image = Clim::parse(&raw)?;
+    if (image.width(), image.height()) != (width, height) {
+        return Err(format!("The picture has {} × {} pixels, not {width} × {height}.", image.width(), image.height()));
+    }
+    image.to_rgba()
+}
+
 /// The place of a pixel inside a tile of 8 × 8, from its number: the bits of x and y alternate.
-fn morton_position(offset: usize) -> (usize, usize) {
+pub(crate) fn morton_position(offset: usize) -> (usize, usize) {
     let x = (offset & 1) | ((offset >> 1) & 2) | ((offset >> 2) & 4);
     let y = ((offset >> 1) & 1) | ((offset >> 2) & 2) | ((offset >> 3) & 4);
     (x, y)
@@ -347,7 +357,7 @@ const ETC1_MODIFIERS: [[i32; 2]; 8] = [[2, 8], [5, 17], [9, 29], [13, 42], [18, 
 /// `alpha` has 4 bits for each pixel: the pixel (x, y) is at the bits (x × 4 + y) × 4.
 /// `color` is the block: two base colors, two tables, and two bits for each pixel (bit x × 4 + y
 /// for the low bit of the index, bit 16 + x × 4 + y for the sign).
-fn etc1_block(alpha: u64, color: u64, mut put: impl FnMut(usize, usize, [u8; 4])) {
+pub(crate) fn etc1_block(alpha: u64, color: u64, mut put: impl FnMut(usize, usize, [u8; 4])) {
     let flipped = (color >> 32) & 1 == 1;
     let differential = (color >> 33) & 1 == 1;
     let mut base = [[0i32; 3]; 2];

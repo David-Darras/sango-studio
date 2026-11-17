@@ -6,6 +6,11 @@ const REQUIRED: [&str; 3] = ["a/0/1/3", "a/0/3/9", "a/2/7/7"];
 /// The identifier of Pokemon Omega Ruby, which Sango Studio does not support.
 const OMEGA_RUBY_ID: &str = "000400000011c400";
 
+/// The path of an archive in a folder that holds the folder `a`: `archive_path(root, 277)` is `root/a/2/7/7`.
+pub fn archive_path(root: &Path, number: usize) -> PathBuf {
+    root.join("a").join((number / 100).to_string()).join((number / 10 % 10).to_string()).join((number % 10).to_string())
+}
+
 /// A dump of the romfs of the game: a folder that has the folder `a`.
 #[derive(Clone, Debug)]
 pub struct Dump {
@@ -76,7 +81,7 @@ impl Dump {
 
     /// The path of an archive: `archive(277)` is `a/2/7/7`.
     pub fn archive(&self, number: usize) -> PathBuf {
-        self.root.join("a").join((number / 100).to_string()).join((number / 10 % 10).to_string()).join((number % 10).to_string())
+        archive_path(&self.root, number)
     }
 }
 

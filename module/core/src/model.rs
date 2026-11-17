@@ -258,27 +258,7 @@ impl<'a> File<'a> {
     }
 }
 
-/// The values that a list of commands gives to the registers of the graphics chip, and the place of each value
-/// (the number of the word in the list).
-fn registers(words: &[u32]) -> HashMap<u16, (u32, usize)> {
-    let mut out = HashMap::new();
-    let mut at = 0;
-    while at + 1 < words.len() {
-        let (value, header) = (words[at], words[at + 1]);
-        let register = (header & 0xffff) as u16;
-        let extra = ((header >> 20) & 0x7ff) as usize;
-        let consecutive = header >> 31 != 0;
-        if at + 2 + extra > words.len() {
-            break;
-        }
-        out.insert(register, (value, at));
-        for k in 0..extra {
-            out.insert(if consecutive { register + 1 + k as u16 } else { register }, (words[at + 2 + k], at + 2 + k));
-        }
-        at += 2 + extra + (extra & 1);
-    }
-    out
-}
+use crate::pica::registers;
 
 /// What an attribute of a vertex is, from its place among the attributes and its format.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -618,7 +598,7 @@ fn read_vertex(file: &File, start: usize, slots: &[Format], kinds: &[Field], pal
 }
 
 /// The size in bytes of a picture of the graphics chip: the format, then its width and height.
-fn texture_size(format: u32, width: usize, height: usize) -> usize {
+pub fn texture_size(format: u32, width: usize, height: usize) -> usize {
     let pixels = width * height;
     match format {
         0 => pixels * 4,
@@ -652,45 +632,11 @@ pub fn parse_textures(data: &[u8]) -> Result<Vec<Texture>, String> {
     Ok(out)
 }
 
-/// The modifiers of the ETC1 tables, with their signs.
-const ETC1_TABLE: [[i32; 4]; 8] = [[2, 8, -2, -8], [5, 17, -5, -17], [9, 29, -9, -29], [13, 42, -13, -42], [18, 60, -18, -60], [24, 80, -24, -80], [33, 106, -33, -106], [47, 183, -47, -183]];
-
-fn extend5(value: i32) -> i32 {
-    (value << 3) | (value >> 2)
-}
-
 /// Decodes a block of 4 × 4 pixels of ETC1, row after row.
 fn etc1_block(block: u64) -> [[u8; 3]; 16] {
-    let differential = (block >> 33) & 1 == 1;
-    let flip = (block >> 32) & 1 == 1;
-    let tables = [((block >> 37) & 7) as usize, ((block >> 34) & 7) as usize];
-    let signed3 = |value: u64| if value >= 4 { value as i32 - 8 } else { value as i32 };
-    let (first, second): ([i32; 3], [i32; 3]) = if differential {
-        let (r, g, b) = (((block >> 59) & 31) as i32, ((block >> 51) & 31) as i32, ((block >> 43) & 31) as i32);
-        let (r2, g2, b2) = ((r + signed3((block >> 56) & 7)).clamp(0, 31), (g + signed3((block >> 48) & 7)).clamp(0, 31), (b + signed3((block >> 40) & 7)).clamp(0, 31));
-        ([extend5(r), extend5(g), extend5(b)], [extend5(r2), extend5(g2), extend5(b2)])
-    } else {
-        let c = |shift: u32| ((block >> shift) & 15) as i32 * 17;
-        ([c(60), c(52), c(44)], [c(56), c(48), c(40)])
-    };
-    let (low, high) = ((block & 0xffff) as u32, ((block >> 16) & 0xffff) as u32);
     let mut out = [[0u8; 3]; 16];
-    for x in 0..4 {
-        for y in 0..4 {
-            let k = x * 4 + y;
-            let index = (((high >> k) & 1) << 1 | ((low >> k) & 1)) as usize;
-            let in_second = if flip { y >= 2 } else { x >= 2 };
-            let (base, table) = if in_second { (second, tables[1]) } else { (first, tables[0]) };
-            let modifier = ETC1_TABLE[table][index];
-            out[y * 4 + x] = [(base[0] + modifier).clamp(0, 255) as u8, (base[1] + modifier).clamp(0, 255) as u8, (base[2] + modifier).clamp(0, 255) as u8];
-        }
-    }
+    crate::clim::etc1_block(u64::MAX, block, |x, y, rgba| out[y * 4 + x] = [rgba[0], rgba[1], rgba[2]]);
     out
-}
-
-/// The place of the pixel number `n` of a tile of 8 × 8 pixels: the bits of x and y alternate.
-fn morton(n: usize) -> (usize, usize) {
-    ((n & 1) | ((n >> 1) & 2) | ((n >> 2) & 4), ((n >> 1) & 1) | ((n >> 2) & 2) | ((n >> 3) & 4))
 }
 
 /// A value of `bits` bits as a byte.
@@ -700,7 +646,7 @@ fn expand(value: u32, bits: u32) -> u8 {
 
 /// Decodes a picture of the graphics chip to RGBA, with the first row at the top. The chip stores a picture in tiles
 /// of 8 × 8 pixels, with the first row of tiles at the bottom. `None` for a format that is not known.
-fn decode_texture(format: u32, width: usize, height: usize, data: &[u8]) -> Option<Vec<u8>> {
+pub fn decode_texture(format: u32, width: usize, height: usize, data: &[u8]) -> Option<Vec<u8>> {
     if width == 0 || height == 0 || width % 8 != 0 || height % 8 != 0 || data.len() < texture_size(format, width, height) {
         return None;
     }
@@ -737,7 +683,7 @@ fn decode_texture(format: u32, width: usize, height: usize, data: &[u8]) -> Opti
             for ty in 0..tiles_y {
                 for tx in 0..tiles_x {
                     for n in 0..64 {
-                        let (x, y) = morton(n);
+                        let (x, y) = crate::clim::morton_position(n);
                         let rgba = match format {
                             0 => {
                                 let p = &data[at..at + 4];

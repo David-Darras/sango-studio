@@ -6,6 +6,4 @@ description = "The cries of the Pokemon: the files of the game, sound files, and
 
 [dependencies]
 puremp3 = "0.1"
-
-[dev-dependencies]
 sango-core.workspace = true

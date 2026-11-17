@@ -1,0 +1,15 @@
+[package]
+name = "sango-overworld"
+version.workspace = true
+edition.workspace = true
+description = "The overworld editor of Sango Studio: the blocks, the tiles, the events and the models of the maps."
+
+[dependencies]
+eframe.workspace = true
+sango-core.workspace = true
+sango-ui.workspace = true
+sango-species.workspace = true
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.29"
+png = "0.17"
+rfd.workspace = true

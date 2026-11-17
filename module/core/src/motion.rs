@@ -94,13 +94,7 @@ pub struct MotionPack {
     data: Vec<u8>,
 }
 
-fn u16_at(data: &[u8], at: usize) -> Result<u16, String> {
-    data.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]])).ok_or_else(|| format!("The motion data stops at {at:#x}."))
-}
-
-fn u32_at(data: &[u8], at: usize) -> Result<u32, String> {
-    data.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok_or_else(|| format!("The motion data stops at {at:#x}."))
-}
+use crate::bytes::{u16_at, u32_at};
 
 fn f32_at(data: &[u8], at: usize) -> Result<f32, String> {
     Ok(f32::from_bits(u32_at(data, at)?))

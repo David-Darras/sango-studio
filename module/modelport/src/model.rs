@@ -156,18 +156,7 @@ fn words_of(template: &Template, offset: usize, count: usize) -> Vec<u32> {
 
 /// The registers that a list of commands writes, with their values (a run of registers writes the next ones).
 fn registers(words: &[u32]) -> HashMap<u32, u32> {
-    let mut regs = HashMap::new();
-    let mut i = 0;
-    while i + 1 < words.len() {
-        let header = words[i + 1];
-        let (reg, extra, seq) = (header & 0xFFFF, ((header >> 20) & 0x7FF) as usize, (header >> 31) & 1);
-        let values = std::iter::once(words[i]).chain(words[i + 2..(i + 2 + extra).min(words.len())].iter().copied());
-        for (k, v) in values.enumerate() {
-            regs.insert(reg + if seq == 1 { k as u32 } else { 0 }, v);
-        }
-        i += 2 + extra + ((extra + 2) % 2);
-    }
-    regs
+    sango_core::pica::registers(words).into_iter().map(|(register, (value, _))| (u32::from(register), value)).collect()
 }
 
 /// (alpha test, alpha blend) of a template material, from its commands.

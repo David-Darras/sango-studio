@@ -31,6 +31,22 @@ pub fn folder_of(relative: &str) -> Option<String> {
     folders().into_iter().map(|(name, _)| name).find(|name| name == folder)
 }
 
+/// The bytes of a list: the number of files, then the number and the size of each file. The files must be sorted by number.
+pub fn index_bytes(files: &[(u32, u32)]) -> Vec<u8> {
+    let mut bytes = (files.len() as u32).to_le_bytes().to_vec();
+    for (number, size) in files {
+        bytes.extend_from_slice(&number.to_le_bytes());
+        bytes.extend_from_slice(&size.to_le_bytes());
+    }
+    bytes
+}
+
+/// The files of a list: the number and the size of each.
+pub fn parse_index(bytes: &[u8]) -> Result<Vec<(u32, u32)>, String> {
+    let count = crate::bytes::u32_at(bytes, 0)? as usize;
+    (0..count).map(|i| Ok((crate::bytes::u32_at(bytes, 4 + 8 * i)?, crate::bytes::u32_at(bytes, 8 + 8 * i)?))).collect()
+}
+
 /// Writes the list of the files of a folder.
 pub fn write_index(sd: &SdCard, folder: &str) -> Result<(), String> {
     let mut files: Vec<(u32, u32)> = Vec::new();
@@ -44,12 +60,7 @@ pub fn write_index(sd: &SdCard, folder: &str) -> Result<(), String> {
         return sd.remove(&format!("{folder}/index.bin")).map(|_| ());
     }
     files.sort_unstable();
-    let mut bytes = (files.len() as u32).to_le_bytes().to_vec();
-    for (number, size) in &files {
-        bytes.extend_from_slice(&number.to_le_bytes());
-        bytes.extend_from_slice(&size.to_le_bytes());
-    }
-    sd.write(&format!("{folder}/index.bin"), &bytes).map(|_| ())
+    sd.write(&format!("{folder}/index.bin"), &index_bytes(&files)).map(|_| ())
 }
 
 /// After a write or a removal: writes the list of the folder of the path, when it has one.

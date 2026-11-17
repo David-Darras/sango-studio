@@ -32,6 +32,7 @@ mod text_tab;
 mod names;
 
 /// The names of the 18 types, in the order of the game: Normal to Fairy.
+pub use names::ITEM as ITEM_NAMES;
 pub use names::TYPE as TYPE_NAMES;
 
 use data::SpeciesData;

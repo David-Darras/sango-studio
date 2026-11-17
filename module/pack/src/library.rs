@@ -64,12 +64,7 @@ pub const USER_SUFFIX: &str = "+new";
 /// A file of the model archive as the plugin serves it from the SD card: not compressed (the plugin compresses it again for the game, so a
 /// file that is copied compressed would reach the game compressed two times).
 fn game_file(archive: &Garc, id: usize) -> Option<Vec<u8>> {
-    let bytes = archive.first_file(id)?;
-    if sango_core::lz::is_compressed(bytes) {
-        sango_core::lz::decompress(bytes).ok()
-    } else {
-        Some(bytes.to_vec())
-    }
+    archive.first_file_decompressed(id)
 }
 
 fn pack_path(id: &str) -> String {

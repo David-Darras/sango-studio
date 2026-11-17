@@ -32,8 +32,16 @@ const PUBLISHED: [&str; 17] = [
     "type/",
 ];
 
-/// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs).
-const CARD_ONLY: [&str; 1] = ["species/model/"];
+/// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs) and the maps of
+/// the Overworld page (the editor of the maps writes them there).
+const CARD_ONLY: [&str; 2] = ["species/model/", "overworld/"];
+
+/// The folder of the maps in the folder of the studio of the SD card.
+pub const OVERWORLD_FOLDER: &str = "overworld";
+
+/// Where the older versions of the editor of the maps wrote its files, in `sango` (next to the folder of the studio), and where they are
+/// now, in `overworld`.
+const OLD_MAP_PLACES: [(&str, &str); 5] = [("overworld_model", "model"), ("land", "land"), ("area", "area"), ("matrix", "matrix"), ("zone", "zone")];
 
 /// The places of the files in the older versions of the studio, and where they are now. A folder ends with `/`.
 const OLD_PLACES: [(&str, &str); 7] = [
@@ -138,6 +146,12 @@ impl SdCard {
         &self.root
     }
 
+    /// The folder of the maps, in the folder of the studio of the SD card: `overworld`. The editor of the maps writes the files of the
+    /// land, the areas, the matrices, the zones and the models of the characters there, and the plugin reads them. They are only on the SD card.
+    pub fn overworld_folder(&self) -> PathBuf {
+        self.root.join(OVERWORLD_FOLDER)
+    }
+
     /// The folder of the 3D models of the packs, in the folder of the studio of the SD card: `species/model`. The plugin reads the models
     /// from there. They are only on the SD card.
     pub fn models_folder(&self) -> PathBuf {
@@ -152,10 +166,11 @@ impl SdCard {
             let bytes = found.iter().map(|file| std::fs::metadata(folder.join(file.trim_start_matches('/'))).map_or(0, |m| m.len())).sum();
             (found.len(), bytes)
         };
-        let (all, models) = (count(&self.root), count(&self.models_folder()));
+        // The maps are the work of the user on the Overworld page: starting from zero does not remove them.
+        let (all, models, maps) = (count(&self.root), count(&self.models_folder()), count(&self.overworld_folder()));
         Erased {
             computer: if self.is_split() { count(&self.local) } else { (0, 0) },
-            card: (all.0 - models.0, all.1 - models.1),
+            card: (all.0 - models.0 - maps.0, all.1 - models.1 - maps.1),
             models,
         }
     }
@@ -173,6 +188,9 @@ impl SdCard {
             let Ok(entries) = std::fs::read_dir(&folder) else { continue };
             for entry in entries.flatten() {
                 let path = entry.path();
+                if entry.file_name() == OVERWORLD_FOLDER && folder == self.root {
+                    continue;
+                }
                 let result = if entry.file_type().is_ok_and(|kind| kind.is_dir()) { std::fs::remove_dir_all(&path) } else { std::fs::remove_file(&path) };
                 result.map_err(|e| format!("{}: {e}", path.display()))?;
             }
@@ -201,6 +219,7 @@ impl SdCard {
     /// keeps only the files that the plugin reads (all of them, as the computer has them).
     fn move_files_to_the_computer(&self) -> Result<(), String> {
         self.move_the_old_models()?;
+        self.move_the_old_maps()?;
         let mut found = Vec::new();
         Self::collect(&self.root, "", &mut found);
         for relative in found.iter().map(|f| f.trim_start_matches('/').to_string()) {
@@ -248,6 +267,22 @@ impl SdCard {
                 std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
             }
             std::fs::rename(&old, &new).map_err(|e| format!("{} to {}: {e}", old.display(), new.display()))?;
+        }
+        Ok(())
+    }
+
+    /// The files of the maps that the older versions of the editor wrote in `sango` (next to the folder of the studio) come into the folder
+    /// `overworld` of the studio.
+    fn move_the_old_maps(&self) -> Result<(), String> {
+        let Some(sango) = self.root.parent().map(|sdmc| sdmc.join("sango")) else { return Ok(()) };
+        for (old, new) in OLD_MAP_PLACES {
+            let (from, to) = (sango.join(old), self.overworld_folder().join(new));
+            if from.is_dir() && !to.exists() {
+                if let Some(folder) = to.parent() {
+                    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+                }
+                std::fs::rename(&from, &to).map_err(|e| format!("{} to {}: {e}", from.display(), to.display()))?;
+            }
         }
         Ok(())
     }
@@ -589,7 +624,7 @@ mod test {
         assert!(sd.files_in("species").is_empty() && !card.join("sango-studio/species/model").exists());
         assert!(card.join("sango/maker/names.bin").exists(), "the other files of the plugin stay");
         assert!(sd.root().is_dir() && work.is_dir(), "the folders stay");
-        assert_eq!(erase_count(), before + 1);
+        assert!(erase_count() > before, "the counter moved (another test may erase at the same time)");
     }
 
     #[test]
@@ -605,5 +640,23 @@ mod test {
         // The next opening does not copy them either.
         let _again = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
         assert!(!work.join("species/model").exists() && sd.models_folder().join("0.raw").is_file());
+    }
+
+    #[test]
+    fn the_maps_of_the_older_editor_come_into_the_overworld_folder_and_stay_on_the_card() {
+        let card = folder("maps").join("sdmc");
+        fs::create_dir_all(card.join("sango/land")).unwrap();
+        fs::write(card.join("sango/land/0.bin"), b"land").unwrap();
+        fs::create_dir_all(card.join("sango/overworld_model")).unwrap();
+        fs::write(card.join("sango/overworld_model/index.bin"), b"models").unwrap();
+        let work = folder("maps_work");
+        let sd = SdCard::open_with(&card.to_string_lossy(), Some(work.clone())).unwrap();
+        assert_eq!(fs::read(sd.overworld_folder().join("land/0.bin")).unwrap(), b"land");
+        assert_eq!(fs::read(sd.overworld_folder().join("model/index.bin")).unwrap(), b"models");
+        assert!(!card.join("sango/land").exists() && !work.join("overworld").exists(), "the maps are not copied to the computer");
+        // Starting from zero keeps them.
+        sd.write("species/table.bin", b"table").unwrap();
+        sd.erase_everything().unwrap();
+        assert!(sd.overworld_folder().join("land/0.bin").is_file());
     }
 }

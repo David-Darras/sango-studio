@@ -8,12 +8,10 @@
 use crate::adpcm::{self, Coefficients, FRAME_BYTES, FRAME_SAMPLES};
 use crate::Sound;
 
-fn u16_at(bytes: &[u8], at: usize) -> Result<u16, String> {
-    bytes.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]])).ok_or_else(|| "The file is cut.".to_string())
-}
+use sango_core::bytes::{put16, u16_at};
 
 fn u32_at(bytes: &[u8], at: usize) -> Result<usize, String> {
-    bytes.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]) as usize).ok_or_else(|| "The file is cut.".to_string())
+    sango_core::bytes::u32_at(bytes, at).map(|value| value as usize)
 }
 
 /// The place of a block of a file by its number in the header: the start and the size.
@@ -73,12 +71,8 @@ pub fn read_wave(wave: &[u8]) -> Result<Sound, String> {
     }
 }
 
-fn put16(out: &mut [u8], at: usize, value: u16) {
-    out[at..at + 2].copy_from_slice(&value.to_le_bytes());
-}
-
 fn put32(out: &mut [u8], at: usize, value: usize) {
-    out[at..at + 4].copy_from_slice(&(value as u32).to_le_bytes());
+    sango_core::bytes::put32(out, at, value as u32);
 }
 
 /// Makes a wave of 4-bit samples from a sound.

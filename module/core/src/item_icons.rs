@@ -4,7 +4,6 @@
 //! picture: they use the empty file [`NO_ICON`]. The price and the pocket are in the file of the item data (the archive
 //! 197); the names are in the file 114 of the texts.
 
-use crate::Clim;
 
 /// The archive of the pictures of the items.
 pub const ARCHIVE: usize = 92;
@@ -74,12 +73,7 @@ pub fn file_of(item: usize) -> Option<usize> {
 
 /// The RGBA pixels of a picture file (compressed or not).
 pub fn decode(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let raw = if crate::lz::is_compressed(bytes) { crate::lz::decompress(bytes)? } else { bytes.to_vec() };
-    let image = Clim::parse(&raw)?;
-    if (image.width(), image.height()) != (SIZE, SIZE) {
-        return Err(format!("The picture has {} × {} pixels.", image.width(), image.height()));
-    }
-    image.to_rgba()
+    crate::clim::decode_sized(bytes, SIZE, SIZE)
 }
 
 /// The price in Poké Dollars and the number of the pocket of the Bag, from the file of the data of an item. The file keeps

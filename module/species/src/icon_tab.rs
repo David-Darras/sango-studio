@@ -261,12 +261,7 @@ impl IconTab {
 
 /// The RGBA pixels of a compressed icon file.
 fn decode(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let raw = if lz::is_compressed(bytes) { lz::decompress(bytes)? } else { bytes.to_vec() };
-    let image = Clim::parse(&raw)?;
-    if (image.width(), image.height()) != (WIDTH, HEIGHT) {
-        return Err(format!("The icon has {} × {} pixels.", image.width(), image.height()));
-    }
-    image.to_rgba()
+    sango_core::clim::decode_sized(bytes, WIDTH, HEIGHT)
 }
 
 #[cfg(test)]

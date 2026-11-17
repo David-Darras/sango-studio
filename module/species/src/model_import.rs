@@ -2,7 +2,7 @@
 //!
 //! The work runs in a thread: the conversion and the writing of all the model files of the packs take some seconds.
 
-use sango_core::{lz, Dump, Garc, SdCard};
+use sango_core::{Dump, Garc, SdCard};
 use sango_modelport::convert::{Templates, POOL};
 use sango_modelport::files::TemplatePacks;
 use sango_pack::{Library, Ref};
@@ -25,12 +25,7 @@ pub enum Request {
 
 /// A file of the model archive, decompressed.
 fn game_file(archive: &Garc, id: usize) -> Result<Vec<u8>, String> {
-    let bytes = archive.first_file(id).ok_or_else(|| format!("The file {id} of the model archive is missing."))?;
-    if lz::is_compressed(bytes) {
-        lz::decompress(bytes)
-    } else {
-        Ok(bytes.to_vec())
-    }
+    archive.first_file_decompressed(id).ok_or_else(|| format!("The file {id} of the model archive is missing."))
 }
 
 /// The first file of the first model of a species of the game: the list of the models says where it is.

@@ -253,11 +253,7 @@ fn read_png(path: &std::path::Path) -> Result<Vec<u8>, String> {
 
 /// The RGBA pixels of an icon file.
 fn decode(bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let image = Clim::parse(bytes)?;
-    if (image.width(), image.height()) != (WIDTH, HEIGHT) {
-        return Err(format!("The icon has {} × {} pixels.", image.width(), image.height()));
-    }
-    image.to_rgba()
+    sango_core::clim::decode_sized(bytes, WIDTH, HEIGHT)
 }
 
 #[cfg(test)]

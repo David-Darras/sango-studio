@@ -10,6 +10,59 @@
 //!
 //! All the numbers are little-endian.
 
+use crate::bytes::u32_at;
+
+/// The alignment of the parts of most bundles.
+pub const ALIGNMENT: usize = 0x80;
+
+/// The start of each resource and the end of the last one, from the table of the offsets.
+fn offsets(data: &[u8]) -> Result<Vec<usize>, String> {
+    let count = u16::from_le_bytes([*data.get(2).ok_or("The bundle is too short.")?, *data.get(3).ok_or("The bundle is too short.")?]) as usize;
+    (0..=count).map(|i| u32_at(data, 4 + 4 * i).map(|offset| offset as usize)).collect()
+}
+
+/// The start and the end of each resource of a bundle, in its bytes.
+pub fn ranges(data: &[u8]) -> Result<Vec<(usize, usize)>, String> {
+    Ok(offsets(data)?.windows(2).map(|pair| (pair[0], pair[1])).collect())
+}
+
+/// Splits a bundle into its resources. Gives the two letters of the signature and the resources.
+pub fn split(data: &[u8]) -> Result<([u8; 2], Vec<&[u8]>), String> {
+    let tag = [*data.first().ok_or("The bundle is empty.")?, *data.get(1).ok_or("The bundle is empty.")?];
+    let parts = ranges(data)?.into_iter().map(|(start, end)| data.get(start..end).ok_or("A resource is outside the bundle.")).collect::<Result<Vec<_>, _>>()?;
+    Ok((tag, parts))
+}
+
+/// Gives the bytes of a bundle where one resource has new data. The resources after it move and the table of offsets follows.
+/// `new_part` must have a size that is a multiple of `alignment`.
+pub fn replace_part_with(bundle: &[u8], index: usize, new_part: &[u8], alignment: usize) -> Result<Vec<u8>, String> {
+    let ranges = ranges(bundle)?;
+    if index >= ranges.len() || new_part.len() % alignment != 0 {
+        return Err("Cannot replace this resource.".into());
+    }
+    let header_size = ranges[0].0;
+    let mut out = bundle.get(..header_size).ok_or("The bundle is cut.")?.to_vec();
+    let mut offsets = Vec::with_capacity(ranges.len() + 1);
+    for (i, &(start, end)) in ranges.iter().enumerate() {
+        offsets.push(out.len());
+        if i == index {
+            out.extend_from_slice(new_part);
+        } else {
+            out.extend_from_slice(bundle.get(start..end).ok_or("A resource is outside the bundle.")?);
+        }
+    }
+    offsets.push(out.len());
+    for (i, offset) in offsets.iter().enumerate() {
+        crate::bytes::put32(&mut out, 4 + 4 * i, *offset as u32);
+    }
+    Ok(out)
+}
+
+/// The same, with the usual alignment ([`ALIGNMENT`]).
+pub fn replace_part(bundle: &[u8], index: usize, new_part: &[u8]) -> Result<Vec<u8>, String> {
+    replace_part_with(bundle, index, new_part, ALIGNMENT)
+}
+
 /// A bundle: the bytes of the file, with the places of its resources.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Bundle {
@@ -29,9 +82,7 @@ impl Bundle {
         if bytes.len() < table_end {
             return Err(format!("The bundle has {count} resources but its table is cut."));
         }
-        let offsets: Vec<usize> = (0..=count)
-            .map(|i| u32::from_le_bytes(bytes[4 + 4 * i..8 + 4 * i].try_into().unwrap()) as usize)
-            .collect();
+        let offsets = offsets(&bytes)?;
         if offsets[0] < table_end || offsets.windows(2).any(|w| w[0] > w[1]) || offsets[count] > bytes.len() {
             return Err("The offsets of the bundle are wrong.".into());
         }

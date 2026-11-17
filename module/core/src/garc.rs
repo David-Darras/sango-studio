@@ -142,13 +142,7 @@ pub struct Garc {
     entries: Vec<Entry>,
 }
 
-fn u16_at(data: &[u8], at: usize) -> Result<u16, String> {
-    data.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]])).ok_or_else(|| format!("The archive stops too early (at {at:#x})."))
-}
-
-fn u32_at(data: &[u8], at: usize) -> Result<u32, String> {
-    data.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok_or_else(|| format!("The archive stops too early (at {at:#x})."))
-}
+use crate::bytes::{u16_at, u32_at};
 
 impl Garc {
     /// Reads an archive from its bytes.
@@ -331,6 +325,16 @@ impl Garc {
     /// When the language has no file, the function returns the first file of the id.
     pub fn file_or_first(&self, id: usize, language: usize) -> Option<&[u8]> {
         self.bytes_of(self.range_or_first(id, language)?)
+    }
+
+    /// The first file of an entry, decompressed when it is compressed. None when the entry has no file or the data is wrong.
+    pub fn first_file_decompressed(&self, id: usize) -> Option<Vec<u8>> {
+        let bytes = self.first_file(id)?;
+        if crate::lz::is_compressed(bytes) {
+            crate::lz::decompress(bytes).ok()
+        } else {
+            Some(bytes.to_vec())
+        }
     }
 
     /// Returns the bytes of a file in the first language that it has.

@@ -54,13 +54,26 @@ pub struct Move {
 impl Move {
     /// The power as text: a number, or a dash when the move has no fixed power.
     pub fn power_text(&self) -> String {
-        if self.power <= 1 { "—".to_string() } else { self.power.to_string() }
+        power_text(self.power)
     }
 
     /// The accuracy as text: a percentage, or a dash when the move never misses or has no accuracy.
     pub fn accuracy_text(&self) -> String {
-        if self.accuracy == 0 || self.accuracy > 100 { "—".to_string() } else { format!("{}%", self.accuracy) }
+        match accuracy_number_text(self.accuracy) {
+            number if number == "—" => number,
+            number => format!("{number}%"),
+        }
     }
+}
+
+/// The power as text: a number, or a dash when the move has no fixed power.
+pub fn power_text(power: u8) -> String {
+    if power <= 1 { "—".to_string() } else { power.to_string() }
+}
+
+/// The accuracy as a number, or a dash when the move never misses or has no accuracy.
+pub fn accuracy_number_text(accuracy: u8) -> String {
+    if accuracy == 0 || accuracy > 100 { "—".to_string() } else { accuracy.to_string() }
 }
 
 /// The data of all the moves.

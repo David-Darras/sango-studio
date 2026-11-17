@@ -210,7 +210,7 @@ impl Home {
         widget::card(ui, |ui| {
             ui.set_width(680.0_f32.min(ui.available_width()));
             ui.label(widget::title("Start from zero"));
-            ui.label(widget::hint("Removes all the files of the studio: the changes that you made, the installed packs, the 3D models, the cries, the texts. The game goes back to its own data. The dump of the game, the settings of the program and the other files of the plugin (the maps, the names) stay."));
+            ui.label(widget::hint("Removes all the files of the studio: the changes that you made, the installed packs, the 3D models, the cries, the texts. The game goes back to its own data. The dump of the game, the settings of the program, the maps of the Overworld page and the other files of the plugin (the names, the scripts) stay."));
             ui.add_space(6.0);
             if !self.asking {
                 if widget::button(ui, "Start from zero…") {
