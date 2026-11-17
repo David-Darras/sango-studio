@@ -27,7 +27,7 @@ pub struct Moment {
 }
 
 /// The moments that the editor offers.
-pub const MOMENTS: [Moment; 10] = [
+pub const MOMENTS: [Moment; 19] = [
     Moment { value: 94, label: "A Pokémon enters the battle", help: "Runs for every Pokémon that enters, yours or not. Use the condition \"It is this Pokémon\" to act only for the owner." },
     Moment { value: 148, label: "A Pokémon gets a new ability", help: "For example after Skill Swap. Add it next to \"enters the battle\" for an ability that acts on entry." },
     Moment { value: 36, label: "A move starts", help: "Before the move does anything." },
@@ -38,6 +38,15 @@ pub const MOMENTS: [Moment; 10] = [
     Moment { value: 127, label: "The end of the turn begins", help: "At the start of the end-of-turn checks." },
     Moment { value: 92, label: "After a Pokémon leaves", help: "After a Pokémon is withdrawn from the battle." },
     Moment { value: 175, label: "Right before fainting", help: "A Pokémon is about to faint." },
+    Moment { value: 61, label: "The power of a move is calculated", help: "Before the damage. Use \"Multiply the value\" to raise or lower the power of the move (the Muscle Band, the type plates)." },
+    Moment { value: 64, label: "The attack stat is calculated", help: "The Attack or the Sp. Atk of the attacker, before the damage (the Choice Band, the Light Ball). Use the condition \"The move is\" to choose physical or special moves." },
+    Moment { value: 65, label: "The defense stat is calculated", help: "The Defense or the Sp. Def of the target, before the damage (the Assault Vest, the Eviolite). Use the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 79, label: "The damage is calculated", help: "After the type effectiveness: multiplies the final damage (the Life Orb, the Expert Belt with \"The move is super effective\")." },
+    Moment { value: 19, label: "The speed is calculated", help: "The speed that decides who moves first (the Choice Scarf, the Iron Ball). Use the condition \"It is this Pokémon\"." },
+    Moment { value: 57, label: "The accuracy is calculated", help: "Multiplies the chance to hit (the Wide Lens, the Zoom Lens)." },
+    Moment { value: 59, label: "A critical hit is checked", help: "Use \"Raise the critical-hit stage\" (the Scope Lens, the Razor Claw)." },
+    Moment { value: 83, label: "A Pokémon took damage from a move", help: "Runs for the Pokémon that was hit, after the damage (the Rocky Helmet, the Sticky Barb). Use the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 128, label: "The end of the turn ends", help: "At the end of the end-of-turn checks (the Leftovers, the Black Sludge)." },
 ];
 
 /// The kinds of condition.
@@ -58,10 +67,36 @@ pub enum ConditionKind {
     OnlyOnce = 6,
     /// The HP of the owner are under a part of its maximum HP (argument: the percent).
     HpBelow = 7,
+    /// The Pokémon that receives the move is the owner of the ability.
+    DefenderIsOwner = 8,
+    /// The move is physical, special or a status move (argument: 1, 2 or 0).
+    MoveCategoryIs = 9,
+    /// The move is super effective against its target.
+    SuperEffective = 10,
+    /// The target of the move has no substitute.
+    NoSubstitute = 11,
+    /// The HP of the owner are not full.
+    HpNotFull = 12,
+    /// The move makes contact.
+    MoveMakesContact = 13,
 }
 
 impl ConditionKind {
-    pub const ALL: [ConditionKind; 7] = [ConditionKind::PokemonIsOwner, ConditionKind::MoveUserIsOwner, ConditionKind::MoveTypeIs, ConditionKind::WeatherIs, ConditionKind::TargetFainted, ConditionKind::OnlyOnce, ConditionKind::HpBelow];
+    pub const ALL: [ConditionKind; 13] = [
+        ConditionKind::PokemonIsOwner,
+        ConditionKind::MoveUserIsOwner,
+        ConditionKind::DefenderIsOwner,
+        ConditionKind::MoveTypeIs,
+        ConditionKind::MoveCategoryIs,
+        ConditionKind::MoveMakesContact,
+        ConditionKind::SuperEffective,
+        ConditionKind::NoSubstitute,
+        ConditionKind::WeatherIs,
+        ConditionKind::TargetFainted,
+        ConditionKind::OnlyOnce,
+        ConditionKind::HpBelow,
+        ConditionKind::HpNotFull,
+    ];
 
     pub fn from_byte(byte: u8) -> Option<ConditionKind> {
         ConditionKind::ALL.into_iter().find(|kind| *kind as u8 == byte)
@@ -76,6 +111,12 @@ impl ConditionKind {
             ConditionKind::TargetFainted => "A target of the move fainted",
             ConditionKind::OnlyOnce => "Only the first time in a battle",
             ConditionKind::HpBelow => "The HP are under",
+            ConditionKind::DefenderIsOwner => "This Pokémon is the target of the move",
+            ConditionKind::MoveCategoryIs => "The move is",
+            ConditionKind::SuperEffective => "The move is super effective",
+            ConditionKind::NoSubstitute => "The target has no substitute",
+            ConditionKind::HpNotFull => "The HP are not full",
+            ConditionKind::MoveMakesContact => "The move makes contact",
         }
     }
 
@@ -88,6 +129,12 @@ impl ConditionKind {
             ConditionKind::TargetFainted => "At least one target of the move has no HP left.",
             ConditionKind::OnlyOnce => "The plugin counts in the memory of the listener: the rule is skipped after its first run.",
             ConditionKind::HpBelow => "The HP of the owner are under a part of its maximum HP.",
+            ConditionKind::DefenderIsOwner => "The Pokémon that receives the move is the one that has the ability or holds the item.",
+            ConditionKind::MoveCategoryIs => "Physical, special or status: the kind of the move.",
+            ConditionKind::SuperEffective => "The type of the move is strong against the target (x2 or more).",
+            ConditionKind::NoSubstitute => "The move did not hit a substitute.",
+            ConditionKind::HpNotFull => "The owner has lost some HP.",
+            ConditionKind::MoveMakesContact => "The move touches its target (the property Contact of the move).",
         }
     }
 
@@ -97,6 +144,7 @@ impl ConditionKind {
             ConditionKind::MoveTypeIs => Argument::Type,
             ConditionKind::WeatherIs => Argument::Weather,
             ConditionKind::HpBelow => Argument::Percent,
+            ConditionKind::MoveCategoryIs => Argument::DamageKind,
             _ => Argument::None,
         }
     }
@@ -120,10 +168,30 @@ pub enum ActionKind {
     ChangeType = 6,
     /// The owner uses a move (a: the number of the move).
     UseMove = 7,
+    /// Multiplies the value that the moment calculates (b: the multiplier in percent, 150 is x1.5).
+    MultiplyValue = 8,
+    /// Removes a part of the maximum HP (a: the percent).
+    DamageHp = 9,
+    /// The item of the owner is used up.
+    ConsumeItem = 10,
+    /// Adds stages to the critical hit stage (a: the number of stages).
+    RaiseCritical = 11,
 }
 
 impl ActionKind {
-    pub const ALL: [ActionKind; 7] = [ActionKind::ChangeStat, ActionKind::SetWeather, ActionKind::SetTerrain, ActionKind::GiveStatus, ActionKind::Heal, ActionKind::ChangeType, ActionKind::UseMove];
+    pub const ALL: [ActionKind; 11] = [
+        ActionKind::MultiplyValue,
+        ActionKind::RaiseCritical,
+        ActionKind::Heal,
+        ActionKind::DamageHp,
+        ActionKind::ChangeStat,
+        ActionKind::GiveStatus,
+        ActionKind::ConsumeItem,
+        ActionKind::SetWeather,
+        ActionKind::SetTerrain,
+        ActionKind::ChangeType,
+        ActionKind::UseMove,
+    ];
 
     pub fn from_byte(byte: u8) -> Option<ActionKind> {
         ActionKind::ALL.into_iter().find(|kind| *kind as u8 == byte)
@@ -138,6 +206,10 @@ impl ActionKind {
             ActionKind::Heal => "Heal HP",
             ActionKind::ChangeType => "Change the type",
             ActionKind::UseMove => "Use a move",
+            ActionKind::MultiplyValue => "Multiply the value",
+            ActionKind::DamageHp => "Remove HP",
+            ActionKind::ConsumeItem => "Use up the item",
+            ActionKind::RaiseCritical => "Raise the critical-hit stage",
         }
     }
 
@@ -150,6 +222,10 @@ impl ActionKind {
             ActionKind::Heal => "Gives back a part of the maximum HP.",
             ActionKind::ChangeType => "The Pokémon gets this type.",
             ActionKind::UseMove => "The Pokémon uses a move, without spending PP.",
+            ActionKind::MultiplyValue => "Multiplies the value that the moment calculates: the power, the attack, the defense, the damage, the speed or the accuracy (150 is x1.5, 50 is x0.5). Choose one of the moments that calculate a value.",
+            ActionKind::DamageHp => "Removes a part of the maximum HP (the recoil of the Life Orb, the Rocky Helmet).",
+            ActionKind::ConsumeItem => "The held item is used up, like a berry.",
+            ActionKind::RaiseCritical => "Adds stages to the critical-hit stage of the move. Choose the moment \"A critical hit is checked\".",
         }
     }
 
@@ -163,6 +239,9 @@ impl ActionKind {
             ActionKind::Heal => Argument::Percent,
             ActionKind::ChangeType => Argument::Type,
             ActionKind::UseMove => Argument::Move,
+            ActionKind::DamageHp => Argument::Percent,
+            ActionKind::RaiseCritical => Argument::CritStages,
+            ActionKind::MultiplyValue | ActionKind::ConsumeItem => Argument::None,
         }
     }
 
@@ -171,13 +250,14 @@ impl ActionKind {
         match self {
             ActionKind::ChangeStat => Argument::Stages,
             ActionKind::SetWeather => Argument::Forever,
+            ActionKind::MultiplyValue => Argument::Multiplier,
             _ => Argument::None,
         }
     }
 
     /// True when the action has a target that the user can choose.
     pub fn has_target(self) -> bool {
-        matches!(self, ActionKind::ChangeStat | ActionKind::GiveStatus | ActionKind::Heal | ActionKind::ChangeType)
+        matches!(self, ActionKind::ChangeStat | ActionKind::GiveStatus | ActionKind::Heal | ActionKind::ChangeType | ActionKind::DamageHp)
     }
 }
 
@@ -194,6 +274,21 @@ pub enum Argument {
     Move,
     Stages,
     Forever,
+    /// A multiplier in percent.
+    Multiplier,
+    /// Physical, special or status.
+    DamageKind,
+    /// The stages of the critical-hit stage.
+    CritStages,
+}
+
+/// The kinds of damage of a move. The value is the number of the engine.
+pub const DAMAGE_KINDS: [(i16, &str); 3] = [(1, "physical"), (2, "special"), (0, "a status move")];
+
+/// The moments where the engine calculates a value that a rule can multiply: the power, the attack, the defense, the damage, the speed and the
+/// accuracy.
+pub fn is_value_moment(moment: u16) -> bool {
+    matches!(moment, 61 | 64 | 65 | 79 | 19 | 57)
 }
 
 /// The statistics of a stat change. The value is the number of the engine (`StatStageEffectKind`).
@@ -258,6 +353,10 @@ impl Action {
             ActionKind::Heal => (25, 0),
             ActionKind::ChangeType => (0, 0),
             ActionKind::UseMove => (1, 0),
+            ActionKind::MultiplyValue => (0, 150),
+            ActionKind::DamageHp => (10, 0),
+            ActionKind::ConsumeItem => (0, 0),
+            ActionKind::RaiseCritical => (1, 0),
         };
         Action { kind, target: 0, a, b, banner: true }
     }
@@ -394,7 +493,7 @@ pub const MOVE_MOMENTS: [Moment; 5] = [
 ];
 
 /// The moments of an item that a Pokémon holds.
-pub const ITEM_MOMENTS: [Moment; 9] = [
+pub const ITEM_MOMENTS: [Moment; 18] = [
     Moment { value: 94, label: "A Pokémon enters the battle", help: "Runs for every Pokémon that enters, yours or not. Use the condition \"It is this Pokémon\" to act only for the holder." },
     Moment { value: 36, label: "A move starts", help: "Before a move does anything." },
     Moment { value: 140, label: "A move did damage", help: "At the end of a damaging move, once a Pokémon took damage." },
@@ -404,6 +503,15 @@ pub const ITEM_MOMENTS: [Moment; 9] = [
     Moment { value: 127, label: "The end of the turn begins", help: "At the start of the end-of-turn checks." },
     Moment { value: 2, label: "After each action", help: "After the action of a Pokémon (a move, a switch, an item)." },
     Moment { value: 175, label: "Right before fainting", help: "A Pokémon is about to faint." },
+    Moment { value: 61, label: "The power of a move is calculated", help: "Before the damage. Use \"Multiply the value\" to raise or lower the power of the move (the Muscle Band, the type plates)." },
+    Moment { value: 64, label: "The attack stat is calculated", help: "The Attack or the Sp. Atk of the attacker, before the damage (the Choice Band, the Light Ball). Use the condition \"The move is\" to choose physical or special moves." },
+    Moment { value: 65, label: "The defense stat is calculated", help: "The Defense or the Sp. Def of the target, before the damage (the Assault Vest, the Eviolite). Use the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 79, label: "The damage is calculated", help: "After the type effectiveness: multiplies the final damage (the Life Orb, the Expert Belt with \"The move is super effective\")." },
+    Moment { value: 19, label: "The speed is calculated", help: "The speed that decides who moves first (the Choice Scarf, the Iron Ball). Use the condition \"It is this Pokémon\"." },
+    Moment { value: 57, label: "The accuracy is calculated", help: "Multiplies the chance to hit (the Wide Lens, the Zoom Lens)." },
+    Moment { value: 59, label: "A critical hit is checked", help: "Use \"Raise the critical-hit stage\" (the Scope Lens, the Razor Claw)." },
+    Moment { value: 83, label: "A Pokémon took damage from a move", help: "Runs for the Pokémon that was hit, after the damage (the Rocky Helmet, the Sticky Barb). Use the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 128, label: "The end of the turn ends", help: "At the end of the end-of-turn checks (the Leftovers, the Black Sludge)." },
 ];
 
 /// The moments that the editor offers in a place.
@@ -417,7 +525,7 @@ pub fn moments(context: Context) -> &'static [Moment] {
 
 /// True for a moment of a move: the values of the situation that tell the move and its targets exist.
 pub fn is_move_moment(moment: u16) -> bool {
-    matches!(moment, 36 | 85 | 140 | 146 | 176)
+    matches!(moment, 36 | 85 | 140 | 146 | 176 | 61 | 64 | 65 | 79 | 57 | 59 | 83)
 }
 
 /// What is wrong with the rules, in words that the user understands. An empty list means the file can be written.
@@ -436,7 +544,18 @@ pub fn problems(rules: &[Rule], context: Context) -> Vec<String> {
         }
         let move_moment = context == Context::Move || is_move_moment(rule.moment);
         for condition in &rule.conditions {
-            if !move_moment && matches!(condition.kind, ConditionKind::MoveUserIsOwner | ConditionKind::MoveTypeIs | ConditionKind::TargetFainted) {
+            let needs_move = matches!(
+                condition.kind,
+                ConditionKind::MoveUserIsOwner
+                    | ConditionKind::MoveTypeIs
+                    | ConditionKind::TargetFainted
+                    | ConditionKind::DefenderIsOwner
+                    | ConditionKind::MoveCategoryIs
+                    | ConditionKind::SuperEffective
+                    | ConditionKind::NoSubstitute
+                    | ConditionKind::MoveMakesContact
+            );
+            if !move_moment && needs_move {
                 problems.push(format!("{at}: \"{}\" needs a moment of a move.", condition.kind.label()));
             }
         }
@@ -446,6 +565,15 @@ pub fn problems(rules: &[Rule], context: Context) -> Vec<String> {
             }
             if action.kind == ActionKind::ChangeStat && action.b == 0 {
                 problems.push(format!("{at}: a stat change of 0 stages does nothing."));
+            }
+            if action.kind == ActionKind::MultiplyValue && !is_value_moment(rule.moment) {
+                problems.push(format!("{at}: \"{}\" needs a moment that calculates a value (the power, the attack, the defense, the damage, the speed or the accuracy).", action.kind.label()));
+            }
+            if action.kind == ActionKind::MultiplyValue && action.b <= 0 {
+                problems.push(format!("{at}: the multiplier must be more than 0."));
+            }
+            if action.kind == ActionKind::RaiseCritical && rule.moment != 59 {
+                problems.push(format!("{at}: \"{}\" needs the moment \"A critical hit is checked\".", action.kind.label()));
             }
         }
     }
@@ -487,6 +615,12 @@ pub fn condition_sentence(condition: &Condition) -> String {
         ConditionKind::TargetFainted => "a target of the move fainted".into(),
         ConditionKind::OnlyOnce => "it is the first time in the battle".into(),
         ConditionKind::HpBelow => format!("its HP are under {}% of the maximum", condition.arg),
+        ConditionKind::DefenderIsOwner => "this Pokémon is the target of the move".into(),
+        ConditionKind::MoveCategoryIs => format!("the move is {}", find(&DAMAGE_KINDS, condition.arg)),
+        ConditionKind::SuperEffective => "the move is super effective".into(),
+        ConditionKind::NoSubstitute => "the target has no substitute".into(),
+        ConditionKind::HpNotFull => "its HP are not full".into(),
+        ConditionKind::MoveMakesContact => "the move makes contact".into(),
     }
 }
 
@@ -508,6 +642,10 @@ pub fn action_sentence(action: &Action) -> String {
         ActionKind::Heal => format!("heal {who} by {}% of its maximum HP", action.a),
         ActionKind::ChangeType => format!("change the type of {who} to {}", type_name(action.a)),
         ActionKind::UseMove => format!("this Pokémon uses move {}", action.a),
+        ActionKind::MultiplyValue => format!("multiply the value by {}", action.b as f32 / 100.0),
+        ActionKind::DamageHp => format!("{who} loses {}% of its maximum HP", action.a),
+        ActionKind::ConsumeItem => "use up the item".into(),
+        ActionKind::RaiseCritical => format!("raise the critical-hit stage by {}", action.a),
     };
     if action.banner {
         format!("{text} (the banner shows)")
@@ -533,3 +671,56 @@ pub fn language_name(index: usize) -> &'static str {
     LANGUAGES.get(index).map(|l| l.name).unwrap_or("?")
 }
 
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn life_orb() -> Vec<Rule> {
+        vec![
+            Rule {
+                moment: 79,
+                conditions: vec![Condition { kind: ConditionKind::MoveUserIsOwner, arg: 0 }],
+                actions: vec![Action { kind: ActionKind::MultiplyValue, target: 0, a: 0, b: 130, banner: false }],
+            },
+            Rule {
+                moment: 140,
+                conditions: vec![Condition { kind: ConditionKind::MoveUserIsOwner, arg: 0 }, Condition { kind: ConditionKind::MoveCategoryIs, arg: 1 }],
+                actions: vec![Action { kind: ActionKind::DamageHp, target: 0, a: 10, b: 0, banner: false }],
+            },
+        ]
+    }
+
+    #[test]
+    fn the_new_reactions_go_through_a_file_and_read_back() {
+        let rules = life_orb();
+        let mut bytes = Vec::new();
+        write_rules(&mut bytes, &rules);
+        let read = read_rules(&mut Reader::new(&bytes), rules.len()).unwrap();
+        assert_eq!(read, rules);
+        assert!(problems(&rules, Context::Item).is_empty(), "{:?}", problems(&rules, Context::Item));
+        assert_eq!(rule_sentence(&rules[0]), "When the damage is calculated, and this Pokémon used the move: multiply the value by 1.3.");
+    }
+
+    #[test]
+    fn a_multiplier_needs_a_moment_that_calculates_a_value() {
+        let mut rules = life_orb();
+        rules[0].moment = 94;
+        let found = problems(&rules, Context::Item);
+        assert_eq!(found.len(), 2, "{found:?}");
+        rules[0].moment = 79;
+        rules[0].actions[0].kind = ActionKind::RaiseCritical;
+        assert_eq!(problems(&rules, Context::Item).len(), 1, "the critical stage needs its own moment");
+    }
+
+    #[test]
+    fn every_moment_has_a_label_and_a_help() {
+        for moment in MOMENTS.iter().chain(ITEM_MOMENTS.iter()) {
+            assert!(!moment.label.is_empty() && !moment.help.is_empty());
+            assert_eq!(moment_label(moment.value), moment.label);
+        }
+        for value in [61, 64, 65, 79, 19, 57] {
+            assert!(is_value_moment(value) && ITEM_MOMENTS.iter().any(|m| m.value == value));
+        }
+    }
+}

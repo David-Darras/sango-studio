@@ -2,7 +2,7 @@
 //! three of them.
 
 use crate::{moments, rule_sentence, ActionKind, Argument, Condition, ConditionKind, Context, Rule, Action};
-use crate::{moment_label, target_label, MAX_ACTIONS, MAX_CONDITIONS, MAX_RULES, STATS, STATUSES, TARGETS, TERRAINS, WEATHERS};
+use crate::{moment_label, target_label, DAMAGE_KINDS, MAX_ACTIONS, MAX_CONDITIONS, MAX_RULES, STATS, STATUSES, TARGETS, TERRAINS, WEATHERS};
 use sango_species::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -58,6 +58,15 @@ fn argument_ui(ui: &mut egui::Ui, salt: String, argument: Argument, value: &mut 
         Argument::Stages => {
             ui.add(egui::DragValue::new(value).range(-6..=6).suffix(" stages"));
         }
+        Argument::Multiplier => {
+            ui.add(egui::DragValue::new(value).range(10..=1000).speed(5).suffix("% (150 is x1.5)"));
+        }
+        Argument::DamageKind => {
+            pick(ui, salt, value, &DAMAGE_KINDS);
+        }
+        Argument::CritStages => {
+            ui.add(egui::DragValue::new(value).range(1..=3).suffix(" stages"));
+        }
         Argument::Forever => {
             let mut forever = *value != 0;
             ui.checkbox(&mut forever, "never stops");
@@ -96,6 +105,7 @@ fn rule_ui(ui: &mut egui::Ui, id: &str, number: usize, rule: &mut Rule, context:
                 let arg = match kind {
                     ConditionKind::WeatherIs => 2,
                     ConditionKind::HpBelow => 50,
+                    ConditionKind::MoveCategoryIs => 1,
                     _ => 0,
                 };
                 *condition = Condition { kind, arg };
