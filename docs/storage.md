@@ -20,9 +20,12 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `game_text/<language>/<file>.bin` | The texts that you changed (archives 71 to 78): `ja`, `ja_kanji`, `en`, `fr`, `it`, `de`, `es`, `ko`. | yes |
 | `ability/`, `move/data/`, `move/custom/`, `item/data/`, `item/custom/`, `type/` | The new and the changed abilities, moves, items and types. | yes |
 | `choreography/` | The choreographies of the moves (the steps of the camera, the effects, the sounds and the poses): the files `<n>.bin` of the archive of the move choreographies, compressed, and the list `index.bin`. | yes |
+| `effect/` | The particle effects of the battles: the files `<n>.bin` of the archive of the effects, compressed, and the list `index.bin`. | yes |
+| `script/field/`, `script/ai/`, `script/amie/` | The scripts that the user changed: the files `<n>.bin` of the archive of the field scripts, of the AI of the trainers and of Pokémon-Amie, compressed, and the list `index.bin` of each folder. | yes |
+| `dexnav/` | The screen of the DexNav (pictures and places of the Pokémon): the file `0.bin` of the archive 248, compressed, and the list `index.bin`. | yes |
 | `species/model/` | The 3D models of the packs: the list `0.raw`, `index.bin` and the files `<n>.pc` (8 for each model). Made again from the packs. | yes, and only there |
 | `code/`, `move/code/` | The code of the Code page. | no |
-| `overworld/land`, `overworld/area`, `overworld/matrix`, `overworld/zone`, `overworld/model` | The blocks, the tilesets, the matrices, the zones (the events) and the models of the characters that the Overworld page writes. | yes, on the SD card only |
+| `overworld/land`, `overworld/area`, `overworld/matrix`, `overworld/zone`, `overworld/model` | The blocks, the tilesets, the matrices, the zones (the events, and the wild Pokémon of the Encounter page) and the models of the characters that the Overworld page writes. | yes, on the SD card only |
 | `reload.bin` | The counter that tells the plugin that a file changed. | yes |
 
 All that the studio writes is in the folder `sango-studio`, the 3D models too (they are only on the SD card, not on the computer). The older models in `sango/pokemodel` move in at the next opening.

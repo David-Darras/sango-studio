@@ -235,6 +235,63 @@ impl Clim {
         Ok(Clim::with_footer(width, height, Format::Rgba8, 9, body))
     }
 
+    /// The same image with other pixels, in the same format, with the same size and the same footer: the file keeps its size, so a pack
+    /// that holds it keeps its layout. `rgba` has `width × height` pixels (row by row from the top). The bytes after the pixel data (the
+    /// padding of the file) stay. An image with a palette cannot be replaced this way.
+    pub fn with_rgba(&self, rgba: &[u8]) -> Result<Clim, String> {
+        if rgba.len() != self.width * self.height * 4 {
+            return Err(format!("The picture must have {} × {} pixels.", self.width, self.height));
+        }
+        let data_size = u32::from_le_bytes(self.footer[36..40].try_into().unwrap()) as usize;
+        if data_size > self.body.len() {
+            return Err("The size of the pixel data is wrong.".into());
+        }
+        if self.palette_size().is_some() {
+            return Err("This image has a palette: it cannot be replaced.".into());
+        }
+        let data = match self.format {
+            Format::Rgba4 => Clim::from_rgba4(self.width, self.height, rgba)?.body,
+            Format::Rgba8 => Clim::from_rgba8(self.width, self.height, rgba)?.body,
+            Format::Etc1 | Format::Etc1A4 => self.encode_etc1(rgba),
+            Format::Rgba5551 => return Err("This image format cannot be replaced.".into()),
+        };
+        if data.len() != data_size {
+            return Err(format!("The new pixel data has {} bytes, the old one has {data_size}.", data.len()));
+        }
+        let mut body = data;
+        body.extend_from_slice(&self.body[data_size..]);
+        Ok(Clim { width: self.width, height: self.height, format: self.format, body, footer: self.footer })
+    }
+
+    /// The pixel data of the image in ETC1 or ETC1A4: blocks of 4 × 4 pixels, four blocks in each tile of 8 × 8. A block outside of the
+    /// picture repeats the pixel at the edge.
+    fn encode_etc1(&self, rgba: &[u8]) -> Vec<u8> {
+        let (side_x, side_y) = (texture_side(self.width), texture_side(self.height));
+        let with_alpha = self.format == Format::Etc1A4;
+        let mut out = Vec::with_capacity(side_x * side_y / 16 * if with_alpha { 16 } else { 8 });
+        for tile_y in (0..side_y).step_by(8) {
+            for tile_x in (0..side_x).step_by(8) {
+                for block in 0..4 {
+                    let (left, top) = (tile_x + (block & 1) * 4, tile_y + (block >> 1) * 4);
+                    let (mut colors, mut alpha) = ([[0u8; 3]; 16], 0u64);
+                    for py in 0..4 {
+                        for px in 0..4 {
+                            let (x, y) = ((left + px).min(self.width - 1), (top + py).min(self.height - 1));
+                            let pixel = &rgba[(y * self.width + x) * 4..][..4];
+                            colors[py * 4 + px] = [pixel[0], pixel[1], pixel[2]];
+                            alpha |= u64::from(pixel[3] >> 4) << (4 * (px * 4 + py));
+                        }
+                    }
+                    if with_alpha {
+                        out.extend_from_slice(&alpha.to_le_bytes());
+                    }
+                    out.extend_from_slice(&crate::model::etc1_encode_block(&colors).to_le_bytes());
+                }
+            }
+        }
+        out
+    }
+
     /// The bytes of the file.
     pub fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = self.body.clone();
@@ -381,7 +438,7 @@ pub(crate) fn morton_position(offset: usize) -> (usize, usize) {
 }
 
 /// The modifiers of the ETC1 tables: the two small values (the other two have the opposite sign).
-const ETC1_MODIFIERS: [[i32; 2]; 8] = [[2, 8], [5, 17], [9, 29], [13, 42], [18, 60], [24, 80], [33, 106], [47, 183]];
+pub(crate) const ETC1_MODIFIERS: [[i32; 2]; 8] = [[2, 8], [5, 17], [9, 29], [13, 42], [18, 60], [24, 80], [33, 106], [47, 183]];
 
 /// Decodes a block of 4 × 4 pixels of ETC1 and gives each pixel to `put`.
 ///

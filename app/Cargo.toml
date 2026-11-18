@@ -21,4 +21,7 @@ sango-packs.workspace = true
 sango-overworld.workspace = true
 sango-trainer.workspace = true
 sango-choreography.workspace = true
+sango-effect.workspace = true
+sango-script.workspace = true
+sango-encounter.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

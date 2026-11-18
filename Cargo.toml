@@ -30,6 +30,9 @@ sango-cry = { path = "module/cry" }
 sango-overworld = { path = "module/overworld" }
 sango-trainer = { path = "module/trainer" }
 sango-choreography = { path = "module/choreography" }
+sango-effect = { path = "module/effect" }
+sango-script = { path = "module/script" }
+sango-encounter = { path = "module/encounter" }
 
 [profile.dev]
 opt-level = 2
