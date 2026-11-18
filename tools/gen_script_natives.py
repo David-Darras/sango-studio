@@ -19,13 +19,14 @@ OUT = os.path.join(os.path.dirname(HERE), "module", "script", "src", "natives.rs
 
 # The names of the parameters that are written with Japanese words in the project: the names that the page shows.
 RENAMES = {
+    "monsNo": "species", "formNo": "form", "itemNo": "item", "sex": "gender", "isFemale": "is_female",
     "keta": "digits", "waza": "move", "waza_no": "move", "waza_pos": "move_slot", "wazaNo": "move", "monsno": "species", "mons_no": "species", "formno": "form",
-    "tokusei_id": "ability", "seikaku_id": "nature", "scrid": "script", "wkno": "work_number", "wkval": "work_value", "tbl_no": "table", "tbl_id": "table",
+    "tokusei_id": "ability", "seikaku_id": "nature", "scrid": "script", "wkno": "variable_number", "wkval": "variable_value", "tbl_no": "table", "tbl_id": "table",
     "gx": "x", "gz": "z", "px": "x", "py": "y", "pz": "z", "goodsNo": "decoration", "goodsIndex": "decoration", "pointNo": "place", "secretBasePointNo": "place",
-    "himitunoNakamaNo": "secret_friend", "bufId": "buffer", "buf_id": "buffer", "zone_id": "zone", "obj_id": "character", "objid": "character", "tar_obj_id": "target_character",
+    "himitunoNakamaNo": "secret_friend", "bufId": "buffer", "buf_id": "buffer", "zone_id": "map", "obj_id": "character", "objid": "character", "tar_obj_id": "target_character",
     "acmd": "action", "para_id": "parameter", "poke_index": "pokemon_slot", "sound_item_id": "sound", "eye_bgm": "music", "str_id": "text", "win_id": "window",
-    "is_fade": "fade", "ret_wk": "result_work", "nuts_id": "berry", "item_no": "item", "item_id": "item", "pocket_no": "pocket", "tr_id": "trainer", "tr_no": "trainer",
-    "flag_no": "flag", "work_no": "work", "idx": "index", "pos": "slot", "num": "count", "dir": "direction", "badge_id": "badge", "poroc_id": "poffin", "arc_id": "archive",
+    "is_fade": "fade", "ret_wk": "result_variable", "nuts_id": "berry", "item_no": "item", "item_id": "item", "pocket_no": "pocket", "tr_id": "trainer", "tr_no": "trainer",
+    "flag_no": "flag", "work_no": "variable", "idx": "index", "pos": "slot", "num": "count", "dir": "facing", "badge_id": "badge", "poroc_id": "poffin", "arc_id": "archive",
     "is_visible": "visible", "is_pause": "pause", "datid": "message", "type_id": "type", "rule_id": "rule", "ribbon_id": "ribbon", "bgm_no": "music", "demo_no": "cutscene",
 }
 
@@ -36,8 +37,8 @@ MEANING = {
     "target_character": "The number of the character that is looked at or reached.",
     "script": "The number of a script.",
     "flag": "The number of an event flag.",
-    "work": "The number of an event work value.",
-    "zone": "The number of a zone (a map of the game).",
+    "variable": "The number of a script variable.",
+    "map": "The number of a map of the game.",
     "item": "The number of an item.",
     "species": "The number of a species (the number of the Pokédex).",
     "form": "The form of the species (0 is the normal form).",
@@ -50,7 +51,7 @@ MEANING = {
     "x": "The position on the X axis (a cell of the grid, or a coordinate).",
     "y": "The height.",
     "z": "The position on the Z axis (a cell of the grid, or a coordinate).",
-    "direction": "A direction (0 up, 1 down, 2 left, 3 right).",
+    "facing": "A facing: the way that a character looks (see the list of values).",
     "count": "A number of things.",
     "digits": "How many digits the number is written with.",
     "text": "The number of a text in the message that is loaded.",
@@ -65,7 +66,7 @@ MEANING = {
     "trainer": "The number of a trainer.",
     "berry": "The number of a Berry.",
     "pocket": "The number of a pocket of the Bag.",
-    "result_work": "The event work value that receives the result.",
+    "result_variable": "The script variable that receives the result.",
     "action": "The number of an action command.",
     "demo": "The number of a cutscene.",
     "cutscene": "The number of a cutscene.",
@@ -83,6 +84,107 @@ LANGUAGE = [
     ("floatsin", [("value", "decimal", "The angle."), ("mode", "number", "0 radians, 1 degrees, 2 grades.")], "Gives the sine of an angle."),
     ("floatcos", [("value", "decimal", "The angle."), ("mode", "number", "0 radians, 1 degrees, 2 grades.")], "Gives the cosine of an angle."),
 ]
+
+
+
+VERBS = {"get", "set", "is", "check", "add", "call", "start", "end", "create", "delete", "change", "clear", "reset", "load", "make", "open", "close",
+         "play", "stop", "wait", "show", "hide", "send", "receive", "register", "learn", "buy", "sell", "use", "apply", "attach", "detach", "enable",
+         "begin", "finish", "init", "initialize", "update", "push", "pop", "swap", "switch", "lock", "unlock", "look", "move", "take", "give", "save",
+         "boot", "decide", "adopt", "acquire", "adjust", "bind", "calc", "destroy", "draw", "fix", "follow", "handle", "notify", "prepare", "recover",
+         "unregister", "subtract", "recreate", "remind", "rent", "replace", "restart", "restore", "select", "setup", "shake", "slide", "terminate", "try", "turn", "vanish", "visit"}
+
+
+def load_vocabulary():
+    words = {}
+    for line in open(os.path.join(HERE, "script_vocabulary.txt"), encoding="utf-8"):
+        line = line.strip()
+        if line and not line.startswith("#") and "|" in line:
+            word, term = line.split("|", 1)
+            words[word] = term
+    return words
+
+
+VOCABULARY = load_vocabulary()
+
+
+def words_of(name):
+    """The pieces of a name: `PlayerGetSex` gives player, get, sex."""
+    pieces = []
+    for part in name.strip("_").split("_"):
+        pieces += re.findall(r"\d+D(?![a-z])|[A-Z]\d+|[A-Z]+(?![a-z])|[A-Z]?[a-z]+|\d+", part)
+    words = []
+    for w in (p.lower() for p in pieces):
+        if re.fullmatch(r"r\d+", w):
+            w = "route_" + w[1:]
+        words.append(w)
+    # Two pieces that make one word.
+    merged = []
+    for w in words:
+        if merged and (merged[-1], w) in (("friend", "ship"), ("un", "regist")):
+            merged[-1] = merged[-1] + w
+        else:
+            merged.append(w)
+    return merged
+
+
+def friendly(name):
+    """The name of a native function in the words of the plugin, with a verb first: `PlayerGetSex` gives `get_player_gender`."""
+    words = []
+    for i, w in enumerate(words_of(name)):
+        if w == "no" and i > 0:
+            w = "number"
+        words.append(VOCABULARY.get(w, w))
+    words = [w for w in words if w]
+    # `MsgWin` is a message window, not a win.
+    words = ["window" if w == "win" and i > 0 and words[i - 1] in ("message", "talk") else w for i, w in enumerate(words)]
+    for i, w in enumerate(words):
+        if i > 0 and w in VERBS and not (words[0] in VERBS):
+            words = [w] + words[:i] + words[i + 1:]
+            break
+    return "_".join(words)
+
+
+
+PARAM_WORDS = {"tar": "target", "sel": "selection", "cur": "current", "ofs": "offset", "idx": "index", "ang": "angle", "tr": "trainer", "trid": "trainer_id",
+               "ret": "result", "buf": "buffer", "wazano": "move", "gx": "x", "gz": "z", "gy": "y", "ids": "ids", "str": "text", "win": "window",
+               "bm": "block", "nakamano": "secret_friend", "shitappa": "rookie", "wset": "word_set", "ctrl": "control", "lv": "level", "mane": "mane",
+               "hige": "beard", "masukara": "mascara", "monety": "money", "camear": "camera", "photbg": "photo_background", "photo": "photo"}
+
+
+def param_name(name):
+    """The name of a parameter in the words of the plugin: `retWk` gives `result_variable`, `pokeNo` gives `pokemon_number`."""
+    if name in RENAMES:
+        return RENAMES[name]
+    words = words_of(name)
+    out = []
+    for i, w in enumerate(words):
+        if w == "no" and i > 0:
+            w = "number"
+        w = PARAM_WORDS.get(w, VOCABULARY.get(w, w))
+        if w:
+            out.append(w)
+    return "_".join(out) or name
+
+
+def friendly_names(names):
+    """A friendly name for each native name. When two natives get the same one, the one without an underscore in front keeps it and the others
+    get `internal_` (a name with an underscore is a function that the scripts of the game call but that the tables do not list). Two natives
+    without an underscore that collide keep the plain snake_case of their own names."""
+    made = {n: friendly(n) for n in names}
+    groups = {}
+    for n in names:
+        groups.setdefault(made[n], []).append(n)
+    for value, owners in groups.items():
+        if len(set(owners)) < 2:
+            continue
+        plain = [n for n in owners if not n.startswith("_")]
+        if len(set(plain)) == 1:
+            for n in set(owners) - set(plain):
+                made[n] = "internal_" + value
+        else:
+            for n in set(owners):
+                made[n] = ("internal_" if n.startswith("_") else "") + "_".join(words_of(n))
+    return made
 
 
 def read(path):
@@ -174,7 +276,7 @@ def main():
                 docs[(fn, what)] = text
     lists, order = {}, []
     current = None
-    for line in open(os.path.join(HERE, "script_values.txt"), encoding="utf-8"):
+    for line in [l for name in ("script_values.txt", "script_plugin_values.txt") for l in open(os.path.join(HERE, name), encoding="utf-8")]:
         line = line.rstrip("\r\n")
         if line.startswith("[") and line.endswith("]"):
             current = line[1:-1]
@@ -183,6 +285,15 @@ def main():
         elif "|" in line and current:
             value, text = line.split("|", 1)
             lists[current].append((int(value), text))
+    enumerators, enum_of = {}, {}
+    for line in open(os.path.join(HERE, "script_value_names.txt"), encoding="utf-8"):
+        line = line.rstrip("\r\n")
+        if line.startswith("@"):
+            name, enum, _ = line[1:].split("|")
+            enum_of.setdefault(name, []).append(enum)
+        elif "|" in line and not line.startswith("#"):
+            name, value, enumerator = line.split("|")
+            enumerators[(name, int(value))] = enumerator
     links = {}
     for line in open(os.path.join(HERE, "script_value_params.txt"), encoding="utf-8"):
         if "|" in line:
@@ -214,8 +325,8 @@ def main():
     listed = {n for names in tables.values() for n in names}
     extra = sorted({n for n in others.values() if n not in listed and n not in {l[0] for l in LANGUAGE}})
     out = ["//! The native functions that the scripts of the game can call.\n//!\n//! Generated by `tools/gen_script_natives.py`. Do not edit by hand.\n\n"]
-    out.append("/// A parameter of a native function: its name, the kind of value that it takes and what it means.\n#[derive(Clone, Copy, Debug)]\npub struct Param {\n    pub name: &'static str,\n    pub kind: &'static str,\n    pub help: &'static str,\n    /// The name of the list of values that the parameter takes, or an empty text.\n    pub list: &'static str,\n}\n\n/// A list of values with their meaning (a direction, a kind of exit...).\n#[derive(Clone, Copy, Debug)]\npub struct ValueList {\n    pub name: &'static str,\n    pub items: &'static [(i64, &'static str)],\n}\n\n")
-    out.append("/// A native function: the name that the game uses, the group, the parameters and what it does. `known` is false when the parameters are not\n/// documented (the function is not described in the tables of the field scripts).\n#[derive(Clone, Copy, Debug)]\npub struct Native {\n    pub name: &'static str,\n    pub group: &'static str,\n    pub params: &'static [Param],\n    pub known: bool,\n    pub help: &'static str,\n    pub returns: &'static str,\n}\n\n")
+    out.append("/// A parameter of a native function: its name, the kind of value that it takes and what it means.\n#[derive(Clone, Copy, Debug)]\npub struct Param {\n    pub name: &'static str,\n    pub kind: &'static str,\n    pub help: &'static str,\n    /// The name of the list of values that the parameter takes, or an empty text.\n    pub list: &'static str,\n}\n\n/// A list of values with their meaning (a direction, a kind of exit...).\n#[derive(Clone, Copy, Debug)]\npub struct ValueList {\n    pub name: &'static str,\n    /// The enum classes of the Sango plugin that hold these values (`overworld::Facing`).\n    pub enums: &'static str,\n    /// The value, the name of its enumerator in the plugin (empty when the plugin has none), and what it means.\n    pub items: &'static [(i64, &'static str, &'static str)],\n}\n\n")
+    out.append("/// A native function: the name that the game uses, the group, the parameters and what it does. `known` is false when the parameters are not\n/// documented (the function is not described in the tables of the field scripts).\n#[derive(Clone, Copy, Debug)]\npub struct Native {\n    pub name: &'static str,\n    /// The name in the words of the Sango plugin (a verb first, `get_player_gender`). The assembler accepts both names.\n    pub alias: &'static str,\n    pub group: &'static str,\n    pub params: &'static [Param],\n    pub known: bool,\n    pub help: &'static str,\n    pub returns: &'static str,\n    /// The list of the values that the native gives back (empty when it is not a list).\n    pub returns_list: &'static str,\n}\n\n")
 
     def q(text):
         return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
@@ -224,7 +335,7 @@ def main():
         rows = []
         for k, item in enumerate(items):
             name, kind, help_text = item if len(item) == 3 else (item[0], kind_of(item[1]), None)
-            name = RENAMES.get(name, name) if name else "value%d" % (k + 1)
+            name = param_name(name) if name else "value%d" % (k + 1)
             original = item[0]
             text = docs.get((fn, original)) or (help_text if help_text is not None else MEANING.get(name, "")) or names_help.get(original, "") or names_help.get(name, "")
             ctype = item[1] if len(item) == 2 else ""
@@ -232,6 +343,7 @@ def main():
             rows.append('Param { name: %s, kind: %s, help: %s, list: %s }' % (q(name), q(kind), q(text), q(listed)))
         return ", ".join(rows)
 
+    aliases = friendly_names(sorted({n for names in tables.values() for n in names} | {l[0] for l in LANGUAGE} | set(extra)))
     out.append("pub const NATIVES: &[Native] = &[\n")
     count = described = known = 0
     for group in sorted(tables):
@@ -240,27 +352,50 @@ def main():
             help_text = notes.get(name, "")
             described += bool(help_text)
             known += items is not None
-            out.append("    Native { name: %s, group: %s, params: &[%s], known: %s, help: %s, returns: %s },\n" % (q(name), q(group), params_of(items or [], name), "true" if items is not None else "false", q(help_text), q(returns.get(name, ""))))
+            out.append("    Native { name: %s, alias: %s, group: %s, params: &[%s], known: %s, help: %s, returns: %s, returns_list: %s },\n" % (q(name), q(aliases[name]), q(group), params_of(items or [], name), "true" if items is not None else "false", q(help_text), q(returns.get(name, "")), q(links.get((name, "@return"), ""))))
             count += 1
     for name, params, help_text in LANGUAGE:
-        out.append("    Native { name: %s, group: \"Language\", params: &[%s], known: true, help: %s, returns: \"\" },\n" % (q(name), params_of(params), q(help_text)))
+        out.append("    Native { name: %s, alias: %s, group: \"Language\", params: &[%s], known: true, help: %s, returns: \"\", returns_list: \"\" },\n" % (q(name), q(aliases[name]), params_of(params), q(help_text)))
         count += 1
         described += 1
         known += 1
     for name in extra:
         group, items = declared.get(name, ("Pokémon-Amie", None))
-        out.append("    Native { name: %s, group: %s, params: &[%s], known: %s, help: %s, returns: %s },\n" % (q(name), q(group), params_of(items or [], name), "true" if items is not None else "false", q(notes.get(name, "")), q(returns.get(name, ""))))
+        out.append("    Native { name: %s, alias: %s, group: %s, params: &[%s], known: %s, help: %s, returns: %s, returns_list: %s },\n" % (q(name), q(aliases[name]), q(group), params_of(items or [], name), "true" if items is not None else "false", q(notes.get(name, "")), q(returns.get(name, "")), q(links.get((name, "@return"), ""))))
         described += bool(notes.get(name))
         known += items is not None
         count += 1
     out.append("];\n\n")
     out.append("/// The lists of values.\npub const LISTS: &[ValueList] = &[\n")
     for name in order:
-        out.append("    ValueList { name: %s, items: &[%s] },\n" % (q(name), ", ".join("(%d, %s)" % (v, q(t)) for v, t in lists[name])))
+        out.append("    ValueList { name: %s, enums: %s, items: &[%s] },\n" % (q(name), q(", ".join(enum_of.get(name, []))), ", ".join("(%d, %s, %s)" % (v, q(enumerators.get((name, v), "")), q(t)) for v, t in lists[name])))
     out.append("];\n\n")
-    out.append("/// The list with this name.\npub fn list(name: &str) -> Option<&'static ValueList> {\n    LISTS.iter().find(|l| l.name == name)\n}\n\n")
+    out.append("/// The list with this name.\npub fn list(name: &str) -> Option<&'static ValueList> {\n    LISTS.iter().find(|l| l.name == name)\n}\n\n/// The native with this name or this alias.\npub fn find(word: &str) -> Option<&'static Native> {\n    NATIVES.iter().find(|n| n.name == word || n.alias == word)\n}\n\n/// The number that the game writes for a native called by its name or by its alias.\npub fn word_hash(word: &str) -> u32 {\n    find(word).map_or_else(|| hash(word), |n| hash(n.name))\n}\n\n/// The name that a script shows for each native: the number of the native and its alias.\npub fn display_names() -> std::collections::HashMap<u32, String> {\n    NATIVES.iter().map(|n| (hash(n.name), n.alias.to_string())).collect()\n}\n\n")
     out.append("/// The number that the game writes in a script for the name of a native function (and of a public function).\npub fn hash(name: &str) -> u32 {\n    name.bytes().fold(0u32, |value, byte| value.wrapping_mul(0x83) ^ u32::from(byte))\n}\n")
     open(OUT, "w", encoding="utf-8", newline="\n").write("".join(out))
+
+    # The documentation: the names of the functions (the translation of the names of the game) and the enum classes of the lists.
+    docs_path = os.path.join(os.path.dirname(HERE), "docs", "script-api.md")
+    text = ["# The API of the scripts\n\n",
+            "Generated by `tools/gen_script_natives.py`. Do not edit by hand.\n\n",
+            "The names of the functions are in the words of the Sango plugin: a verb first, `facing` (not direction), `character` (not object),\n"
+            "`species`, `gender`, `tile`, `variable`, `map`, `model`, `message`. The assembler and the page accept both names: the new one and the name of the game.\n\n",
+            "## The enum classes\n\nEach list of values of the page is an enum class of the Sango plugin (a header in `lib/include`). The plugin and the scripts use the same numbers.\n\n",
+            "| List of the page | Enum class of the plugin | Values |\n| --- | --- | --- |\n"]
+    for name in order:
+        text.append("| %s | %s | %d |\n" % (name, ", ".join("`%s`" % e for e in enum_of.get(name, [])) or "-", len(lists[name])))
+    text.append("\n## The names of the functions\n\n| Name | Name in the game | Group |\n| --- | --- | --- |\n")
+    seen = set()
+    for group in sorted(tables):
+        for name in tables[group]:
+            if name not in seen:
+                seen.add(name)
+                text.append("| `%s` | `%s` | %s |\n" % (aliases[name], name, group))
+    for name, _, _ in LANGUAGE:
+        text.append("| `%s` | `%s` | Language |\n" % (aliases[name], name))
+    for name in extra:
+        text.append("| `%s` | `%s` | %s |\n" % (aliases[name], name, declared.get(name, ("Pokémon-Amie", None))[0]))
+    open(docs_path, "w", encoding="utf-8", newline="\n").write("".join(text))
     print(len(returns), "with a return text;", len(docs), "parameter texts;", count, "natives;", described, "described;", known, "with parameters")
 
 

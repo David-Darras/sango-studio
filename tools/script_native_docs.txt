@@ -1,20 +1,20 @@
 _CallTrialDownloadApp.mode|Which mode of the download application to open.
-_CallTrialDownloadApp.ret_wk|Work variable that receives the result (one of the four result variables of the script).
+_CallTrialDownloadApp.ret_wk|Variable that receives the result (one of the four result variables of the script).
 GetKeyCont.@return|The keys that are held down now.
 IsKeyTrigger.key|The button to test (a button number of the game: left, right, up, down, A, B, X, Y, L, R, Start, Select, Plus, Minus).
 IsKeyTrigger.stick_f|Yes to also count a push of the stick as a press.
 IsKeyTrigger.touch_f|Yes to also count a touch of the screen as a press.
 IsKeyTrigger.@return|Yes if the input was made this frame, no if not.
-GetStickHold.@return|The stick direction that is held.
+GetStickHold.@return|The stick facing that is held.
 _WordSetCurrentSecretBaseOwnerName.buf_id|Number of the text buffer that receives the name.
 WordSetSecretBaseGoodsName.buf_id|Number of the text buffer that receives the name.
 WordSetSecretBaseGoodsName.goodNo|Number of the secret base item.
 ListMenuInit_Seq.@return|Yes when the menu is finished.
-_MapChangeAndDemoCall.zone_id|Zone to go to.
-_MapChangeAndDemoCall.gx|Grid X of the destination.
+_MapChangeAndDemoCall.zone_id|Map to go to.
+_MapChangeAndDemoCall.gx|Tile X of the destination.
 _MapChangeAndDemoCall.y|Height (Y) of the destination.
-_MapChangeAndDemoCall.gz|Grid Z of the destination.
-_MapChangeAndDemoCall.dir|Direction of the player on arrival.
+_MapChangeAndDemoCall.gz|Tile Z of the destination.
+_MapChangeAndDemoCall.dir|Facing of the player on arrival.
 _MapChangeAndDemoCall.demo_idx|Number of the demo to play.
 ContactEncountIsActive.@return|Yes while a contact encounter is running, no if not.
 OnMotionBlur.blend_type|Kind of blend of the blur.
@@ -55,16 +55,16 @@ SecretBaseGoodsAdd.goodsNo|Number of the secret base item.
 SecretBaseGoodsAdd.num|Number to add.
 SecretBaseGoodsAdd.@return|The number that was really added.
 SecretBaseExistDeliveryBase.@return|Yes if a distributed secret base exists, no if not.
-SetEscapeLocation.zone_id|Zone where the player goes when they escape.
-SetEscapeLocation.gx|Grid X of the place.
+SetEscapeLocation.zone_id|Map where the player goes when they escape.
+SetEscapeLocation.gx|Tile X of the place.
 SetEscapeLocation.y|Height (Y) of the place. It is a decimal number.
-SetEscapeLocation.gz|Grid Z of the place.
-SetEscapeLocation.dir|Direction of the player on arrival.
+SetEscapeLocation.gz|Tile Z of the place.
+SetEscapeLocation.dir|Facing of the player on arrival.
 SetEscapeLocation.form|Form of the player on arrival. The default, -1, keeps the current form of the player.
-MdlSetVisibleMesh.@return|The direction after the turn.
-CalcVecToDir.@return|The direction.
-GetReturnDir.@return|The direction.
-GetTurnDirByDir.@return|The direction after the turn.
+MdlSetVisibleMesh.@return|The facing after the turn.
+CalcVecToDir.@return|The facing.
+GetReturnDir.@return|The facing.
+GetTurnDirByDir.@return|The facing after the turn.
 MdlCanUseTurnAcmd.obj_id|The character (object). -1 is the target of the talk.
 MdlCanUseTurnAcmd.@return|Yes if the turn action can be used, no if not.
 CheckWinAllSuspend.@return|Yes when all the windows are suspended.
@@ -117,9 +117,9 @@ _SecretBaseCallBattle.pointNo|Position number of the base.
 _SecretBaseCallBattle.mode|Mode of the battle.
 _SecretBaseCallBattle.shitappaIndex|Number of the grunt.
 _SecretBaseCallBattle.@return|Yes if the battle took place, no if not (for example, not enough Pokémon).
-_SecretBaseCallQRApp.ret_wk_loaded|Work variable: was a base loaded?
-_SecretBaseCallQRApp.ret_wk_delivery|Work variable: is the loaded base a distributed one?
-_SecretBaseCallQRApp.ret_wk_point|Work variable: position number of the loaded base.
+_SecretBaseCallQRApp.ret_wk_loaded|Variable: was a base loaded?
+_SecretBaseCallQRApp.ret_wk_delivery|Variable: is the loaded base a distributed one?
+_SecretBaseCallQRApp.ret_wk_point|Variable: position number of the loaded base.
 _SecretBaseCallQRApp.is_fade|Yes to fade.
 _SecretBaseGetOthersBasePlayLog.pointNo|Position number of the base of another player.
 _SecretBaseGetOthersBasePlayLog.@return|The number of the log message if the base has a valid play log, -1 if not.
@@ -175,9 +175,9 @@ _SecretBaseSetSaveDataParam.value|The value to set.
 _SecretBaseSetSaveDataParam.@return|0 if the save data cannot be reached, otherwise depends on the kind of value.
 _SecretBaseTsupparikunEvent.paramType|Which value of the save data to use.
 _SecretBaseTsupparikunEvent.@return|0 if the save data cannot be reached, otherwise depends on the kind of value.
-_SecretBaseEventPlayerSitDownOn.dir|Direction in which the player sits.
-_SecretBaseGetGridGoodsNo.gridX|X position on the grid.
-_SecretBaseGetGridGoodsNo.gridZ|Z position on the grid.
+_SecretBaseEventPlayerSitDownOn.dir|Facing in which the player sits.
+_SecretBaseGetGridGoodsNo.gridX|X position on the tiles.
+_SecretBaseGetGridGoodsNo.gridZ|Z position on the tiles.
 _SecretBaseGetGridGoodsNo.@return|The number of the item, -1 if there is none.
 _FieldNutsGetParam.pointNo|Position number of the berry plot.
 _FieldNutsGetParam.param|Which value of the plot to read.
@@ -234,8 +234,8 @@ SetBodyRotationY.ang|Angle in degrees around the vertical axis (a decimal number
 SetBodyScale.scalex|Size on the X axis (a decimal number, 1.0 is the normal size).
 SetBodyScale.scaley|Size on the Y axis (a decimal number).
 SetBodyScale.scalez|Size on the Z axis (a decimal number).
-SetCameraUpVector.x|X of the up direction (a decimal number).
-SetCameraUpVector.y|Y of the up direction (a decimal number).
+SetCameraUpVector.x|X of the up facing (a decimal number).
+SetCameraUpVector.y|Y of the up facing (a decimal number).
 CheckMenuButton.@return|0 nothing, 1 snack button, 2 end button, 3 game button, 4 a game was chosen, 5 the game was cancelled, 6 the snack bar opened, 7 the snack bar closed, 8 something is running.
 SetMotionFrameSpeed.spd|Speed (a decimal number, 1.0 is normal).
 CheckMotionAvailable.num|Number of the motion.
@@ -287,3 +287,8 @@ AI_CMD.arg2|Second argument of the command (see the list of the commands).
 AI_CMD.arg3|Third argument of the command (see the list of the commands).
 AI_CMD.arg4|Fourth argument of the command (not used by the commands today).
 AI_CMD.@return|Yes or no for the questions, a number for the commands that read a value (see the list of the commands). 0 for an unknown command.
+PlayerGetSex.@return|Gives 0 for a male player and 1 for a female player (the values of the plugin: pokemon::Gender).
+PlayerGetForm.@return|Gives how the player moves (walking, on a bike, surfing...).
+RegionGet.@return|Gives the region of the console.
+RomGetLanguageID.@return|Gives the language of the game.
+PokeTemotiGetBall.@return|Gives the Poké Ball of the Pokémon.

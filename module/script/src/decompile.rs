@@ -582,7 +582,7 @@ mod test {
     fn the_scripts_of_the_game_are_turned_into_text() {
         let Ok(root) = std::env::var("SANGO_DUMP") else { return };
         let dump = sango_core::Dump::open(&root).unwrap();
-        let names: std::collections::HashMap<u32, String> = crate::natives::NATIVES.iter().map(|n| (crate::natives::hash(n.name), n.name.to_string())).collect();
+        let names = crate::natives::display_names();
         let (mut scripts, mut lines, mut calls) = (0, 0, 0);
         for archive in [7usize, 29, 89] {
             let garc = sango_core::Garc::open(&dump.archive(archive)).unwrap();
@@ -595,7 +595,7 @@ mod test {
                 let text = to_pawn(&amx, &|h| names.get(&h).cloned()).unwrap_or_else(|e| panic!("archive {archive} file {id}: {e}"));
                 scripts += 1;
                 lines += text.lines().count();
-                calls += text.matches("WorkGet(").count() + text.matches("FlagGet(").count() + text.matches("MsgWin").count();
+                calls += ["WorkGet", "FlagGet", "MsgWinOpen"].iter().map(|n| text.matches(&format!("{}(", crate::natives::find(n).map_or(*n, |x| x.alias))).count()).sum::<usize>();
             }
         }
         assert!(scripts >= 90 && lines > 10_000, "{scripts} scripts, {lines} lines");

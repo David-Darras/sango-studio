@@ -27,6 +27,7 @@ pub mod patricia;
 pub mod pica;
 pub mod modified;
 pub mod moves;
+pub mod natures;
 pub mod posing;
 pub mod render;
 pub mod text;

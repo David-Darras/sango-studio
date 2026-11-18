@@ -39,3 +39,13 @@ ChangeFacialGameIcon.anim_id|Face game bubble animation
 SetIcon.id|Pokémon-Amie icon
 SetIcon2.id|Pokémon-Amie icon
 AI_CMD.cmdID|AI command
+PlayerGetSex.@return|Gender
+PlayerGetForm.@return|Player form
+RegionGet.@return|Hardware region
+RomGetLanguageID.@return|Language
+PokeTemotiGetBall.@return|Ball
+ZukanSetFlag.sex|Gender
+CallApplicationDemo.sex|Gender
+_CallApplicationDemoNotFieldControl.sex|Gender
+CallFieldCaptureDemoSimplePoke.sex|Gender
+WordSetPokeTypeName.type_id|Pokémon type

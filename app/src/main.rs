@@ -42,6 +42,8 @@ impl App {
             Box::new(sango_effect::EffectPage::default()),
             Box::new(sango_script::ScriptPage::default()),
             Box::new(sango_encounter::EncounterPage::default()),
+            Box::new(sango_formula::Formula::default()),
+            Box::new(sango_nature::Nature::default()),
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_code::Code::default()),
@@ -58,19 +60,27 @@ impl App {
             ui.label(egui::RichText::new("Sango Studio").strong().size(22.0).color(color::ACCENT));
             ui.label(widget::hint("Created By ZettaD"));
             ui.add_space(14.0);
-            for (i, module) in self.modules.iter().enumerate() {
-                let selected = i == self.current;
-                let response = widget::side_button(ui, module.icon(), module.title(), selected);
-                if response.clicked() {
-                    self.current = i;
-                    self.side_bar_focus = true;
-                    ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
-                    ctx.request_repaint();
+            // The buttons scroll when the window is too low for all the pages; the version stays at the bottom.
+            let height = (ui.available_height() - 26.0).max(80.0);
+            egui::ScrollArea::vertical().id_salt("side_bar_scroll").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
+                for (i, module) in self.modules.iter().enumerate() {
+                    let selected = i == self.current;
+                    let response = widget::side_button(ui, module.icon(), module.title(), selected);
+                    if response.clicked() {
+                        self.current = i;
+                        self.side_bar_focus = true;
+                        ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+                        ctx.request_repaint();
+                    }
+                    if selected && self.side_bar_focus {
+                        widget::glow(ui, response.rect, 10.0);
+                        // The selected page stays in sight (for example when the arrows change the page).
+                        if ctx.input(|i| i.key_pressed(egui::Key::ArrowUp) || i.key_pressed(egui::Key::ArrowDown)) {
+                            ui.scroll_to_rect(response.rect, None);
+                        }
+                    }
                 }
-                if selected && self.side_bar_focus {
-                    widget::glow(ui, response.rect, 10.0);
-                }
-            }
+            });
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.label(widget::hint(&format!("v{}", sango_core::VERSION)));
             });

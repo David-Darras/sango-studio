@@ -24,6 +24,8 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `script/field/`, `script/ai/`, `script/amie/` | The scripts that the user changed: the files `<n>.bin` of the archive of the field scripts, of the AI of the trainers and of Pokémon-Amie, compressed, and the list `index.bin` of each folder. | yes |
 | `dexnav/` | The screen of the DexNav (pictures and places of the Pokémon): the file `0.bin` of the archive 248, compressed, and the list `index.bin`. | yes |
 | `species/model/` | The 3D models of the packs: the list `0.raw`, `index.bin` and the files `<n>.pc` (8 for each model). Made again from the packs. | yes, and only there |
+| `formula/` | The formulas of the statistics and the shiny chance: `formulas.txt` (the text of the formulas that the user changed, for the studio) and `formulas.bin` (the programs, for the plugin). | yes |
+| `nature/` | The effect of each nature on the five statistics, in percent, and the new natures: `natures.csv`. | yes |
 | `code/`, `move/code/` | The code of the Code page. | no |
 | `overworld/land`, `overworld/area`, `overworld/matrix`, `overworld/zone`, `overworld/model` | The blocks, the tilesets, the matrices, the zones (the events, and the wild Pokémon of the Encounter page) and the models of the characters that the Overworld page writes. | yes, on the SD card only |
 | `reload.bin` | The counter that tells the plugin that a file changed. | yes |

@@ -1,7 +1,7 @@
 AICommonWeakReserveGetScrId|Gets the script number of an entry of the weak reserve list.
-AICommonWeakReserveGetWkNo|Gets the work number of an entry of the weak reserve list.
-AICommonWeakReserveGetWkVal|Gets the work value of an entry of the weak reserve list.
-AICommonWeakReserveSetData|Stores one entry of the weak reserve list (script, work number and value).
+AICommonWeakReserveGetWkNo|Gets the variable number of an entry of the weak reserve list.
+AICommonWeakReserveGetWkVal|Gets the variable value of an entry of the weak reserve list.
+AICommonWeakReserveSetData|Stores one entry of the weak reserve list (script, variable number and value).
 AICreate|Starts the AI of a character.
 AIDelete|Stops and removes the AI of a character.
 AIGetForceStopFlag|Tells whether the AI of a character is forced to stop.
@@ -24,9 +24,9 @@ APowerSetStart|Starts an O-Power.
 AcmdListClear|Clears the list of action commands.
 AddBraceletFashionAfter|Ends adding the bracelet to the clothes.
 AddBtlTrainerObj|Adds a battle trainer character.
-AddCommMultiTrainerObjOnGrid|Adds a trainer character of a link multi battle on a grid cell.
+AddCommMultiTrainerObjOnGrid|Adds a trainer character of a link multi battle on a tile.
 AddStylishPoint|Adds stylish points.
-AddTrainerObjOnGrid|Adds a trainer character on a grid cell.
+AddTrainerObjOnGrid|Adds a trainer character on a tile.
 AddWinCount|Adds one win in a row.
 ApplyFashion|Puts on the clothes that were chosen.
 ApplyKisekaeShopping|Buys the items that are checked.
@@ -34,7 +34,7 @@ AreaR102AgehantMove|Starts the contact cutscene of the Beautifly of Route 102.
 AreaR102CamomeGlid|Starts the contact cutscene of the Wingull of Route 102.
 Assert_|Stops the game with an error when a condition is false.
 BGMChangeEvent|Changes the music of an event.
-BGMChangeNowMap|Goes back to the music of the current zone.
+BGMChangeNowMap|Goes back to the music of the current map.
 BGMEndDemo|Ends the music of a cutscene and goes back to the music of the place.
 BGMEndEvent|Ends the music of an event and goes back to the music of the place.
 BGMIsPlaying|Tells whether the music is playing.
@@ -97,7 +97,7 @@ BuildMdlEventAnimeStop|Stops the event animation of a map object.
 BuildMdlGetHandleByGPos|Gets the handle of a map object from its position.
 BuildMdlGetHandleByUniqID|Gets the handle of a map object from its unique number.
 BuildMdlSetVisible|Shows or hides a map object.
-CalcVecToDir|Turns a vector on the grid into a direction.
+CalcVecToDir|Turns a vector on the tiles into a facing.
 Call3DCamera|Opens the 3D camera.
 CallAnanukenohimoEffect|Plays the effect of the Escape Rope.
 CallAnawohoruEffect|Plays the effect of Dig.
@@ -233,7 +233,7 @@ FlagGet|Reads an event flag.
 FlagReset|Clears an event flag.
 FlagSet|Sets an event flag.
 FlagSetReq|Requests that an event flag is set.
-FlyFlagSet|Unlocks the Fly destination of a zone.
+FlyFlagSet|Unlocks the Fly destination of a map.
 FriendShipDemoStart|Starts a contact cutscene.
 GetBirthdayDay|Gets the day of the birthday that the console has.
 GetBirthdayMonth|Gets the month of the birthday that the console has.
@@ -251,8 +251,8 @@ GetCurrentFrontHair|Gets the front hair of the player.
 GetCurrentHairColor|Gets the hair colour of the player.
 GetDay|Gets the day of the month.
 GetDefaultEyeColor|Gets the eye colour that the player had at the start.
-GetDirAddValueGridX|Gets the X of the cell next to a cell in a direction.
-GetDirAddValueGridZ|Gets the Z of the cell next to a cell in a direction.
+GetDirAddValueGridX|Gets the X of the cell next to a cell in the given facing.
+GetDirAddValueGridZ|Gets the Z of the cell next to a cell in the given facing.
 GetFashionReturnState|Gets the state after the clothes are restored.
 GetHour|Gets the hour.
 GetKeyCont|Tells whether a key is held.
@@ -271,19 +271,19 @@ GetPadOn|Pokémon-Amie: tells which buttons are pressed.
 GetPastDays|Pokémon-Amie: gets the days since the last visit.
 GetPlayerCap|Gets the cap of the player.
 GetPlayerFollowerAcmd|Gets the action command for a follower from the action command of the player.
-GetPlayerFollowerGridX|Gets the X position of the grid cell behind the player.
-GetPlayerFollowerGridZ|Gets the Z position of the grid cell behind the player.
+GetPlayerFollowerGridX|Gets the X position of the tile behind the player.
+GetPlayerFollowerGridZ|Gets the Z position of the tile behind the player.
 GetPrice|Gets the price of the hairstyle.
 GetPssIconType|Gets the type of the PSS icon.
 GetRank|Gets the rank.
-GetReturnDir|Gets the opposite direction.
+GetReturnDir|Gets the opposite facing.
 GetRockCrashItemTableNo|Gets the number of the table of items of Rock Smash.
 GetRomFriendDataCode|Gets the code of the friend character of the game.
 GetSalonScene|Gets the scene of the hair salon.
 GetSavedMakeData|Gets a saved look datum.
 GetSecond|Gets the second.
 GetSickness|Pokémon-Amie: gets the state of illness of the Pokémon.
-GetStickHold|Gets the direction of the stick that is held.
+GetStickHold|Gets the facing of the stick that is held.
 GetStylishLevel|Gets the stylish level.
 GetStylishPoint|Gets the stylish points.
 GetTimeZone|Gets the time of the day (morning, day, evening, night).
@@ -292,7 +292,7 @@ GetTouchX|Pokémon-Amie: gets the X position that is touched.
 GetTouchY|Pokémon-Amie: gets the Y position that is touched.
 GetTrainerID|Gets the trainer number.
 GetTrainerObjCode|Gets the character code of a trainer.
-GetTurnDirByDir|Gets the direction of a turn.
+GetTurnDirByDir|Gets the facing of a turn.
 GetWinCount|Gets the number of wins in a row.
 GimmickAnimeReq|Requests the animation of a device.
 GimmickWorkGetBit|Gets a bit of the work of a map device.
@@ -410,16 +410,16 @@ MdlCntRelease|Takes an event character away from the controller of the character
 MdlDel|Removes a character.
 MdlDelByFlag|Removes all the characters that have a flag.
 MdlEventTypeIsAI|Tells whether a character is moved by the AI.
-MdlGetDirDisp|Gets the direction that a character faces.
-MdlGetDirMove|Gets the direction in which a character moves.
+MdlGetDirDisp|Gets the facing of a character.
+MdlGetDirMove|Gets the way that a character moves.
 MdlGetEventType|Gets the event type of a character.
-MdlGetGPosDirX|Gets the X position of the cell next to a character in a direction.
-MdlGetGPosDirZ|Gets the Z position of the cell next to a character in a direction.
-MdlGetGPosX|Gets the X position of a character on the grid.
-MdlGetGPosZ|Gets the Z position of a character on the grid.
+MdlGetGPosDirX|Gets the X position of the cell next to a character in the given facing.
+MdlGetGPosDirZ|Gets the Z position of the cell next to a character in the given facing.
+MdlGetGPosX|Gets the X position of a character on the tiles.
+MdlGetGPosZ|Gets the Z position of a character on the tiles.
 MdlGetMoveCode|Gets the movement code of a character.
 MdlGetObjCode|Gets the model code of a character.
-MdlGetObjID|Gets the character that is on a cell of the grid.
+MdlGetObjID|Gets the character that is on a cell of the tiles.
 MdlGetParam0|Gets the first parameter of a character.
 MdlGetParam1|Gets the second parameter of a character.
 MdlGetParam2|Gets the third parameter of a character.
@@ -445,8 +445,8 @@ MdlPauseAnim|Pauses the animation of a character.
 MdlPauseAnimNo|Locks the animation of a character (no other animation plays).
 MdlSearchByObjCode|Looks for a character by its model code.
 MdlSetCullingOff|Turns off the culling of a character.
-MdlSetDirDisp|Sets the direction that a character faces.
-MdlSetGPos|Sets the position of a character on the grid.
+MdlSetDirDisp|Sets the facing of a character.
+MdlSetGPos|Sets the position of a character on the tiles.
 MdlSetMoveSpeedZero|Sets the speed of a character to zero.
 MdlSetParam0|Sets the first parameter of a character.
 MdlSetParam1|Sets the second parameter of a character.
@@ -506,7 +506,7 @@ PlayerGetID|Gets the trainer ID of the player.
 PlayerGetMoney|Gets the money of the player.
 PlayerGetReturnDir|Gets the position of the player one step before.
 PlayerGetSex|Gets the gender of the player.
-PlayerGetZoneID|Gets the zone where the player is.
+PlayerGetZoneID|Gets the map where the player is.
 PlayerIsKanjiMode|Tells whether the kanji mode is on.
 PlayerSetBP|Sets the BP of the player.
 PlayerSetFieldMenu|Sets the menu of the map.
@@ -601,7 +601,7 @@ SetCameraAnimationBeginFrame|Sets the first frame of the camera animation.
 SetCameraAnimationEndFrame|Sets the last frame of the camera animation.
 SetCameraAnimationRotation|Sets the turn of the camera animation.
 SetCameraAnimationTranslation|Sets the movement of the camera animation.
-SetCameraUpVector|Pokémon-Amie: sets the up direction of the camera.
+SetCameraUpVector|Pokémon-Amie: sets the up facing of the camera.
 SetCurrentEyeColor|Sets the eye colour of the player.
 SetDefaultEyeColor|Sets the eye colour that the player had at the start.
 SetEndConcentratedLine|Ends the speed lines.
@@ -679,7 +679,7 @@ TrainerBattleRuleGet|Gets the battle rule of a trainer (not to be used: it loads
 TrainerBattleRuleIsDouble|Tells whether the battle rule is a double battle.
 TrainerCardGetRank|Gets the rank of the Trainer Card.
 TrainerCardGetRankGold|Gets the gold rank of the Trainer Card.
-TrainerGetDir|Gets the direction of a trainer that sees the player.
+TrainerGetDir|Gets the facing of a trainer that sees the player.
 TrainerGetEyeMoveType|Gets the way a trainer moves when it looks for the player.
 TrainerGetInfo|Gets the information of a trainer.
 TrainerGetMsgID|Sets the message of a trainer.
@@ -748,11 +748,11 @@ WordSetWazaName|Puts the name of a move in a text buffer.
 WordSetWearingProduct|Puts the name of the item that is tried on in a text buffer.
 WordSetWeatherName|Puts the name of a weather in a text buffer.
 WordSetWordWithCount|Puts the text that is loaded in a text buffer, with a count.
-WorkGet|Reads an event work value.
-WorkSet|Writes an event work value.
-WorkSetReq|Requests that an event work value is written.
+WorkGet|Reads an script variable.
+WorkSet|Writes an script variable.
+WorkSetReq|Requests that an script variable is written.
 YesNoWin_Seq|Waits for the answer to a window with yes and no.
-ZoneIsPokecen|Tells whether the zone is a Pokémon Center.
+ZoneIsPokecen|Tells whether the map is a Pokémon Center.
 ZukanGetFlag|Gets a Pokédex flag.
 ZukanGetOpenFlag|Gets the flag that opens the Pokédex.
 ZukanHyouka|Gives the rating of the Pokédex.
@@ -863,7 +863,7 @@ _SecretBaseIsGoodsExist|Tells whether a decoration is at a position.
 _SecretBaseMapChangeForMyBaseCreate|Moves from the inside of the base to the PC.
 _SecretBaseMapChangeInSide|Moves to the inside of the Secret Base.
 _SecretBaseMapChangeOutSide|Moves to the outside of the Secret Base.
-_SecretBaseMoveGridRequest|Sets a request to move on the grid in the Secret Base.
+_SecretBaseMoveGridRequest|Sets a request to move on the tiles in the Secret Base.
 _SecretBaseOthersBaseRandom|Gets a random number for the base of someone else (the same all day).
 _SecretBasePreOpen|Opens the entrance of a Secret Base for a while.
 _SecretBaseRegistHimitunoNakama|Registers the caretaker of the base as a secret friend.
@@ -909,7 +909,7 @@ _TrainerEyeRegist|Registers a trainer that sees the player.
 _TrainerEyeSetBattleWin|Sets that the player won against a trainer that sees it.
 _UpdateCakeButton|Pokémon-Amie: updates the buttons of the food menu.
 _WordSetCurrentSecretBaseOwnerName|Puts the name of the owner of the Secret Base in a text buffer.
-_WordSetRegister|Puts a value in a text buffer (a stick direction or a point).
+_WordSetRegister|Puts a value in a text buffer (a stick facing or a point).
 _ZukanGetCount|Gets the count of a mode of the Pokédex.
 _ZukanIsComplete|Tells whether the Pokédex is complete.
 _Suspend|Suspends the script for a number of frames. The script of Pokémon-Amie calls it through the stock function Suspend, which then sleeps.
@@ -940,7 +940,7 @@ SetBodyPositionY|Sets the height of the body of the Pokémon.
 SetBodyRotationZ|Rotates the body of the Pokémon around the Z axis.
 SetBodyRotationY|Rotates the body of the Pokémon around the vertical axis.
 SetBodyScale|Sets the size of the Pokémon.
-SetCameraUpVector|Sets the up direction of the camera.
+SetCameraUpVector|Sets the up facing of the camera.
 CheckMenuButton|Tells which button of the menu was pressed.
 SetCakeMenuButtonPassive|Turns off the snack button.
 SetCakeMenuButtonRecover|Turns the snack button on again.

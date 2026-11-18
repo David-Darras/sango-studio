@@ -1,0 +1,882 @@
+# The enumerator of each value of the lists of the script API. Written by tools/sync_script_enums.py.
+@Facing|overworld::Facing|0-9
+Facing|0|kUp
+Facing|1|kDown
+Facing|2|kLeft
+Facing|3|kRight
+Facing|4|kUpLeft
+Facing|5|kUpRight
+Facing|6|kDownLeft
+Facing|7|kDownRight
+Facing|9|kInvalid
+@Facing|overworld::ElevatedFacing|10-19
+Facing|10|kRise
+Facing|11|kDescend
+Facing|12|kRiseLeft
+Facing|13|kRiseRight
+Facing|14|kRiseAwayFromCamera
+Facing|15|kRiseTowardCamera
+Facing|16|kDescendLeft
+Facing|17|kDescendRight
+Facing|18|kDescendAwayFromCamera
+Facing|19|kDescendTowardCamera
+@Move command|overworld::ActionCommand|0-65535
+Move command|0|kNone
+Move command|1|kFace
+Move command|2|kFaceRotate32Frames
+Move command|3|kFaceRotate16Frames
+Move command|4|kFaceRotate14Frames
+Move command|5|kFaceRotate12Frames
+Move command|6|kFaceRotate8Frames
+Move command|7|kFaceRotate4Frames
+Move command|8|kFaceSideCameraBehindPlayer
+Move command|9|kFaceSideStealthySteps
+Move command|10|kFaceBack
+Move command|11|kWalk32Frames
+Move command|12|kWalk16Frames
+Move command|13|kWalk8Frames
+Move command|14|kWalk4Frames
+Move command|15|kWalk2Frames
+Move command|16|kWalk1Frame
+Move command|17|kWalk12Frames
+Move command|18|kWalk14Frames
+Move command|19|kWalk7Frames
+Move command|20|kWalk6Frames
+Move command|21|kWalk3Frames
+Move command|22|kWalk5Frames
+Move command|23|kDash6Frames
+Move command|24|kSlowWalk12Frames
+Move command|25|kStealthyWalk16Frames
+Move command|26|kTurn2Frames
+Move command|27|kWalkInPlace32Frames
+Move command|28|kWalkInPlace16Frames
+Move command|29|kWalkInPlace8Frames
+Move command|30|kWalkInPlace4Frames
+Move command|31|kWalkInPlace2Frames
+Move command|32|kJumpInPlace16Frames
+Move command|33|kJumpInPlace8Frames
+Move command|34|kJumpInPlace
+Move command|35|kJump1Tile8Frames
+Move command|36|kJump1Tile16Frames
+Move command|37|kJump2Tiles16Frames
+Move command|38|kJump3Tiles16Frames
+Move command|39|kJump3Tiles24Frames
+Move command|40|kJump3Tiles24FramesNoLandingSound
+Move command|41|kWait1Frame
+Move command|42|kWait2Frames
+Move command|43|kWait4Frames
+Move command|44|kWait8Frames
+Move command|45|kWait15Frames
+Move command|46|kWait16Frames
+Move command|47|kWait32Frames
+Move command|48|kHide
+Move command|49|kShow
+Move command|50|kLockFacing
+Move command|51|kUnlockFacing
+Move command|52|kPauseAnimation
+Move command|53|kResumeAnimation
+Move command|54|kWarpUp
+Move command|55|kWarpDown
+Move command|56|kExclamationMark
+Move command|57|kExclamationMarkWithSound
+Move command|58|kFreeMovementWeakAcceleration
+Move command|59|kFreeMovementStrongAcceleration
+Move command|60|kFreeMovementBraking
+Move command|61|kFreeMovementStrongBraking
+Move command|62|kFreeMovementStartTurn
+Move command|63|kFreeMovementTurn
+Move command|64|kFreeMovementStartFastTurn
+Move command|65|kFreeMovementFastTurn
+Move command|66|kFreeMovementJump
+Move command|67|kFreeMovementConstantSpeed
+Move command|68|kFreeMovementEndMove
+Move command|69|kFreeMovementStop
+Move command|70|kFreeMovementConstantSpeedSpeedGivenDirectly
+Move command|71|kRollerSkatesSpinRight
+Move command|72|kRollerSkatesSpinLeft
+Move command|73|kRollerSkatesParallel
+Move command|74|kRollerSkatesOpenTurn
+Move command|75|kRollerSkatesBackFlip
+Move command|76|kRollerSkates360Right
+Move command|77|kRollerSkates360Left
+Move command|78|kRollerSkatesBio540
+Move command|79|kFreeMovementBadGround
+Move command|80|kStealthyStepsMove
+Move command|81|kMachBikeStop
+Move command|82|kMachBikeMove
+Move command|83|kMachBikeBump
+Move command|84|kMachBikeSlowDownWithoutInput
+Move command|85|kMachBikeMoveOnSand
+Move command|86|kMachBikeSlowDownOnSand
+Move command|87|kMachBikeJump
+Move command|88|kAcroBikeStop
+Move command|89|kAcroBikeMove
+Move command|90|kAcroBikeBump
+Move command|91|kAcroBikeMoveOnSand
+Move command|92|kAcroBikeJump
+Move command|93|kAcroBikeWheelieJump
+Move command|94|kAcroBikeSideStep
+Move command|95|kAcroBikeWheelieJumpInPlace
+Move command|96|kAcroBikeWheelieJumpInPlaceAndTurn
+Move command|97|kAcroBikeWheelieJumpAndMove
+Move command|98|kAcroBikeSteppingStoneJump
+Move command|99|kAcroBikeJumpAndTurn
+Move command|100|kTurnOnLastFrameValueInput
+Move command|101|kTurnOnLastFrameFacing
+Move command|102|kSurfingStop
+Move command|103|kSurfingAcceleration
+Move command|104|kSurfingConstantSpeed
+Move command|105|kSurfingBraking
+Move command|106|kSurfingStrongBraking
+Move command|107|kSurfingJump
+Move command|108|kSurfingStartTurn
+Move command|109|kSurfingTurn
+Move command|110|kSurfingEndMove
+Move command|111|kSurfingStealthySteps
+Move command|112|kRhyhornRideStop
+Move command|113|kRhyhornRideWalkForward
+Move command|114|kRhyhornRideWalkBack
+Move command|115|kRhyhornRideTurn
+Move command|116|kRhyhornRideWalkForwardFast
+Move command|117|kRhyhornRideWalkBackFast
+Move command|118|kRhyhornRideTurnFast
+Move command|119|kRhyhornRideWalkInPlace
+Move command|120|kRhyhornRideLieDown
+Move command|121|kRhyhornRideStandUp
+Move command|122|kRhyhornRideWaitLyingDown
+Move command|123|kRhyhornRideGetOn
+Move command|124|kRhyhornRideGetOff
+Move command|125|kRhyhornRideGetOnLeft
+Move command|126|kRhyhornRideGetOffLeft
+Move command|127|kRhyhornRideRefuse
+Move command|128|kRhyhornRideAction
+Move command|129|kGogoatRideGetOn
+Move command|130|kGogoatRideGetOff
+Move command|131|kGogoatRideGetOnLeft
+Move command|132|kGogoatRideGetOffLeft
+Move command|133|kGogoatRideRefuse
+Move command|134|kSitWait
+Move command|135|kSit
+Move command|136|kSitStand
+Move command|137|kSitRotate
+Move command|138|kBow
+Move command|139|kHoldOutHands
+Move command|140|kPullTowardOneself
+Move command|141|kPutInBag
+Move command|142|kTakeOutBag
+Move command|143|kTalkGesture
+Move command|144|kStopOnRollerSkates
+Move command|145|kWriteReport
+Move command|146|kWritingReport
+Move command|147|kFinishedWritingReport
+Move command|148|kHalfSitStart
+Move command|149|kHalfSitWait
+Move command|150|kHalfSitEnd
+Move command|151|kKneelStart
+Move command|152|kKneelWait
+Move command|153|kKneelEnd
+Move command|154|kGetUpFromBed
+Move command|155|kStopLyingDown
+Move command|156|kPutOnDevonScope
+Move command|157|kSlideDownSlope
+Move command|158|kSlideDownSlopeSecretBaseSlide
+Move command|159|kSlideDownSlopeBackward
+Move command|160|kSkatePipeMove
+Move command|161|kSkatePipeStart
+Move command|162|kSkatePipeEnd
+Move command|163|kConveyorBeltStepOn
+Move command|164|kConveyorBeltStepOff
+Move command|165|kConveyorBeltPushedBack
+Move command|166|kWalkWithRotate4Frames
+Move command|167|kCameraBehindPlayerStop
+Move command|168|kCameraBehindPlayerWalk
+Move command|169|kCameraBehindPlayerRun
+Move command|170|kCameraBehindPlayerJump
+Move command|171|kCameraBehindPlayerBump
+Move command|172|kCameraBehindPlayerWalkDebug
+Move command|173|kFreeMovementMoveOnSand
+Move command|174|kFishingMaleStyle1Start
+Move command|175|kFishingMaleStyle1Cast
+Move command|176|kFishingMaleStyle1WaitForBite
+Move command|177|kFishingMaleStyle1Bite
+Move command|178|kFishingMaleStyle1ReelIn
+Move command|179|kFishingMaleStyle1Fail
+Move command|180|kFishingMaleStyle2Start
+Move command|181|kFishingMaleStyle2Cast
+Move command|182|kFishingMaleStyle2WaitForBite
+Move command|183|kFishingMaleStyle2Bite
+Move command|184|kFishingMaleStyle2ReelIn
+Move command|185|kFishingMaleStyle2Fail
+Move command|186|kFishingMaleStyle3Start
+Move command|187|kFishingMaleStyle3Cast
+Move command|188|kFishingMaleStyle3WaitForBite
+Move command|189|kFishingMaleStyle3Bite
+Move command|190|kFishingMaleStyle3ReelIn
+Move command|191|kFishingMaleStyle3Fail
+Move command|192|kFishingMaleStyle4Start
+Move command|193|kFishingMaleStyle4Cast
+Move command|194|kFishingMaleStyle4WaitForBite
+Move command|195|kFishingMaleStyle4Bite
+Move command|196|kFishingMaleStyle4ReelIn
+Move command|197|kFishingMaleStyle4Fail
+Move command|198|kFishingFemaleStyle1Start
+Move command|199|kFishingFemaleStyle1Cast
+Move command|200|kFishingFemaleStyle1WaitForBite
+Move command|201|kFishingFemaleStyle1Bite
+Move command|202|kFishingFemaleStyle1ReelIn
+Move command|203|kFishingFemaleStyle1Fail
+Move command|204|kFishingFemaleStyle2Start
+Move command|205|kFishingFemaleStyle2Cast
+Move command|206|kFishingFemaleStyle2WaitForBite
+Move command|207|kFishingFemaleStyle2Bite
+Move command|208|kFishingFemaleStyle2ReelIn
+Move command|209|kFishingFemaleStyle2Fail
+Move command|210|kFishingFemaleStyle3Start
+Move command|211|kFishingFemaleStyle3Cast
+Move command|212|kFishingFemaleStyle3WaitForBite
+Move command|213|kFishingFemaleStyle3Bite
+Move command|214|kFishingFemaleStyle3ReelIn
+Move command|215|kFishingFemaleStyle3Fail
+Move command|216|kFishingFemaleStyle4Start
+Move command|217|kFishingFemaleStyle4Cast
+Move command|218|kFishingFemaleStyle4WaitForBite
+Move command|219|kFishingFemaleStyle4Bite
+Move command|220|kFishingFemaleStyle4ReelIn
+Move command|221|kFishingFemaleStyle4Fail
+Move command|222|kWateringCanMaleTakeOut
+Move command|223|kWateringCanMaleUse
+Move command|224|kWateringCanMalePutAway
+Move command|225|kWateringCanFemaleTakeOut
+Move command|226|kWateringCanFemaleUse
+Move command|227|kWateringCanFemalePutAway
+Move command|228|kHarvestBerries
+Move command|229|kQuestionMark
+Move command|230|kQuestionMarkWithSound
+Move command|231|kGetItem
+Move command|232|kTurnWithLook4Frames
+Move command|233|kTurnWithLook8Frames
+Move command|234|kAngry
+Move command|235|kHappy
+Move command|236|kSad
+Move command|237|kSurprised
+Move command|238|kPose
+Move command|239|kMoveFromFreeMovementCenterTile
+Move command|240|kFastWalk4Frames
+Move command|241|kSlideDownSlopeOnBike
+Move command|242|kSlideDownSlopeBackwardOnBike
+Move command|243|kFaceWithoutCorrection
+Move command|244|kFaceRotate6Frames
+Move command|245|kFaceRotate5Frames
+Move command|246|kFaceRotate3Frames
+Move command|247|kFaceRotate2Frames
+Move command|248|kJumpInPlace8FramesHeight0
+Move command|249|kCameraBehindPlayerBumpOnBike
+Move command|250|kTurn8Frames
+Move command|251|kTurn12Frames
+Move command|252|kTurnWithMotion12FramesRight
+Move command|253|kTurnWithMotion12FramesLeft
+Move command|254|kFreeMovementWalk
+Move command|255|kFreeMovementDash
+Move command|256|kStealthyStepsStop
+Move command|257|kSitOnChair
+Move command|258|kStandUpFromChair
+Move command|259|kSlidingMove4Frames
+Move command|65535|kEndList
+@Nature|pokemon::Nature|
+Nature|0|kHardy
+Nature|1|kLonely
+Nature|2|kBrave
+Nature|3|kAdamant
+Nature|4|kNaughty
+Nature|5|kBold
+Nature|6|kDocile
+Nature|7|kRelaxed
+Nature|8|kImpish
+Nature|9|kLax
+Nature|10|kTimid
+Nature|11|kHasty
+Nature|12|kSerious
+Nature|13|kJolly
+Nature|14|kNaive
+Nature|15|kModest
+Nature|16|kMild
+Nature|17|kQuiet
+Nature|18|kBashful
+Nature|19|kRash
+Nature|20|kCalm
+Nature|21|kGentle
+Nature|22|kSassy
+Nature|23|kCareful
+Nature|24|kQuirky
+@Screen|script::ScreenTarget|
+Screen|0|kUpperScreen
+Screen|1|kLowerScreen
+Screen|2|kBothScreens
+@Exit type|overworld::ExitType|
+Exit type|0|kNone
+Exit type|1|kFadeOnly
+Exit type|2|kMat
+Exit type|3|kDoor
+Exit type|4|kScriptOnly
+Exit type|5|kStairs
+Exit type|6|kWarp
+Exit type|7|kSecretBaseEntrance
+Exit type|8|kMatWithoutFadeIn
+Exit type|9|kStairsWithoutFadeIn
+Exit type|15|kSpecial1
+Exit type|16|kSpecial2
+Exit type|17|kSpecial3
+Exit type|18|kSpecial4
+Exit type|19|kSpecial5
+Exit type|20|kSpecial6
+Exit type|21|kSpecial7
+Exit type|22|kSpecial8
+Exit type|23|kSpecial9
+Exit type|24|kSpecial10
+Exit type|25|kSpecial11
+Exit type|26|kSpecial12
+Exit type|27|kSpecial13
+Exit type|28|kSpecial14
+Exit type|29|kSpecial15
+Exit type|30|kSpecial16
+Exit type|31|kSpecial17
+Exit type|32|kSpecial18
+Exit type|33|kSpecial19
+Exit type|34|kSpecial20
+Exit type|35|kSpecial21
+Exit type|36|kSpecial22
+Exit type|37|kSpecial23
+Exit type|38|kSpecial24
+Exit type|39|kSpecial25
+Exit type|40|kSpecial26
+Exit type|41|kSpecial27
+Exit type|42|kSpecial28
+Exit type|43|kSpecial29
+Exit type|44|kSpecial30
+Exit type|45|kSpecial31
+Exit type|46|kSpecial32
+Exit type|47|kSpecial33
+Exit type|48|kSpecial34
+Exit type|49|kSpecial35
+Exit type|50|kSpecial36
+Exit type|51|kSpecial37
+Exit type|52|kSpecial38
+Exit type|53|kSpecial39
+Exit type|54|kSpecial40
+Exit type|55|kSpecial41
+Exit type|56|kSpecial42
+Exit type|57|kSpecial43
+Exit type|58|kSpecial44
+Exit type|59|kSpecial45
+Exit type|60|kSpecial46
+Exit type|61|kSpecial47
+Exit type|62|kSpecial48
+Exit type|63|kSpecial49
+Exit type|64|kSpecial50
+@Map change|overworld::MapChangeEffect|
+Map change|0|kNoEffect
+Map change|1|kEntranceEvent
+Map change|2|kFly
+Map change|3|kDive
+Map change|4|kEscape
+Map change|5|kTeleport
+Map change|6|kWalkConnectedMap
+@Fade-in|script::FadeInStyle|
+Fade-in|0|kBlack
+Fade-in|1|kWhite
+Fade-in|2|kBlackFromCaptureScreen
+Fade-in|3|kWhiteFromCaptureScreen
+Fade-in|4|kCaptureScreen
+Fade-in|5|kCircleThatShrinks
+Fade-in|6|kBall
+Fade-in|7|kUp
+Fade-in|8|kDown
+Fade-in|9|kLeft
+Fade-in|10|kRight
+Fade-in|11|kDiamond
+@Fade-out|script::FadeOutStyle|
+Fade-out|0|kBlack
+Fade-out|1|kWhite
+Fade-out|2|kBlackFromCaptureScreen
+Fade-out|3|kWhiteFromCaptureScreen
+Fade-out|4|kCaptureScreen
+Fade-out|5|kCircleThatShrinks
+Fade-out|6|kBall
+Fade-out|7|kUp
+Fade-out|8|kDown
+Fade-out|9|kLeft
+Fade-out|10|kRight
+Fade-out|11|kStar
+@Fade of the field|script::FadeOwner|
+Fade of the field|0|kScriptMakesFade
+Fade of the field|1|kEventMakesFade
+@Player form|overworld::PlayerForm|
+Player form|0|kWalking
+Player form|1|kMachBike
+Player form|2|kAcroBike
+Player form|3|kRollerSkates
+Player form|4|kSurfing
+Player form|5|kRhyhornOrMamoswineRideStartClimb
+Player form|6|kGogoatRide
+Player form|7|kRhyhornOrMamoswineRideFast
+Player form|8|kBigGogoatRide
+Player form|9|kSitting
+Player form|10|kClimbing
+Player form|11|kDowsing
+Player form|12|kStealthySteps
+Player form|13|kSurfingOnKyogre
+Player form|14|kSurfingOnSharpedo
+Player form|15|kSurfingOnWailmer
+Player form|16|kDiving
+Player form|17|kDivingWithKyogre
+Player form|18|kDivingWithSharpedo
+Player form|19|kDivingWithWailmer
+Player form|20|kNone
+@Player action|overworld::PlayerAction|
+Player action|0|kNone
+Player action|1|kSpinRight
+Player action|2|kSpinLeft
+Player action|3|kParallel
+Player action|4|kDash
+Player action|5|kOpenTurn
+Player action|7|k360Right
+Player action|8|k360Left
+Player action|9|kBackFlip
+Player action|10|kBio540
+@Special character|overworld::SpecialCharacter|
+Special character|-1|kTalkTarget
+Special character|255|kPlayer
+Special character|254|kScriptCharacter1
+Special character|253|kScriptCharacter2
+Special character|252|kScriptCharacter3
+Special character|240|kNoCharacter
+@Obstacle rule|overworld::ObstacleRule|
+Obstacle rule|0|kDoNotIgnoreObstacles
+Obstacle rule|1|kIgnoreCharactersOnly
+Obstacle rule|2|kIgnoreMapOnly
+Obstacle rule|3|kIgnoreEverything
+@Special camera|overworld::SpecialCamera|
+Special camera|0|kShop
+Special camera|1|kSecretBaseViewFromAbove
+Special camera|2|kSecretBaseViewPoster
+@Motion blur kind|renderer::MotionBlurKind|
+Motion blur kind|0|kNormal
+Motion blur kind|1|kCircle
+Motion blur kind|2|kBlurWhatIsNear
+@Motion blur animation|renderer::MotionBlurAnimation|
+Motion blur animation|0|kNone
+Motion blur animation|1|kZoom
+@Motion blur change|renderer::MotionBlurChange|
+Motion blur change|0|kSetValue
+Motion blur change|1|kLinear
+Motion blur change|2|kSpline
+Motion blur change|3|kQuadratic
+Motion blur change|4|kBase10Logarithm
+@Pokédex count|script::PokedexCount|
+Pokédex count|0|kSeen
+Pokédex count|1|kCaught
+@Trainer data|script::TrainerDataKind|
+Trainer data|0|kTrainerClass
+Trainer data|1|kGender
+Trainer data|2|kBattleRule
+Trainer data|3|kMusicWhenTrainerSeesPlayer
+@Party search|script::PartySearch|
+Party search|0|kNotEgg
+Party search|1|kNeitherEggNorFainted
+@Pokémon select mode|script::PokemonSelectMode|
+Pokémon select mode|0|kNormal
+Pokémon select mode|1|kChooseTarget
+Pokémon select mode|2|kChooseMove
+Pokémon select mode|3|kPokemonDayCare
+Pokémon select mode|4|kContest
+Pokémon select mode|5|kChooseMoveBattlePointsShop
+@Move tutor mode|script::MoveTutorKind|
+Move tutor mode|0|kDragonMoves
+Move tutor mode|1|kUltimateMoves
+Move tutor mode|2|kCombinedMoves
+Move tutor mode|3|kDragonAscent
+Move tutor mode|4|kBattleShop
+@Postman request|script::PostmanRequest|
+Postman request|0|kIsThereGift
+Postman request|1|kCanGiftBeReceived
+Postman request|2|kMessageWhenGiftIsReceived
+Postman request|3|kMessageWhenGiftCannotBeReceived
+Postman request|4|kTypeGift
+@Postman gift|script::PostmanGift|
+Postman gift|0|kPokemon
+Postman gift|1|kEgg
+Postman gift|2|kAssistPower
+Postman gift|3|kNormalItem
+Postman gift|4|kExtraStageSparring
+Postman gift|5|kSpecialDistributionEvent
+Postman gift|6|kEonTicketItem
+@PGL postman request|script::PglPostmanRequest|
+PGL postman request|0|kReadItem
+PGL postman request|1|kReadNumberItems
+PGL postman request|2|kMarkFirstItemAsTaken
+PGL postman request|3|kReadNumberKindsItems
+@Field menu item|script::FieldMenuItem|
+Field menu item|0|kPokemonList
+Field menu item|1|kPokedex
+@Field menu page flags|script::FieldMenuPageFlag|
+Field menu page flags|1|kTraining
+Field menu page flags|2|kPlayerSearchSystem
+Field menu page flags|4|kPokemonAmie
+@Field menu page|script::FieldMenuPage|
+Field menu page|0|kNoPage
+Field menu page|1|kTraining
+Field menu page|2|kPlayerSearchSystem
+Field menu page|3|kPokemonAmie
+@Judge mode|script::JudgeKind|
+Judge mode|0|kTotalIVs
+Judge mode|1|kHighestIV
+Judge mode|2|kLowestIV
+Judge mode|3|kHPIV
+Judge mode|4|kAttackIV
+Judge mode|5|kDefenseIV
+Judge mode|6|kSpeedIV
+Judge mode|7|kSpecialAttackIV
+Judge mode|8|kSpecialDefenseIV
+@Trade data|script::TradeDataKind|
+Trade data|0|kPokemonThatPlayerReceives
+Trade data|1|kPokemonThatPlayerGives
+Trade data|2|kDoesGameAcceptAnyPokemon
+@Berry plot value|script::BerryPlotValue|
+Berry plot value|0|kState
+Berry plot value|1|kMinutesSinceBerryWasPlanted
+Berry plot value|2|kMinutesUntilSoilIsDry
+Berry plot value|3|kBerryThatIsPlanted
+Berry plot value|4|kNumberBerriesHarvest
+@Berry plot state|script::BerryPlotState|
+Berry plot state|0|kEmpty
+Berry plot state|1|kSeed
+Berry plot state|2|kSprout
+Berry plot state|3|kGrownStem
+Berry plot state|4|kInBloom
+Berry plot state|5|kWithBerries
+Berry plot state|6|kDead
+@Word kind|script::WordKind|
+Word kind|0|kWord
+Word kind|1|kPlayerName
+Word kind|2|kPlayerNickname
+Word kind|3|kPrefixPlayerNickname
+Word kind|4|kRivalName
+Word kind|5|kPokemonSpeciesName
+Word kind|6|kItemName
+Word kind|7|kMoveNameTMOrHMItem
+Word kind|8|kBagPocketName
+Word kind|9|kNumber
+Word kind|10|kMoveName
+Word kind|11|kNicknamePokemonParty
+Word kind|12|kNicknamePokemonInBox
+Word kind|13|kTypeName
+Word kind|14|kNatureName
+Word kind|15|kBoxName
+Word kind|16|kTrainerClassName
+Word kind|17|kTrainerName
+Word kind|18|kPlaceName
+Word kind|19|kWeatherName
+Word kind|20|kAssistPowerName
+Word kind|21|kRibbonName
+Word kind|23|kSecretBaseGroupName
+Word kind|24|kSecretBasePassword
+Word kind|25|kSecretBaseWordWhenHappy
+Word kind|26|kSecretBaseWordEncourage
+Word kind|27|kSecretBaseWordOnBlackboard
+Word kind|28|kSecretBaseWordOnPaperBall
+Word kind|29|kSecretBaseOwnerName
+Word kind|30|kSecretBaseDisplayedName
+Word kind|33|kOwnSecretBaseGroupName
+Word kind|34|kOwnSecretBasePassword
+Word kind|35|kOwnSecretBaseWordWhenHappy
+Word kind|36|kOwnSecretBaseWordEncourage
+Word kind|37|kOwnSecretBaseWordOnBlackboard
+Word kind|38|kOwnSecretBaseWordOnPaperBall
+Word kind|39|kOwnSecretBaseOwnerName
+Word kind|40|kOwnSecretBaseDisplayedName
+@Free word input|script::FreeWordInput|
+Free word input|0|kGroupName
+Free word input|1|kPassword
+Free word input|2|kWordWhenHappy
+Free word input|3|kWordEncourage
+Free word input|4|kWordOnBlackboard
+Free word input|5|kWordOnPaperBall
+@Contest data|script::ContestData|
+Contest data|0|kTotalScore
+Contest data|1|kRanking
+Contest data|2|kConditionEntry
+Contest data|3|kRankEntry
+Contest data|4|kRankingLisia
+Contest data|5|kRankingWallace
+Contest data|6|kRankingOtherCharacters
+@Contest condition|script::ContestCondition|
+Contest condition|0|kCool
+Contest condition|1|kBeautiful
+Contest condition|2|kCute
+Contest condition|3|kSmart
+Contest condition|4|kTough
+@Contest rank|script::ContestRank|
+Contest rank|0|kNormal
+Contest rank|1|kSuper
+Contest rank|2|kHyper
+Contest rank|3|kMaster
+@Time unit|script::TimeUnit|
+Time unit|0|kMinutes
+Time unit|1|kSeconds
+Time unit|2|kMilliseconds
+@Friendly encounter scene|script::FriendlyEncounterScene|
+Friendly encounter scene|0|kRoute102Wingull
+Friendly encounter scene|1|kRoute102Beautifly
+Friendly encounter scene|2|kRoute104Wingull1
+Friendly encounter scene|3|kRoute104Wingull2
+Friendly encounter scene|4|kRoute104Wingull3
+Friendly encounter scene|5|kRoute105Wingull1
+Friendly encounter scene|6|kRoute105Wingull2
+Friendly encounter scene|7|kRoute107Wingull
+Friendly encounter scene|8|kRoute108Wingull1
+Friendly encounter scene|9|kRoute108Wingull2
+Friendly encounter scene|10|kRoute109Wingull1
+Friendly encounter scene|11|kRoute109Wingull2
+Friendly encounter scene|12|kRoute109Wingull3
+Friendly encounter scene|13|kRoute114Swablu
+Friendly encounter scene|14|kRoute124Wingull1
+Friendly encounter scene|15|kRoute124Wingull2
+Friendly encounter scene|16|kRoute124UnderwaterLuvdisc1
+Friendly encounter scene|17|kRoute124UnderwaterLuvdisc2
+Friendly encounter scene|18|kRoute124UnderwaterCorsola
+Friendly encounter scene|19|kRoute126UnderwaterLuvdisc1
+Friendly encounter scene|20|kRoute126UnderwaterLuvdisc2
+Friendly encounter scene|21|kRoute126UnderwaterLuvdisc3
+Friendly encounter scene|22|kRoute127UnderwaterRelicanth
+Friendly encounter scene|23|kRoute127UnderwaterChinchou1
+Friendly encounter scene|24|kRoute127UnderwaterChinchou2
+Friendly encounter scene|25|kRoute128UnderwaterRelicanth
+Friendly encounter scene|26|kRoute128UnderwaterCorsola
+Friendly encounter scene|27|kRoute128UnderwaterChinchou
+@Hardware region|system::HardwareRegion|
+Hardware region|0|kJapan
+Hardware region|1|kAmerica
+Hardware region|2|kEuropeAndAustralia
+Hardware region|4|kChina
+Hardware region|5|kKorea
+Hardware region|6|kTaiwan
+@Sound mode|script::SoundMode|
+Sound mode|0|kPlayOnce
+Sound mode|1|kStartLoopingSound
+Sound mode|2|kRestartLoopIfItEnded
+Sound mode|3|kStopLoop
+Sound mode|4|kAskIfLoopHasEnded
+@Face game expression|script::FaceGameExpression|
+Face game expression|0|kStraightFace
+Face game expression|1|kSlightSmile
+Face game expression|2|kSmileSmall
+Face game expression|3|kSmileBig
+Face game expression|4|kEyesOpen
+Face game expression|5|kEyesHalfClosed
+Face game expression|6|kEyesClosed
+Face game expression|7|kWinkLeft
+Face game expression|8|kWinkRight
+Face game expression|9|kPursedMouth
+Face game expression|10|kBigMouth
+Face game expression|11|kEyesClosedAndBigMouth
+Face game expression|12|kEyesClosedAndPursedMouth
+Face game expression|13|kEyesOpenAndBigMouth
+Face game expression|14|kEyesOpenAndPursedMouth
+@Face game bubble animation|script::FaceGameBubbleAnimation|
+Face game bubble animation|0|kAppears
+Face game bubble animation|1|kWaits
+Face game bubble animation|2|kForcedEnd
+Face game bubble animation|3|kRightAnswer
+@Face game bubble tilt|script::FaceGameBubbleTilt|
+Face game bubble tilt|0|kStraight
+Face game bubble tilt|1|kLeft
+Face game bubble tilt|2|kRight
+@Pokémon-Amie icon|script::AmieIcon|
+Pokémon-Amie icon|0|kTap
+Pokémon-Amie icon|1|kHit
+Pokémon-Amie icon|2|kPointingFingerStill
+Pokémon-Amie icon|3|kPointingFingerAnimated
+Pokémon-Amie icon|4|kOpenHandStill
+Pokémon-Amie icon|5|kOpenHandAnimated
+Pokémon-Amie icon|6|kElectricShock
+Pokémon-Amie icon|7|kBeckoningHandStill
+Pokémon-Amie icon|8|kBeckoningHandAnimated
+Pokémon-Amie icon|9|kBeckoningHandFade30Frames
+Pokémon-Amie icon|10|kBeckoningHandFade15Frames
+Pokémon-Amie icon|11|kWaveringIcon
+Pokémon-Amie icon|12|kIceIcon
+Pokémon-Amie icon|13|kScribbleIcon
+Pokémon-Amie icon|14|kBurntHand
+Pokémon-Amie icon|15|kHandHurtByThorns
+Pokémon-Amie icon|16|kMark1
+Pokémon-Amie icon|17|kMark2
+Pokémon-Amie icon|18|kMark3
+Pokémon-Amie icon|19|kMark4
+Pokémon-Amie icon|20|kMark5
+Pokémon-Amie icon|21|kGhostType
+@AI command|battle::AiCommand|
+AI command|0|kRandomUnder
+AI command|1|kRandomOver
+AI command|2|kRandomEquals
+AI command|3|kRandomDiffers
+AI command|4|kHpPercentUnder
+AI command|5|kHpPercentOver
+AI command|6|kHpPercentEquals
+AI command|7|kHpPercentDiffers
+AI command|8|kHasStatusProblem
+AI command|9|kHasNoStatusProblem
+AI command|10|kHasSpecificStatusProblem
+AI command|11|kLacksSpecificStatusProblem
+AI command|12|kIsBadlyPoisoned
+AI command|13|kIsNotBadlyPoisoned
+AI command|14|kHasLastingEffect
+AI command|15|kLacksLastingEffect
+AI command|16|kFieldHasSideEffect
+AI command|17|kFieldLacksSideEffect
+AI command|18|kUserHasDamagingMove
+AI command|19|kUserHasNoDamagingMove
+AI command|20|kGetTurn
+AI command|21|kGetType
+AI command|22|kRatedMoveDoesDamage
+AI command|23|kGetRatedMovePower
+AI command|24|kCompareRatedMoveDamage
+AI command|25|kCompareRatedMoveDamageAgain
+AI command|26|kGetLastMoveUsed
+AI command|27|kGetWhoMovesFirst
+AI command|28|kCountBenchAbleToFight
+AI command|29|kGetRatedMoveSequence
+AI command|30|kGetAbility
+AI command|31|kRatedMoveEffectiveness
+AI command|32|kBenchHasStatusProblem
+AI command|33|kBenchHasNoStatusProblem
+AI command|34|kGetWeather
+AI command|35|kStatUnder
+AI command|36|kStatOver
+AI command|37|kStatEquals
+AI command|38|kStatDiffers
+AI command|39|kRatedMoveFaintsTarget
+AI command|40|kRatedMoveDoesNotFaintTarget
+AI command|41|kHasMove
+AI command|42|kLacksMove
+AI command|43|kHasMoveWithSequence
+AI command|44|kLacksMoveWithSequence
+AI command|45|kRunAway
+AI command|46|kGetHeldItem
+AI command|47|kGetHeldItemEffect
+AI command|48|kGetGender
+AI command|49|kAlreadyActed
+AI command|50|kGetStockpileCount
+AI command|51|kGetBattleRule
+AI command|52|kGetOpponentKind
+AI command|53|kGetItemUsedUp
+AI command|54|kGetRatedMoveType
+AI command|55|kGetRatedMovePowerAgain
+AI command|56|kGetRatedMoveSequenceAgain
+AI command|57|kGetProtectCount
+AI command|58|kCompareLevels
+AI command|59|kTargetIsTaunted
+AI command|60|kTargetIsTauntedAgain
+AI command|61|kMoveAimsAtAlly
+AI command|62|kHasType
+AI command|63|kHasAbility
+AI command|64|kHasFlashFirePowerUp
+AI command|65|kHoldsItem
+AI command|66|kFieldEffectIsActive
+AI command|67|kGetSideEffectCount
+AI command|68|kBenchHasLostHp
+AI command|69|kBenchHasLostPp
+AI command|70|kGetFlingPower
+AI command|71|kGetRatedMovePpLeft
+AI command|72|kUsedAllMoves
+AI command|73|kGetRatedMoveDamageKind
+AI command|74|kGetLastTargetMoveDamageKind
+AI command|75|kGetSpeedRank
+AI command|76|kGetSlowStartTurns
+AI command|77|kBenchWouldDoMoreDamage
+AI command|78|kUserHasSuperEffectiveMove
+AI command|79|kBestDamageBelowLastMove
+AI command|80|kGetRaisedStatTotal
+AI command|81|kGetStatDifference
+AI command|82|kGetStat
+AI command|83|kCompareRatedMoveDamageWithPartner
+AI command|84|kFainted
+AI command|85|kDidNotFaint
+AI command|86|kGetAbilityWithMoveEffects
+AI command|87|kHasSubstitute
+AI command|88|kGetSpecies
+AI command|89|kSharedRandomUnder
+AI command|90|kSharedRandomOver
+AI command|91|kSharedRandomEquals
+AI command|92|kSharedRandomDiffers
+AI command|93|kDelayedAttackWaiting
+AI command|94|kAttackUnderSpecialAttack
+AI command|95|kAttackOverSpecialAttack
+AI command|96|kAttackDiffersFromSpecialAttack
+AI command|97|kHasEatenBerry
+AI command|98|kExtraTypeIs
+AI command|99|kTerrainIsActive
+AI command|100|kGetWeight
+AI command|101|kIsMultiBattle
+AI command|102|kIsMegaEvolved
+AI command|103|kIsOutOfFieldByMove
+AI command|104|kGetHiddenPowerType
+@Gender|pokemon::Gender|gender.h
+Gender|0|kMale
+Gender|1|kFemale
+Gender|2|kUnknown
+@Pokémon type|pokemon::TypeId|type.h
+Pokémon type|0|kNormal
+Pokémon type|1|kFighting
+Pokémon type|2|kFlying
+Pokémon type|3|kPoison
+Pokémon type|4|kGround
+Pokémon type|5|kRock
+Pokémon type|6|kBug
+Pokémon type|7|kGhost
+Pokémon type|8|kSteel
+Pokémon type|9|kFire
+Pokémon type|10|kWater
+Pokémon type|11|kGrass
+Pokémon type|12|kElectric
+Pokémon type|13|kPsychic
+Pokémon type|14|kIce
+Pokémon type|15|kDragon
+Pokémon type|16|kDark
+Pokémon type|17|kFairy
+@Language|system::Language|language.h
+Language|0|kNone
+Language|1|kJapanese
+Language|2|kEnglish
+Language|3|kFrench
+Language|4|kItalian
+Language|5|kGerman
+Language|6|kUnused
+Language|7|kSpanish
+Language|8|kKorean
+@Ball|pokemon::Ball|ball.h
+Ball|0|kNone
+Ball|1|kMasterBall
+Ball|2|kUltraBall
+Ball|3|kGreatBall
+Ball|4|kPokeBall
+Ball|5|kSafariBall
+Ball|6|kNetBall
+Ball|7|kDiveBall
+Ball|8|kNestBall
+Ball|9|kRepeatBall
+Ball|10|kTimerBall
+Ball|11|kLuxuryBall
+Ball|12|kPremierBall
+Ball|13|kDuskBall
+Ball|14|kHealBall
+Ball|15|kQuickBall
+Ball|16|kCherishBall
+Ball|17|kSpeedBall
+Ball|18|kLevelBall
+Ball|19|kLureBall
+Ball|20|kHeavyBall
+Ball|21|kLoveBall
+Ball|22|kFriendBall
+Ball|23|kMoonBall
+Ball|24|kSportBall
+Ball|25|kDreamBall

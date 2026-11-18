@@ -81,14 +81,28 @@ fn group_name(group: &str) -> &str {
 /// The name of a native with its parameters: `WordSetNumber(buffer, number, digits, display)`.
 fn signature(native: &natives::Native) -> String {
     if !native.known {
-        return format!("{}(...)", native.name);
+        return format!("{}(...)", native.alias);
     }
-    format!("{}({})", native.name, native.params.iter().map(|p| p.name).collect::<Vec<_>>().join(", "))
+    format!("{}({})", native.alias, native.params.iter().map(|p| p.name).collect::<Vec<_>>().join(", "))
+}
+
+/// A list of values: the number, the name of the enumerator of the plugin and what it means.
+fn values_list(ui: &mut egui::Ui, what: &str, list: &natives::ValueList, id: (&str, &str)) {
+    let title = if list.enums.is_empty() { format!("      {what} ({})", list.items.len()) } else { format!("      {what} ({}, {})", list.items.len(), list.enums) };
+    egui::CollapsingHeader::new(egui::RichText::new(title).size(13.0).color(color::MUTED)).id_salt(id).show(ui, |ui| {
+        for (value, name, text) in list.items {
+            let line = if name.is_empty() { format!("{value} — {text}") } else { format!("{value} — {name} — {text}") };
+            ui.label(egui::RichText::new(line).monospace().size(12.5));
+        }
+    });
 }
 
 /// A native: its name with the parameters, what it does, and what each parameter takes.
 fn native_card(ui: &mut egui::Ui, native: &natives::Native, calls: Option<usize>) {
     ui.label(egui::RichText::new(signature(native)).monospace().strong());
+    if native.alias != native.name {
+        ui.label(widget::hint(&format!("Name in the game: {}. Both names work in the assembler.", native.name)));
+    }
     ui.label(widget::hint(if native.help.is_empty() { "No description yet." } else { native.help }));
     if !native.known {
         ui.label(widget::hint("The parameters of this function are not documented."));
@@ -99,17 +113,14 @@ fn native_card(ui: &mut egui::Ui, native: &natives::Native, calls: Option<usize>
         let line = if param.help.is_empty() { format!("   {} — {}", param.name, param.kind) } else { format!("   {} — {}. {}", param.name, param.kind, param.help) };
         ui.label(egui::RichText::new(line).size(13.0));
         if let Some(list) = natives::list(param.list) {
-            egui::CollapsingHeader::new(egui::RichText::new(format!("      values of {} ({})", param.name, list.items.len())).size(13.0).color(color::MUTED))
-                .id_salt((native.name, param.name))
-                .show(ui, |ui| {
-                    for (value, text) in list.items {
-                        ui.label(egui::RichText::new(format!("{value} — {text}")).monospace().size(12.5));
-                    }
-                });
+            values_list(ui, &format!("values of {}", param.name), list, (native.name, param.name));
         }
     }
     if !native.returns.is_empty() {
         ui.label(egui::RichText::new(format!("   returns — {}", native.returns)).size(13.0));
+    }
+    if let Some(list) = natives::list(native.returns_list) {
+        values_list(ui, "values that it gives", list, (native.name, "@return"));
     }
     if let Some(calls) = calls {
         ui.label(widget::hint(&format!("The scripts of the game call it {calls} time(s).")));
@@ -121,7 +132,7 @@ impl ScriptPage {
     fn open(&mut self, dump: &Dump) {
         self.error = None;
         self.garcs = KINDS.iter().map(|(archive, _, _)| Garc::open(&dump.archive(*archive)).ok()).collect();
-        self.names = natives::NATIVES.iter().map(|n| (natives::hash(n.name), n.name.to_string())).collect();
+        self.names = natives::display_names();
         self.items.clear();
         // The field scripts, in the order of their numbers.
         for file in files::FILES {
@@ -352,7 +363,7 @@ impl ScriptPage {
             ui.label(widget::hint("The native functions of the table of the file. A function that the game does not know by this name shows its number."));
             ui.add_space(4.0);
             for entry in &amx.natives {
-                match self.names.get(&entry.name).and_then(|name| natives::NATIVES.iter().find(|n| n.name == name)) {
+                match self.names.get(&entry.name).and_then(|name| natives::find(name)) {
                     Some(native) => native_card(ui, native, None),
                     None => {
                         ui.label(egui::RichText::new(format!("0x{:08X}", entry.name)).monospace());
@@ -377,7 +388,7 @@ impl ScriptPage {
                 }
             }
             for group in groups {
-                let shown: Vec<&natives::Native> = natives::NATIVES.iter().filter(|n| n.group == group && (needle.is_empty() || sango_ui::picker::simple(n.name).contains(&needle) || sango_ui::picker::simple(n.help).contains(&needle))).collect();
+                let shown: Vec<&natives::Native> = natives::NATIVES.iter().filter(|n| n.group == group && (needle.is_empty() || sango_ui::picker::simple(&format!("{} {}", n.alias.replace('_', " "), n.name)).contains(&needle) || sango_ui::picker::simple(n.help).contains(&needle))).collect();
                 if shown.is_empty() {
                     continue;
                 }

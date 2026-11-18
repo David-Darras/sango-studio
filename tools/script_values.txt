@@ -1,4 +1,4 @@
-[Direction]
+[Facing]
 0|Up
 1|Down
 2|Left
@@ -7,7 +7,7 @@
 5|Up and right
 6|Down and left
 7|Down and right
-9|No direction
+9|No facing
 10|Rise
 11|Descend
 12|Rise to the left
@@ -133,13 +133,13 @@
 8|360 to the left
 9|Back flip
 10|Bio 540
-[Special object]
+[Special character]
 -1|The character that the player talks to
 255|The player
-254|Object added by the script (first)
-253|Object added by the script (second)
-252|Object added by the script (third)
-240|No object
+254|Character added by the script (first)
+253|Character added by the script (second)
+252|Character added by the script (third)
+240|No character
 [Pokédex count]
 0|Seen
 1|Caught
@@ -381,13 +381,13 @@
 1|The event makes the fade
 [Move command]
 0|None (nothing moves)
-1|Face a direction
-2|Face a direction, smooth turn, 32 frames
-3|Face a direction, smooth turn, 16 frames
-4|Face a direction, smooth turn, 14 frames
-5|Face a direction, smooth turn, 12 frames
-6|Face a direction, smooth turn, 8 frames
-7|Face a direction, smooth turn, 4 frames
+1|Turn to a facing
+2|Turn to a facing, smooth turn, 32 frames
+3|Turn to a facing, smooth turn, 16 frames
+4|Turn to a facing, smooth turn, 14 frames
+5|Turn to a facing, smooth turn, 12 frames
+6|Turn to a facing, smooth turn, 8 frames
+7|Turn to a facing, smooth turn, 4 frames
 8|Face the side (camera behind the player)
 9|Face the side (stealthy steps)
 10|Face the back (camera behind the player)
@@ -415,12 +415,12 @@
 32|Jump in place, 16 frames
 33|Jump in place, 8 frames
 34|Jump in place (hiding cloak)
-35|Jump 1 grid, 8 frames
-36|Jump 1 grid, 16 frames
-37|Jump 2 grids, 16 frames
-38|Jump 3 grids, 16 frames
-39|Jump 3 grids, 24 frames
-40|Jump 3 grids, 24 frames, no landing sound
+35|Jump 1 tile, 8 frames
+36|Jump 1 tile, 16 frames
+37|Jump 2 tiles, 16 frames
+38|Jump 3 tiles, 16 frames
+39|Jump 3 tiles, 24 frames
+40|Jump 3 tiles, 24 frames, no landing sound
 41|Wait, 1 frame
 42|Wait, 2 frames
 43|Wait, 4 frames
@@ -430,8 +430,8 @@
 47|Wait, 32 frames
 48|Hide
 49|Show
-50|Lock the direction
-51|Unlock the direction
+50|Lock the facing
+51|Unlock the facing
 52|Pause the animation
 53|Resume the animation
 54|Warp up
@@ -481,7 +481,7 @@
 98|Acro Bike: stepping-stone jump
 99|Acro Bike: jump and turn
 100|Turn on the last frame (value of the input)
-101|Turn on the last frame (direction)
+101|Turn on the last frame (facing)
 102|Surfing: stop
 103|Surfing: acceleration
 104|Surfing: constant speed
@@ -619,15 +619,15 @@
 236|Sad
 237|Surprised
 238|Pose
-239|Move from free movement to the center of the grid
+239|Move from free movement to the center of the tile
 240|Fast walk, 4 frames
 241|Slide down a slope (on a bike)
 242|Slide down a slope backward (on a bike)
-243|Face a direction (no correction of the position)
-244|Face a direction, smooth turn, 6 frames
-245|Face a direction, smooth turn, 5 frames
-246|Face a direction, smooth turn, 3 frames
-247|Face a direction, smooth turn, 2 frames
+243|Turn to a facing (no correction of the position)
+244|Turn to a facing, smooth turn, 6 frames
+245|Turn to a facing, smooth turn, 5 frames
+246|Turn to a facing, smooth turn, 3 frames
+247|Turn to a facing, smooth turn, 2 frames
 248|Jump in place, 8 frames, height 0
 249|Camera behind the player: bump on a bike
 250|Turn with motion, 8 frames
