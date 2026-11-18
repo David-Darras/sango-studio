@@ -12,7 +12,7 @@ const RELOAD_PATH_SIZE: usize = 64;
 const RELOAD_MAX_PATHS: usize = 256;
 
 /// The paths in the folder of the studio that the plugin reads: the other files stay on the computer. A folder ends with `/`.
-const PUBLISHED: [&str; 18] = [
+const PUBLISHED: [&str; 19] = [
     "reload.bin",
     "species/table.bin",
     "species/data/",
@@ -24,6 +24,7 @@ const PUBLISHED: [&str; 18] = [
     "species/evolution/",
     "leveling_rate/",
     "trainer/",
+    "choreography/",
     "game_text/",
     "ability/",
     "move/data/",

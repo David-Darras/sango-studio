@@ -2712,6 +2712,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-choreography"
+version = "0.1.0"
+dependencies = [
+ "sango-core",
+ "sango-species",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-code"
 version = "0.1.0"
 dependencies = [
@@ -2854,6 +2863,7 @@ dependencies = [
  "image",
  "sango-ability",
  "sango-archive",
+ "sango-choreography",
  "sango-code",
  "sango-core",
  "sango-home",

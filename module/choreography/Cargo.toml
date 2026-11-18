@@ -1,0 +1,10 @@
+[package]
+name = "sango-choreography"
+version.workspace = true
+edition.workspace = true
+description = "The animation editor of Sango Studio: the steps of the choreography of a move, on a timeline."
+
+[dependencies]
+sango-core.workspace = true
+sango-species.workspace = true
+sango-ui.workspace = true

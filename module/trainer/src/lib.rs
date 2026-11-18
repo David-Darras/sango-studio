@@ -20,7 +20,6 @@ use std::sync::{Arc, Mutex};
 use store::Store;
 
 mod builder;
-mod focus;
 mod lists;
 mod model_view;
 mod gen6;
@@ -158,7 +157,7 @@ fn choice(ui: &mut egui::Ui, id: impl std::hash::Hash, value: &mut u8, list: &[&
             ui.selectable_value(value, number as u8, *name);
         }
     });
-    if let Some(to) = focus::nav(ui, &combo.response, *value as usize, list.len(), false) {
+    if let Some(to) = sango_ui::focus::nav(ui, &combo.response, *value as usize, list.len(), false) {
         *value = to as u8;
     }
 }
@@ -168,8 +167,8 @@ fn choice(ui: &mut egui::Ui, id: impl std::hash::Hash, value: &mut u8, list: &[&
 fn named_menu(ui: &mut egui::Ui, id: &str, value: &mut u32, entries: &[(u32, String)], width: f32) {
     let shown = entries.iter().find(|(number, _)| number == value).map_or_else(|| format!("Unknown ({value})"), |(_, name)| name.clone());
     let mut small = (*value).min(u32::from(u16::MAX)) as u16;
-    if builder::picker(ui, id, &shown, width, &mut small, None, || {
-        vec![builder::Group { title: String::new(), entries: entries.iter().filter(|(number, _)| *number <= u32::from(u16::MAX)).map(|(number, name)| (*number as u16, name.clone())).collect() }]
+    if sango_ui::picker::picker(ui, id, &shown, width, &mut small, None, || {
+        vec![sango_ui::picker::Group { title: String::new(), entries: entries.iter().filter(|(number, _)| *number <= u32::from(u16::MAX)).map(|(number, name)| (*number as u16, name.clone())).collect() }]
     })
     {
         *value = u32::from(small);
@@ -183,7 +182,7 @@ fn language_menu(ui: &mut egui::Ui, id: &str, language: &mut usize, width: f32) 
             ui.selectable_value(language, number, item.name);
         }
     });
-    if let Some(to) = focus::nav(ui, &combo.response, *language, LANGUAGES.len(), false) {
+    if let Some(to) = sango_ui::focus::nav(ui, &combo.response, *language, LANGUAGES.len(), false) {
         *language = to;
     }
 }
@@ -485,7 +484,7 @@ impl Trainer {
                     }
                 });
                 let at = data::WEATHERS.iter().position(|(value, _)| *value == extras.weather).unwrap_or(0);
-                if let Some(to) = focus::nav(ui, &combo.response, at, data::WEATHERS.len(), false) {
+                if let Some(to) = sango_ui::focus::nav(ui, &combo.response, at, data::WEATHERS.len(), false) {
                     extras.weather = data::WEATHERS[to].0;
                 }
                 ui.label("Terrain");
