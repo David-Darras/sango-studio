@@ -744,6 +744,192 @@ pub fn decode_texture(format: u32, width: usize, height: usize, data: &[u8]) -> 
     Some(out)
 }
 
+/// A value of 0 to 255 as a number of `bits` bits.
+fn reduce(value: u8, bits: u32) -> u32 {
+    let max = (1u32 << bits) - 1;
+    (u32::from(value) * max + 127) / 255
+}
+
+/// The light of a colour.
+fn light(rgba: &[u8]) -> u8 {
+    ((u32::from(rgba[0]) * 299 + u32::from(rgba[1]) * 587 + u32::from(rgba[2]) * 114 + 500) / 1000) as u8
+}
+
+/// Writes a block of 4 x 4 pixels as ETC1 (8 bytes): the best of the two directions and of the two ways to write the colours. `pixels` has the
+/// colour of the pixel (x, y) at the place y * 4 + x.
+pub(crate) fn etc1_encode_block(pixels: &[[u8; 3]; 16]) -> u64 {
+    let mut best = (u64::MAX, 0u64);
+    for flipped in [false, true] {
+        let half_of = |x: usize, y: usize| usize::from(if flipped { y >= 2 } else { x >= 2 });
+        let mut average = [[0u32; 3]; 2];
+        for y in 0..4 {
+            for x in 0..4 {
+                for c in 0..3 {
+                    average[half_of(x, y)][c] += u32::from(pixels[y * 4 + x][c]);
+                }
+            }
+        }
+        for half in &mut average {
+            for c in half.iter_mut() {
+                *c = (*c + 4) / 8;
+            }
+        }
+        for differential in [false, true] {
+            let mut codes = [[0i32; 3]; 2];
+            let mut bases = [[0i32; 3]; 2];
+            for c in 0..3 {
+                if differential {
+                    let first = reduce(average[0][c] as u8, 5) as i32;
+                    let second = (reduce(average[1][c] as u8, 5) as i32).clamp(first - 4, first + 3).clamp(0, 31);
+                    codes[0][c] = first;
+                    codes[1][c] = second;
+                    bases[0][c] = first << 3 | first >> 2;
+                    bases[1][c] = second << 3 | second >> 2;
+                } else {
+                    let (first, second) = (reduce(average[0][c] as u8, 4) as i32, reduce(average[1][c] as u8, 4) as i32);
+                    codes[0][c] = first;
+                    codes[1][c] = second;
+                    bases[0][c] = first * 17;
+                    bases[1][c] = second * 17;
+                }
+            }
+            if differential && (0..3).any(|c| !(-4..=3).contains(&(codes[1][c] - codes[0][c]))) {
+                continue;
+            }
+            // For each half, the table and the choice of each pixel that give the least error.
+            let mut tables = [0usize; 2];
+            let mut choices = [0u8; 16];
+            let mut total = 0u64;
+            for half in 0..2 {
+                let mut half_best = (u64::MAX, 0usize, [0u8; 16]);
+                for (table, modifiers) in crate::clim::ETC1_MODIFIERS.iter().enumerate() {
+                    let mut error = 0u64;
+                    let mut picked = [0u8; 16];
+                    for y in 0..4 {
+                        for x in 0..4 {
+                            if half_of(x, y) != half {
+                                continue;
+                            }
+                            let pixel = pixels[y * 4 + x];
+                            let mut pixel_best = (u64::MAX, 0u8);
+                            for choice in 0..4u8 {
+                                let modifier = modifiers[(choice & 1) as usize] * if choice & 2 != 0 { -1 } else { 1 };
+                                let e: u64 = (0..3).map(|c| (((bases[half][c] + modifier).clamp(0, 255) - i32::from(pixel[c])).pow(2)) as u64).sum();
+                                if e < pixel_best.0 {
+                                    pixel_best = (e, choice);
+                                }
+                            }
+                            error += pixel_best.0;
+                            picked[y * 4 + x] = pixel_best.1;
+                        }
+                    }
+                    if error < half_best.0 {
+                        half_best = (error, table, picked);
+                    }
+                }
+                total += half_best.0;
+                tables[half] = half_best.1;
+                for y in 0..4 {
+                    for x in 0..4 {
+                        if half_of(x, y) == half {
+                            choices[y * 4 + x] = half_best.2[y * 4 + x];
+                        }
+                    }
+                }
+            }
+            if total >= best.0 {
+                continue;
+            }
+            let mut word = 0u64;
+            for c in 0..3 {
+                if differential {
+                    let shift = 59 - c * 8;
+                    word |= (codes[0][c] as u64) << shift;
+                    word |= ((codes[1][c] - codes[0][c]) as u64 & 7) << (shift - 3);
+                } else {
+                    let shift = 60 - c * 8;
+                    word |= (codes[0][c] as u64) << shift;
+                    word |= (codes[1][c] as u64) << (shift - 4);
+                }
+            }
+            word |= (tables[0] as u64) << 37 | (tables[1] as u64) << 34;
+            word |= u64::from(differential) << 33 | u64::from(flipped) << 32;
+            for y in 0..4 {
+                for x in 0..4 {
+                    let (bit, choice) = (x * 4 + y, choices[y * 4 + x]);
+                    word |= u64::from(choice & 1) << bit | u64::from(choice >> 1) << (16 + bit);
+                }
+            }
+            best = (total, word);
+        }
+    }
+    best.1
+}
+
+/// Writes a picture in a format of the graphics chip: the inverse of [`decode_texture`]. `rgba` has the first row at the top. `None` for a
+/// format that is not known (the HILO format) or a size that is not a multiple of 8.
+pub fn encode_texture(format: u32, width: usize, height: usize, rgba: &[u8]) -> Option<Vec<u8>> {
+    if width == 0 || height == 0 || width % 8 != 0 || height % 8 != 0 || rgba.len() < width * height * 4 || format == 6 || format > 13 {
+        return None;
+    }
+    let pixel = |x: usize, y: usize| -> &[u8] {
+        let at = ((height - 1 - y) * width + x) * 4;
+        &rgba[at..at + 4]
+    };
+    let mut out = Vec::with_capacity(texture_size(format, width, height));
+    let (tiles_x, tiles_y) = (width / 8, height / 8);
+    if format == 0xc || format == 0xd {
+        for ty in 0..tiles_y {
+            for tx in 0..tiles_x {
+                for n in 0..4 {
+                    let (mut colors, mut alpha) = ([[0u8; 3]; 16], 0u64);
+                    for py in 0..4 {
+                        for px in 0..4 {
+                            let p = pixel(tx * 8 + (n & 1) * 4 + px, ty * 8 + (n >> 1) * 4 + py);
+                            colors[py * 4 + px] = [p[0], p[1], p[2]];
+                            alpha |= u64::from(reduce(p[3], 4)) << (4 * (px * 4 + py));
+                        }
+                    }
+                    if format == 0xd {
+                        out.extend_from_slice(&alpha.to_le_bytes());
+                    }
+                    out.extend_from_slice(&etc1_encode_block(&colors).to_le_bytes());
+                }
+            }
+        }
+        return Some(out);
+    }
+    let mut half: Option<u8> = None;
+    for ty in 0..tiles_y {
+        for tx in 0..tiles_x {
+            for n in 0..64 {
+                let (x, y) = crate::clim::morton_position(n);
+                let p = pixel(tx * 8 + x, ty * 8 + y);
+                match format {
+                    0 => out.extend_from_slice(&[p[3], p[2], p[1], p[0]]),
+                    1 => out.extend_from_slice(&[p[2], p[1], p[0]]),
+                    2 => out.extend_from_slice(&((reduce(p[0], 5) << 11 | reduce(p[1], 5) << 6 | reduce(p[2], 5) << 1 | u32::from(p[3] >= 128)) as u16).to_le_bytes()),
+                    3 => out.extend_from_slice(&((reduce(p[0], 5) << 11 | reduce(p[1], 6) << 5 | reduce(p[2], 5)) as u16).to_le_bytes()),
+                    4 => out.extend_from_slice(&((reduce(p[0], 4) << 12 | reduce(p[1], 4) << 8 | reduce(p[2], 4) << 4 | reduce(p[3], 4)) as u16).to_le_bytes()),
+                    5 => out.extend_from_slice(&[p[3], light(p)]),
+                    7 => out.push(light(p)),
+                    8 => out.push(p[3]),
+                    9 => out.push((reduce(light(p), 4) << 4 | reduce(p[3], 4)) as u8),
+                    0xa | 0xb => {
+                        let value = if format == 0xa { reduce(light(p), 4) } else { reduce(p[3], 4) } as u8;
+                        match half.take() {
+                            None => half = Some(value),
+                            Some(low) => out.push(low | value << 4),
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+        }
+    }
+    Some(out)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -780,6 +966,35 @@ mod test {
         assert!(decode_texture(7, 7, 8, &data).is_none());
         assert!(decode_texture(99, 8, 8, &data).is_none());
         assert!(decode_texture(7, 8, 8, &data[..10]).is_none());
+    }
+
+    /// A picture written in each format and decoded again is the picture that the format can hold: writing it again gives the same bytes.
+    #[test]
+    fn a_picture_is_written_in_each_format_and_read_back() {
+        let (width, height) = (16usize, 8usize);
+        let rgba: Vec<u8> = (0..width * height).flat_map(|n| [(n * 7 % 256) as u8, (n * 13 % 256) as u8, (n * 29 % 256) as u8, if n % 5 == 0 { 40 } else { 255 }]).collect();
+        for format in [0u32, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13] {
+            let bytes = encode_texture(format, width, height, &rgba).unwrap_or_else(|| panic!("format {format}"));
+            assert_eq!(bytes.len(), texture_size(format, width, height), "format {format}");
+            let decoded = decode_texture(format, width, height, &bytes).unwrap();
+            if format < 12 {
+                let again = encode_texture(format, width, height, &decoded).unwrap();
+                assert_eq!(again, bytes, "format {format}: the picture that the format holds is stable");
+            }
+        }
+        // ETC1 keeps a smooth picture close to what it was.
+        let smooth: Vec<u8> = (0..width * height).flat_map(|n| { let (x, y) = (n % width, n / width); [(x * 14) as u8, (y * 30) as u8, (x * 7 + y * 9) as u8, 255] }).collect();
+        for format in [12u32, 13] {
+            let bytes = encode_texture(format, width, height, &smooth).unwrap();
+            let decoded = decode_texture(format, width, height, &bytes).unwrap();
+            let error: u32 = decoded.chunks(4).zip(smooth.chunks(4)).map(|(a, b)| (0..3).map(|c| u32::from(a[c].abs_diff(b[c]))).sum::<u32>()).sum();
+            assert!(error as usize / (width * height * 3) < 12, "format {format}: mean error {}", error as usize / (width * height * 3));
+        }
+        // The format of 8 bits for each channel keeps the picture as it is.
+        let bytes = encode_texture(0, width, height, &rgba).unwrap();
+        assert_eq!(decode_texture(0, width, height, &bytes).unwrap(), rgba);
+        assert!(encode_texture(6, 8, 8, &[0; 256]).is_none());
+        assert!(encode_texture(7, 7, 8, &[0; 256]).is_none());
     }
 
     #[test]

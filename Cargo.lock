@@ -2746,6 +2746,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-effect"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-choreography",
+ "sango-core",
+ "sango-species",
+ "sango-ui",
+]
+
+[[package]]
+name = "sango-encounter"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-core",
+ "sango-overworld",
+ "sango-species",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-home"
 version = "0.1.0"
 dependencies = [
@@ -2841,6 +2865,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-script"
+version = "0.1.0"
+dependencies = [
+ "sango-core",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-species"
 version = "0.1.0"
 dependencies = [
@@ -2866,12 +2898,15 @@ dependencies = [
  "sango-choreography",
  "sango-code",
  "sango-core",
+ "sango-effect",
+ "sango-encounter",
  "sango-home",
  "sango-item",
  "sango-leveling-rate",
  "sango-move",
  "sango-overworld",
  "sango-packs",
+ "sango-script",
  "sango-species",
  "sango-trainer",
  "sango-type",
