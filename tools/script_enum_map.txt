@@ -1,0 +1,60 @@
+# Which enum class of the Sango plugin holds each list of values of the script API.
+#
+#   Studio list | namespace::Enum | folder of lib/include | what | values (optional)
+#
+# `what` is `existing` when the plugin already has the enum (its names are used, and the missing values are added to it) or `new` when
+# tools/sync_script_enums.py writes the header. `values` keeps only some values of the list (a range like `0-9` or `10-19`).
+# The enum names are the words of the plugin; the lists of the page show the names of the enumerators.
+Facing|overworld::Facing|overworld/constant|existing|0-9
+Facing|overworld::ElevatedFacing|overworld/constant|new|10-19
+Move command|overworld::ActionCommand|overworld/constant|existing|0-65535
+Nature|pokemon::Nature|pokemon/constant|existing
+Screen|script::ScreenTarget|script/constant|new
+Exit type|overworld::ExitType|overworld/constant|new
+Map change|overworld::MapChangeEffect|overworld/constant|new
+Fade-in|script::FadeInStyle|script/constant|new
+Fade-out|script::FadeOutStyle|script/constant|new
+Fade of the field|script::FadeOwner|script/constant|new
+Player form|overworld::PlayerForm|overworld/constant|new
+Player action|overworld::PlayerAction|overworld/constant|new
+Special character|overworld::SpecialCharacter|overworld/constant|new
+Obstacle rule|overworld::ObstacleRule|overworld/constant|new
+Special camera|overworld::SpecialCamera|overworld/constant|new
+Motion blur kind|renderer::MotionBlurKind|renderer/constant|new
+Motion blur animation|renderer::MotionBlurAnimation|renderer/constant|new
+Motion blur change|renderer::MotionBlurChange|renderer/constant|new
+Pokédex count|script::PokedexCount|script/constant|new
+Trainer data|script::TrainerDataKind|script/constant|new
+Party search|script::PartySearch|script/constant|new
+Pokémon select mode|script::PokemonSelectMode|script/constant|new
+Move tutor mode|script::MoveTutorKind|script/constant|new
+Postman request|script::PostmanRequest|script/constant|new
+Postman gift|script::PostmanGift|script/constant|new
+PGL postman request|script::PglPostmanRequest|script/constant|new
+Field menu item|script::FieldMenuItem|script/constant|new
+Field menu page flags|script::FieldMenuPageFlag|script/constant|new
+Field menu page|script::FieldMenuPage|script/constant|new
+Judge mode|script::JudgeKind|script/constant|new
+Trade data|script::TradeDataKind|script/constant|new
+Berry plot value|script::BerryPlotValue|script/constant|new
+Berry plot state|script::BerryPlotState|script/constant|new
+Word kind|script::WordKind|script/constant|new
+Free word input|script::FreeWordInput|script/constant|new
+Contest data|script::ContestData|script/constant|new
+Contest condition|script::ContestCondition|script/constant|new
+Contest rank|script::ContestRank|script/constant|new
+Time unit|script::TimeUnit|script/constant|new
+Friendly encounter scene|script::FriendlyEncounterScene|script/constant|new
+Hardware region|system::HardwareRegion|system/constant|new
+Sound mode|script::SoundMode|script/constant|new
+Face game expression|script::FaceGameExpression|script/constant|new
+Face game bubble animation|script::FaceGameBubbleAnimation|script/constant|new
+Face game bubble tilt|script::FaceGameBubbleTilt|script/constant|new
+Pokémon-Amie icon|script::AmieIcon|script/constant|new
+AI command|battle::AiCommand|battle/constant|new
+Contest data|script::ContestData|script/constant|new
+# Lists that the plugin owns (made from its header, the 5th column is the file of the header).
+Gender|pokemon::Gender|pokemon/constant|plugin|gender.h
+Pokémon type|pokemon::TypeId|pokemon/constant|plugin|type.h
+Language|system::Language|system/constant|plugin|language.h
+Ball|pokemon::Ball|pokemon/constant|plugin|ball.h

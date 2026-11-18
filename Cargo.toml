@@ -33,6 +33,8 @@ sango-choreography = { path = "module/choreography" }
 sango-effect = { path = "module/effect" }
 sango-script = { path = "module/script" }
 sango-encounter = { path = "module/encounter" }
+sango-formula = { path = "module/formula" }
+sango-nature = { path = "module/nature" }
 
 [profile.dev]
 opt-level = 2

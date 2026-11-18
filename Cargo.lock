@@ -2770,6 +2770,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-formula"
+version = "0.1.0"
+dependencies = [
+ "sango-core",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-home"
 version = "0.1.0"
 dependencies = [
@@ -2818,6 +2826,14 @@ dependencies = [
  "sango-core",
  "sango-rules",
  "sango-species",
+ "sango-ui",
+]
+
+[[package]]
+name = "sango-nature"
+version = "0.1.0"
+dependencies = [
+ "sango-core",
  "sango-ui",
 ]
 
@@ -2900,10 +2916,12 @@ dependencies = [
  "sango-core",
  "sango-effect",
  "sango-encounter",
+ "sango-formula",
  "sango-home",
  "sango-item",
  "sango-leveling-rate",
  "sango-move",
+ "sango-nature",
  "sango-overworld",
  "sango-packs",
  "sango-script",

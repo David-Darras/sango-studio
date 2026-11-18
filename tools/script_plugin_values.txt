@@ -1,0 +1,61 @@
+# The lists of values that are made from the enum classes of the plugin. Written by tools/sync_script_enums.py.
+[Gender]
+0|Male
+1|Female
+2|A Pokémon without a gender (for example Magnemite)
+[Pokémon type]
+0|Normal
+1|Fighting
+2|Flying
+3|Poison
+4|Ground
+5|Rock
+6|Bug
+7|Ghost
+8|Steel
+9|Fire
+10|Water
+11|Grass
+12|Electric
+13|Psychic
+14|Ice
+15|Dragon
+16|Dark
+17|Fairy
+[Language]
+0|None
+1|Japanese
+2|English
+3|French
+4|Italian
+5|German
+6|Unused
+7|Spanish
+8|Korean
+[Ball]
+0|None
+1|Master ball
+2|Ultra ball
+3|Great ball
+4|Poke ball
+5|Safari ball
+6|Net ball
+7|Dive ball
+8|Nest ball
+9|Repeat ball
+10|Timer ball
+11|Luxury ball
+12|Premier ball
+13|Dusk ball
+14|Heal ball
+15|Quick ball
+16|Cherish ball
+17|Speed ball
+18|Level ball
+19|Lure ball
+20|Heavy ball
+21|Love ball
+22|Friend ball
+23|Moon ball
+24|Sport ball
+25|Dream ball

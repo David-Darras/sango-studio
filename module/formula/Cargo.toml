@@ -1,0 +1,9 @@
+[package]
+name = "sango-formula"
+version.workspace = true
+edition.workspace = true
+description = "The Formula page of Sango Studio: the formulas of the statistics and the shiny chance."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true

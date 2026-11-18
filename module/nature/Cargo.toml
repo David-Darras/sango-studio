@@ -1,0 +1,9 @@
+[package]
+name = "sango-nature"
+version.workspace = true
+edition.workspace = true
+description = "The Nature page of Sango Studio: what each nature does, and new natures."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true

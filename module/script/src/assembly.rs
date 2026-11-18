@@ -228,7 +228,7 @@ pub fn from_text(text: &str) -> Result<Amx, String> {
                 "native" => {
                     let mut parts = args.split_whitespace();
                     let word = parts.next().ok_or_else(|| fail(".native needs a name.".to_string()))?;
-                    let hash = if word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') { crate::natives::hash(word) } else { parse_number(word).map_err(&fail)? as u32 };
+                    let hash = if word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') { crate::natives::word_hash(word) } else { parse_number(word).map_err(&fail)? as u32 };
                     let address = parts.next().map_or(Ok(0), parse_number).map_err(&fail)? as u32;
                     amx.natives.push(Entry { address, name: hash });
                 }
@@ -274,7 +274,7 @@ pub fn from_text(text: &str) -> Result<Amx, String> {
                         for (place, operand) in operands.iter().enumerate() {
                             // A native can be called by its name: it must be in the table (the lines .native).
                             if place == 0 && name.starts_with("sysreq") && operand.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_') {
-                                let wanted = crate::natives::hash(operand);
+                                let wanted = crate::natives::word_hash(operand);
                                 let at = amx.natives.iter().position(|n| n.name == wanted).ok_or_else(|| fail(format!("The native {operand} is not in the table: add a line \".native {operand}\" at the start.")))?;
                                 cells.push(at as i32);
                             } else {
@@ -366,7 +366,7 @@ mod test {
                     continue;
                 }
                 let amx = Amx::parse(&bytes).unwrap();
-                let names: std::collections::HashMap<u32, String> = crate::natives::NATIVES.iter().map(|n| (crate::natives::hash(n.name), n.name.to_string())).collect();
+                let names = crate::natives::display_names();
                 let text = to_text(&amx, &|h| names.get(&h).cloned()).unwrap_or_else(|e| panic!("archive {archive} file {id}: {e}"));
                 lines += text.lines().count();
                 let again = from_text(&text).unwrap_or_else(|e| panic!("archive {archive} file {id}: {e}"));

@@ -1,6 +1,8 @@
 //! The script editor.
 
 mod amx;
+#[cfg(test)]
+mod api_tests;
 mod assembly;
 mod decompile;
 mod files;
