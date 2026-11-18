@@ -128,7 +128,21 @@ pub fn convert(source: &Source, templates: &Templates, model_name: &str, scale_f
 
 /// The same, and `flip_pictures` turns the pictures upside down first: the texture coordinates of a glTF file start at the top of the picture,
 /// those of the game at the bottom of the picture as the viewer of Studio shows it.
-pub fn convert_with(source: &Source, templates: &Templates, model_name: &str, scale_factor: f64, flip_pictures: bool) -> Result<Converted, String> {
+/// What the conversion makes before the model is written: the skeleton, the textures, the materials and the description of the meshes.
+pub struct Prepared {
+    pub scale: f64,
+    pub skeleton: skeleton::Skeleton,
+    pub textures: Vec<Texture>,
+    pub materials: Vec<MaterialSpec>,
+    pub texture_names: HashMap<String, String>,
+    pub spec: ModelSpec,
+    pub aabb: ([f64; 3], [f64; 3]),
+    all: Vec<(Prim, String, bool)>,
+}
+
+/// The skeleton, the textures, the materials and the meshes of a glTF file, for the game.
+/// `keep_all_joints` keeps the joints that no vertex uses: the motions of a model move them by name.
+pub fn prepare(source: &Source, model_name: &str, scale_factor: f64, flip_pictures: bool, keep_all_joints: bool, original: Option<&[skeleton::Joint]>) -> Result<Prepared, String> {
     let scale = UNITS_PER_METER * scale_factor;
     // The joints that some vertex is weighted to.
     let mut used = BTreeSet::new();
@@ -141,7 +155,13 @@ pub fn convert_with(source: &Source, templates: &Templates, model_name: &str, sc
             }
         }
     }
-    let skeleton = skeleton::build(source, &used, scale as f32, model_name)?;
+    if keep_all_joints {
+        used.extend(0..source.joints.len());
+    }
+    let skeleton = match original {
+        Some(joints) => skeleton::reuse(source, joints)?,
+        None => skeleton::build(source, &used, scale as f32, model_name)?,
+    };
 
     // The materials and the textures: one texture for each distinct picture (several materials may share one), because the game loads all
     // the textures of a model at once.
@@ -223,6 +243,11 @@ pub fn convert_with(source: &Source, templates: &Templates, model_name: &str, sc
     let all_refs: Vec<&Prim> = all.iter().map(|(p, _, _)| p).collect();
     let aabb = geometry::bounds(&all_refs);
     let spec = ModelSpec { aabb, joints: skeleton.joints.clone(), materials: materials.clone(), meshes };
+    Ok(Prepared { scale, skeleton, textures, materials, texture_names, spec, aabb, all })
+}
+
+pub fn convert_with(source: &Source, templates: &Templates, model_name: &str, scale_factor: f64, flip_pictures: bool) -> Result<Converted, String> {
+    let Prepared { scale, skeleton, textures, materials, texture_names, spec, aabb, all } = prepare(source, model_name, scale_factor, flip_pictures, false, None)?;
     let model = model::write_model_file(&spec, &templates.models, model_name, &texture_names)?;
 
     // The shadow: the body, coarsened, on one material.

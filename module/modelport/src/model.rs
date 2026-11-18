@@ -395,11 +395,12 @@ fn write_luts(sec: &mut Section, strs: &mut Strings, cmds: &mut Section, luts: &
 /// The model file. `templates` are the models of the game that the materials are cloned from: the first one also gives the layout of the
 /// meshes, of the bones and of the metadata. `model_name` is the name of the model, `texture_names` the textures of the textures file
 /// (the name with `.tga` and the name in the file). `keep` is the set of the lookup table sets that the materials read, when known.
-pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &str, texture_names: &HashMap<String, String>, keep: Option<&BTreeSet<String>>) -> Result<(Vec<u8>, BTreeSet<String>), String> {
+pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &str, texture_names: &HashMap<String, String>, keep: Option<&BTreeSet<String>>, textures: &[crate::texture::Texture]) -> Result<(Vec<u8>, BTreeSet<String>), String> {
     let tpl = templates.first().ok_or("No template.")?;
     let (mut sec, mut strs, mut cmds, mut raw) = (Section::new(), Strings::new(), Section::new(), Section::new());
     let has_luts = templates.iter().any(|t| t.c32(12 * 4 + 4) != 0);
-    bch::main_header(&mut sec, if has_luts { &[0, 4] } else { &[0] });
+    let present: Vec<usize> = [0].into_iter().chain((!textures.is_empty()).then_some(3)).chain(has_luts.then_some(4)).collect();
+    bch::main_header(&mut sec, &present);
     let luts = collect_luts(templates, keep);
     let lut_set = write_luts(&mut sec, &mut strs, &mut cmds, &luts);
     let mut used_luts: BTreeSet<String> = BTreeSet::new();
@@ -758,15 +759,24 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
     let _ = lut_set;
     // The unused helpers of the other kinds of source (ported shaders) are not needed here.
     let _ = (multiply as fn(&Matrix, &Matrix) -> Matrix, invert as fn(&Matrix) -> Option<Matrix>);
+    if !textures.is_empty() {
+        crate::texture::append_textures(&mut sec, &mut strs, &mut cmds, &mut raw, textures);
+    }
     Ok((bch::build(&mut sec, &strs, &cmds, &raw), used_luts))
 }
 
 /// The model file, written in two passes: the second one keeps only the lookup table sets that the materials read (every set weighs about
-/// 1 KB per table, and the heap of the Pokémon models is small).
-pub fn write_model_file(model: &ModelSpec, templates: &[Template], model_name: &str, texture_names: &HashMap<String, String>) -> Result<Vec<u8>, String> {
-    let (first, used) = write_model_bch(model, templates, model_name, texture_names, None)?;
+/// 1 KB per table, and the heap of the Pokémon models is small). `textures` go in the same file (the models of the trainers hold their
+/// textures); a Pokémon model has none, its textures are in another file.
+pub fn write_model_file_with(model: &ModelSpec, templates: &[Template], model_name: &str, texture_names: &HashMap<String, String>, textures: &[crate::texture::Texture]) -> Result<Vec<u8>, String> {
+    let (first, used) = write_model_bch(model, templates, model_name, texture_names, None, textures)?;
     if !templates.iter().any(|t| t.c32(12 * 4 + 4) != 0) {
         return Ok(first);
     }
-    Ok(write_model_bch(model, templates, model_name, texture_names, Some(&used))?.0)
+    Ok(write_model_bch(model, templates, model_name, texture_names, Some(&used), textures)?.0)
+}
+
+/// The model file of a Pokémon (without textures).
+pub fn write_model_file(model: &ModelSpec, templates: &[Template], model_name: &str, texture_names: &HashMap<String, String>) -> Result<Vec<u8>, String> {
+    write_model_file_with(model, templates, model_name, texture_names, &[])
 }

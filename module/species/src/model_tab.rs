@@ -465,6 +465,11 @@ impl ModelTab {
         }
         if response.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+            // The wheel zooms the model only: the page must not scroll at the same time.
+            ui.input_mut(|i| {
+                i.smooth_scroll_delta = egui::Vec2::ZERO;
+                i.raw_scroll_delta = egui::Vec2::ZERO;
+            });
             if scroll != 0.0 {
                 self.camera.zoom = (self.camera.zoom * (1.0 + scroll * 0.002)).clamp(0.3, 6.0);
                 self.dirty = true;

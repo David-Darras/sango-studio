@@ -9,6 +9,8 @@ pub mod color {
     pub const SURFACE: Color32 = Color32::from_rgb(246, 247, 252);
     /// A button at rest, a field.
     pub const SURFACE_STRONG: Color32 = Color32::from_rgb(237, 240, 248);
+    /// The outline of a field that can be edited (a number box, a text box).
+    pub const FIELD_BORDER: Color32 = Color32::from_rgb(176, 183, 208);
     pub const BORDER: Color32 = Color32::from_rgb(225, 229, 240);
     pub const TEXT: Color32 = Color32::from_rgb(28, 32, 48);
     pub const MUTED: Color32 = Color32::from_rgb(110, 118, 140);
@@ -75,7 +77,7 @@ pub fn apply(ctx: &egui::Context) {
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, color::BORDER);
     v.widgets.inactive.weak_bg_fill = color::SURFACE_STRONG;
     v.widgets.inactive.bg_fill = color::SURFACE_STRONG;
-    v.widgets.inactive.bg_stroke = Stroke::NONE;
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, color::FIELD_BORDER);
     v.widgets.hovered.weak_bg_fill = color::ACCENT_SOFT;
     v.widgets.hovered.bg_fill = color::ACCENT_SOFT;
     v.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, color::ACCENT);
@@ -97,4 +99,12 @@ pub fn apply(ctx: &egui::Context) {
     style.text_styles.insert(TextStyle::Small, FontId::proportional(12.5));
     style.text_styles.insert(TextStyle::Monospace, FontId::monospace(13.5));
     ctx.set_style(style);
+    // The fields and the menus have an outline, so the user sees that they can be edited (the window may use the light or the dark theme of
+    // egui: both get it).
+    for theme in [egui::Theme::Light, egui::Theme::Dark] {
+        ctx.style_mut_of(theme, |style| {
+            style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, color::FIELD_BORDER);
+            style.visuals.widgets.hovered.bg_stroke = Stroke::new(1.0_f32, color::ACCENT);
+        });
+    }
 }

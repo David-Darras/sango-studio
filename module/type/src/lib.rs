@@ -399,6 +399,10 @@ enum IconAction {
 }
 
 impl Module for Type {
+    fn unsaved(&self) -> bool {
+        self.dirty()
+    }
+
     fn title(&self) -> &str {
         "Type"
     }

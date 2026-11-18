@@ -691,6 +691,10 @@ fn focus_combo(ui: &egui::Ui, response: &egui::Response, value: &mut i32, last: 
 }
 
 impl Module for Move {
+    fn unsaved(&self) -> bool {
+        self.data.is_some() && self.dirty()
+    }
+
     fn title(&self) -> &str {
         "Move"
     }

@@ -45,6 +45,8 @@ const FORMAT_AT: usize = 0x20;
 pub enum Format {
     Rgba5551,
     Rgba4,
+    /// 8 bits for each of red, green, blue and alpha: the pictures of the trainers.
+    Rgba8,
     Etc1,
     Etc1A4,
 }
@@ -54,6 +56,7 @@ impl Format {
         match number {
             7 => Some(Format::Rgba5551),
             8 => Some(Format::Rgba4),
+            9 => Some(Format::Rgba8),
             10 => Some(Format::Etc1),
             11 => Some(Format::Etc1A4),
             _ => None,
@@ -159,20 +162,7 @@ impl Clim {
         if first_index + if palette.len() <= 16 { pixel_count.div_ceil(2) } else { pixel_count } > body.len() {
             return Err("The palette and the indexes do not fit in the texture.".into());
         }
-        let mut footer = [0u8; FOOTER_SIZE];
-        footer[..4].copy_from_slice(SIGNATURE);
-        footer[4..6].copy_from_slice(&0xFEFFu16.to_le_bytes());
-        footer[6..8].copy_from_slice(&0x14u16.to_le_bytes());
-        footer[8..12].copy_from_slice(&0x0202_0000u32.to_le_bytes());
-        footer[12..16].copy_from_slice(&((body.len() + FOOTER_SIZE) as u32).to_le_bytes());
-        footer[16..18].copy_from_slice(&1u16.to_le_bytes());
-        footer[20..24].copy_from_slice(b"imag");
-        footer[24..28].copy_from_slice(&0x10u32.to_le_bytes());
-        footer[WIDTH_AT..WIDTH_AT + 2].copy_from_slice(&(width as u16).to_le_bytes());
-        footer[HEIGHT_AT..HEIGHT_AT + 2].copy_from_slice(&(height as u16).to_le_bytes());
-        footer[FORMAT_AT..FORMAT_AT + 4].copy_from_slice(&7u32.to_le_bytes());
-        footer[36..40].copy_from_slice(&(body.len() as u32).to_le_bytes());
-        Ok(Clim { width, height, format: Format::Rgba5551, body, footer })
+        Ok(Clim::with_footer(width, height, Format::Rgba5551, 7, body))
     }
 
     /// Makes an image of the format RGBA4 (4 bits for each of red, green, blue and alpha, no palette) from RGBA pixels (4
@@ -200,6 +190,11 @@ impl Clim {
                 body[index * 2..][..2].copy_from_slice(&raw.to_le_bytes());
             }
         }
+        Ok(Clim::with_footer(width, height, Format::Rgba4, 8, body))
+    }
+
+    /// An image of a format with the footer that the game files have: the size, the number of the format and the size of the data.
+    fn with_footer(width: usize, height: usize, format: Format, number: u32, body: Vec<u8>) -> Clim {
         let mut footer = [0u8; FOOTER_SIZE];
         footer[..4].copy_from_slice(SIGNATURE);
         footer[4..6].copy_from_slice(&0xFEFFu16.to_le_bytes());
@@ -211,9 +206,33 @@ impl Clim {
         footer[24..28].copy_from_slice(&0x10u32.to_le_bytes());
         footer[WIDTH_AT..WIDTH_AT + 2].copy_from_slice(&(width as u16).to_le_bytes());
         footer[HEIGHT_AT..HEIGHT_AT + 2].copy_from_slice(&(height as u16).to_le_bytes());
-        footer[FORMAT_AT..FORMAT_AT + 4].copy_from_slice(&8u32.to_le_bytes());
+        footer[FORMAT_AT..FORMAT_AT + 4].copy_from_slice(&number.to_le_bytes());
         footer[36..40].copy_from_slice(&(body.len() as u32).to_le_bytes());
-        Ok(Clim { width, height, format: Format::Rgba4, body, footer })
+        Clim { width, height, format, body, footer }
+    }
+
+    /// Makes an image of the format RGBA8 (8 bits for each of red, green, blue and alpha) from RGBA pixels (4 bytes each, row by row
+    /// from the top). The image goes in the corner of a texture whose sides are powers of 2.
+    pub fn from_rgba8(width: usize, height: usize, rgba: &[u8]) -> Result<Clim, String> {
+        if width == 0 || height == 0 || width > 1024 || height > 1024 {
+            return Err("The image must be from 1 to 1024 pixels on each side.".into());
+        }
+        if rgba.len() != width * height * 4 {
+            return Err("The pixels do not match the size of the image.".into());
+        }
+        let (side_x, side_y) = (texture_side(width), texture_side(height));
+        let tiles_per_row = side_x / 8;
+        let mut body = vec![0u8; side_x * side_y * 4];
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = &rgba[(y * width + x) * 4..][..4];
+                let (tx, ty) = (x % 8, y % 8);
+                let inside = (tx & 1) | ((ty & 1) << 1) | ((tx & 2) << 1) | ((ty & 2) << 2) | ((tx & 4) << 2) | ((ty & 4) << 3);
+                let index = ((y / 8) * tiles_per_row + x / 8) * 64 + inside;
+                body[index * 4..][..4].copy_from_slice(&[pixel[3], pixel[2], pixel[1], pixel[0]]);
+            }
+        }
+        Ok(Clim::with_footer(width, height, Format::Rgba8, 9, body))
     }
 
     /// The bytes of the file.
@@ -290,6 +309,18 @@ impl Clim {
                     let (dx, dy) = morton_position(i % 64);
                     let tile = i / 64;
                     put((tile % tiles_per_row) * 8 + dx, (tile / tiles_per_row) * 8 + dy, self.rgba_16(raw));
+                }
+            }
+            Format::Rgba8 => {
+                let pixel_count = side_x * side_y;
+                if self.body.len() < pixel_count * 4 {
+                    return Err("The pixel data of the image is too short.".into());
+                }
+                for i in 0..pixel_count {
+                    let p = &self.body[i * 4..i * 4 + 4];
+                    let (dx, dy) = morton_position(i % 64);
+                    let tile = i / 64;
+                    put((tile % tiles_per_row) * 8 + dx, (tile / tiles_per_row) * 8 + dy, [p[3], p[2], p[1], p[0]]);
                 }
             }
             Format::Etc1 | Format::Etc1A4 => {
@@ -415,6 +446,16 @@ mod test {
         footer[FORMAT_AT] = 7;
         bytes.extend_from_slice(&footer);
         bytes
+    }
+
+    #[test]
+    fn an_image_of_8_bits_goes_out_and_comes_back() {
+        let (width, height) = (16usize, 8usize);
+        let rgba: Vec<u8> = (0..width * height * 4).map(|n| (n * 7 % 256) as u8).collect();
+        let image = Clim::from_rgba8(width, height, &rgba).unwrap();
+        let again = Clim::parse(&image.to_bytes()).unwrap();
+        assert_eq!((again.width(), again.height(), again.format()), (16, 8, Format::Rgba8));
+        assert_eq!(again.to_rgba().unwrap(), rgba);
     }
 
     #[test]

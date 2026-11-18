@@ -32,6 +32,8 @@ mod text_tab;
 mod names;
 
 /// The names of the 18 types, in the order of the game: Normal to Fairy.
+pub use move_names::MOVE as MOVE_NAMES;
+pub use names::ABILITY as ABILITY_NAMES;
 pub use names::ITEM as ITEM_NAMES;
 pub use names::TYPE as TYPE_NAMES;
 
@@ -91,6 +93,73 @@ pub fn species_abilities(session: &Session) -> Result<Vec<SpeciesAbilities>, Str
         }
     }
     Ok(all)
+}
+
+/// What a team builder needs of a species (form 0).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Summary {
+    /// The base stats: HP, Attack, Defense, Sp. Atk, Sp. Def, Speed.
+    pub base: [u8; 6],
+    /// The two types (the same number twice for a species with one type).
+    pub types: [u8; 2],
+    /// Ability 1, ability 2 and the hidden ability (0 is none).
+    pub abilities: [u8; 3],
+    /// The gender ratio: 0 male only, 254 female only, 255 no gender.
+    pub gender_ratio: u8,
+}
+
+/// The summary of every species, form 0: the SD card first, then the romfs. The index is the number of the species (0 is not used).
+pub fn summaries(session: &Session) -> Result<Vec<Option<Summary>>, String> {
+    let dump = session.dump.as_ref().ok_or("The dump is not open.")?;
+    let garc = Garc::open(&dump.archive(ARCHIVE))?;
+    extras::refresh(session.sd.as_ref());
+    let mut all = vec![None; extras::max_species() + 1];
+    for species in extras::species_ids() {
+        let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+        if let Some(d) = on_card.or_else(|| game_data(&garc, species, 0)) {
+            all[species] = Some(Summary {
+                base: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
+                types: [d.type_1, d.type_2],
+                abilities: [d.ability_1, d.ability_2, d.ability_hidden],
+                gender_ratio: d.gender_ratio,
+            });
+        }
+    }
+    Ok(all)
+}
+
+/// The icons of the species, as textures: decoded when a species is shown, then kept.
+#[derive(Default)]
+pub struct SpeciesIcons {
+    garc: Option<Garc>,
+    textures: HashMap<usize, Option<egui::TextureHandle>>,
+}
+
+impl SpeciesIcons {
+    /// Opens the archive of the icons of a dump.
+    pub fn open(&mut self, dump: &sango_core::Dump) {
+        self.garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).ok();
+        self.textures.clear();
+    }
+
+    /// The icon (40 by 30 pixels) of a species.
+    pub fn get(&mut self, ctx: &egui::Context, species: usize) -> Option<&egui::TextureHandle> {
+        icon_texture(&mut self.textures, self.garc.as_ref(), ctx, species)
+    }
+}
+
+/// The names of the forms of a species, from the form 0, for the menus of the other pages.
+pub fn form_choices(species: usize) -> Vec<String> {
+    form_names::names_of(species)
+}
+
+/// A GLB file of a model of the game that is a plain BCH with its textures (the models of the trainers): the skeleton, the meshes and
+/// the pictures, in the rest pose.
+pub fn glb_of_bch(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let model = sango_core::model::parse_model(bytes)?;
+    let textures = sango_core::model::parse_textures(bytes)?;
+    let by_name: HashMap<String, sango_core::model::Texture> = textures.into_iter().map(|t| (t.name.clone(), t)).collect();
+    model_export::glb(&model, &by_name, &[])
 }
 
 /// The Leveling rate of each species, from the species 1 on (form 0).
@@ -1322,7 +1391,9 @@ fn weight_field(ui: &mut egui::Ui, id_salt: &str, hg_value: &mut u16) {
     });
 }
 
-fn searchable_picker<T>(
+/// A drop-down list with a search box of the things of a list of names. The value is the number of the thing: 0 is "None" and the number
+/// `n` is the name at the place `n - 1`.
+pub fn searchable_picker<T>(
     ui: &mut egui::Ui,
     id_salt: &str,
     value: &mut T,
@@ -1386,6 +1457,23 @@ fn searchable_picker<T>(
         widget::set_active_id(ui, picker_id);
     }
     widget::register_focusable(ui, picker_id, button_response.rect);
+    // The menu is the active one after a click: with the list closed, the arrows go to the previous or the next entry.
+    if widget::is_active(ui, picker_id) && widget::page_has_focus(ui) && !ui.memory(|m| m.is_popup_open(popup_id)) {
+        widget::glow(ui, rect, 6.0);
+        widget::scroll_active_into_view(ui, &button_response);
+        let (up, down) = ui.input_mut(|i| (i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp), i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)));
+        let named = |n: usize| n == 0 || names.get(n - 1).is_some_and(|name| !name.is_empty());
+        let target = if down {
+            (current_id + 1..=names.len()).find(|&n| named(n))
+        } else if up {
+            (0..current_id).rev().find(|&n| named(n))
+        } else {
+            None
+        };
+        if let Some(new_val) = target.and_then(|n| T::try_from(n).ok()) {
+            *value = new_val;
+        }
+    }
 
     let search_id = picker_id.with("search");
     let mut search_text: String = ui.data_mut(|d| d.get_temp(search_id).unwrap_or_default());
@@ -2336,6 +2424,10 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, above: im
 }
 
 impl Module for Species {
+    fn unsaved(&self) -> bool {
+        self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed())
+    }
+
     fn title(&self) -> &str {
         "Species"
     }

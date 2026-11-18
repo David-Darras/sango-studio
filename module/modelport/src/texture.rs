@@ -127,15 +127,12 @@ pub fn fit_budget(textures: &mut [Texture]) {
     }
 }
 
-/// The file of the textures of a model (BCH). The textures are made smaller when they do not fit the limits.
-pub fn write_texture_bch(mut textures: Vec<Texture>) -> Vec<u8> {
-    fit_budget(&mut textures);
-    let (mut sec, mut strs, mut cmds, mut raw) = (Section::new(), Strings::new(), Section::new(), Section::new());
-    bch::main_header(&mut sec, &[3]);
+/// Writes the textures in the sections of a file that is being built (the dictionary 3 of the main header must be free).
+pub fn append_textures(sec: &mut Section, strs: &mut Strings, cmds: &mut Section, raw: &mut Section, textures: &[Texture]) {
     let names: Vec<&str> = textures.iter().map(|t| t.name.as_str()).collect();
-    let dic = bch::write_dict(&mut sec, &mut strs, &names);
+    let dic = bch::write_dict(sec, strs, &names);
     let list = sec.tell();
-    for _ in &textures {
+    for _ in textures {
         sec.u32(0);
     }
     sec.patch_ptr(0x24, 0, list as u32);
@@ -150,7 +147,7 @@ pub fn write_texture_bch(mut textures: Vec<Texture>) -> Vec<u8> {
         // One list of commands for each of the three texture units.
         for (dim, kind, address_register, format_register) in [(0x82u32, 0x84u32, 0x85u32, 0x8Eu32), (0x92, 0x94, 0x95, 0x96), (0x9A, 0x9C, 0x9D, 0x9E)] {
             let words = [((t.width as u32) << 16) | t.height as u32, 0xF0000 | dim, 0, 0x40000 | kind, 0, 0xF0000 | address_register, t.format, 0xF0000 | format_register, 0, 0, 1, 0xF023D];
-            let (offset, count) = bch::emit_commands(&mut cmds, &words, &[(4, 5, address as u32)]);
+            let (offset, count) = bch::emit_commands(cmds, &words, &[(4, 5, address as u32)]);
             sec.ptr(2, offset as u32);
             sec.u32(count as u32);
         }
@@ -158,6 +155,14 @@ pub fn write_texture_bch(mut textures: Vec<Texture>) -> Vec<u8> {
         let at = strs.get(&t.name);
         sec.ptr(1, at);
     }
+}
+
+/// The file of the textures of a model (BCH). The textures are made smaller when they do not fit the limits.
+pub fn write_texture_bch(mut textures: Vec<Texture>) -> Vec<u8> {
+    fit_budget(&mut textures);
+    let (mut sec, mut strs, mut cmds, mut raw) = (Section::new(), Strings::new(), Section::new(), Section::new());
+    bch::main_header(&mut sec, &[3]);
+    append_textures(&mut sec, &mut strs, &mut cmds, &mut raw, &textures);
     bch::build(&mut sec, &strs, &cmds, &raw)
 }
 

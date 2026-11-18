@@ -27,6 +27,7 @@ pub mod pica;
 pub mod skeleton;
 pub mod template;
 pub mod texture;
+pub mod trainer;
 
 #[cfg(test)]
 mod test {

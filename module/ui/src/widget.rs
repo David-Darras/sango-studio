@@ -32,6 +32,24 @@ pub fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
     ui.painter().galley(rect.center() - galley.size() / 2.0, galley, egui::Color32::WHITE);
 }
 
+/// A button for something that cannot be undone: the first click changes the button ("Click again to confirm"), the second click does
+/// the work. The button goes back to its first state after a few seconds. Gives true on the second click.
+pub fn confirm_button(ui: &mut egui::Ui, text: &str, confirm_text: &str) -> bool {
+    let id = ui.make_persistent_id(("confirm_button", text));
+    let now = ui.input(|i| i.time);
+    let armed: Option<f64> = ui.data(|d| d.get_temp(id));
+    if armed.is_some_and(|since| now - since < 4.0) {
+        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
+        if button_styled(ui, egui::RichText::new(confirm_text).color(color::WHITE), Some(color::ROSE)) {
+            ui.data_mut(|d| d.remove::<f64>(id));
+            return true;
+        }
+    } else if button(ui, text) {
+        ui.data_mut(|d| d.insert_temp(id, now));
+    }
+    false
+}
+
 /// A button of the side bar: filled with the main colour when it is the current page. The icon is in
 /// a column of its own, so that the labels of all the buttons start at the same place.
 pub fn side_button(ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) -> egui::Response {
@@ -763,7 +781,19 @@ pub fn spin<T: egui::emath::Numeric>(ui: &mut egui::Ui, value: &mut T, min: f64,
     let res = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
         let drag_width = if max > 999.0 { 60.0 } else { 44.0 };
-        let drag_response = ui.add_sized([drag_width, 22.0], egui::DragValue::new(value).range(min..=max).speed(0.5));
+        // A white box with an outline: it looks like a field that can be typed in (a click edits it, a drag changes it).
+        let drag_response = ui
+            .scope(|ui| {
+                let widgets = &mut ui.visuals_mut().widgets;
+                widgets.inactive.weak_bg_fill = color::WHITE;
+                widgets.inactive.bg_fill = color::WHITE;
+                widgets.inactive.bg_stroke = Stroke::new(1.0_f32, color::FIELD_BORDER);
+                widgets.hovered.weak_bg_fill = color::WHITE;
+                widgets.hovered.bg_fill = color::WHITE;
+                ui.add_sized([drag_width, 24.0], egui::DragValue::new(value).range(min..=max).speed(0.5))
+            })
+            .inner
+            .on_hover_text(format!("Click to type a number from {} to {}, drag to change it, or use the arrows.", min, max));
         let (up_steps, down_steps) = ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
             let up = arrow_button(ui, true);

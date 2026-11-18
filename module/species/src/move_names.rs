@@ -600,7 +600,7 @@ pub const MOVE: [&str; 621] = [
     "Mystical Fire",
     "Spiky Shield",
     "Aromatic Mist",
-    "Erie Impulse",
+    "Eerie Impulse",
     "Venom Drench",
     "Powder",
     "Geomancy",

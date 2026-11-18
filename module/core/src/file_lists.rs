@@ -17,6 +17,11 @@ pub fn folders() -> Vec<(String, usize)> {
         ("species/egg_moves".to_string(), 190),
         ("species/evolution".to_string(), 192),
         ("leveling_rate".to_string(), 194),
+        ("trainer/data".to_string(), 36),
+        ("trainer/class".to_string(), 37),
+        ("trainer/pokemon".to_string(), 38),
+        ("trainer/picture".to_string(), 160),
+        ("trainer/model".to_string(), 133),
     ];
     found.extend(LANGUAGES.iter().map(|language| (format!("game_text/{}", language.folder), language.archive)));
     found

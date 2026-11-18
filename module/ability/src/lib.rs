@@ -327,6 +327,10 @@ impl Ability {
 }
 
 impl Module for Ability {
+    fn unsaved(&self) -> bool {
+        self.texts.changed() || self.store.changed()
+    }
+
     fn title(&self) -> &str {
         "Ability"
     }

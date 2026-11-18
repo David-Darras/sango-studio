@@ -22,6 +22,7 @@ OUT = os.path.join(REPO, "module", "species", "src", "move_names.rs")
 # The names that the split gives wrongly: the name as written by the split, and the name of the games.
 FIXES = {
     "Double Edge": "Double-Edge",
+    "Erie Impulse": "Eerie Impulse",
     "Self Destruct": "Self-Destruct",
     "Mud Slap": "Mud-Slap",
     "Will O Wisp": "Will-O-Wisp",

@@ -15,6 +15,7 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `species/level_up_moves/<file>.bin` | The level-up moves (archive 191): `<file>` is the place of the form in the archive. | yes |
 | `species/egg_moves/<species>.bin` | The egg moves (archive 190). | yes |
 | `species/evolution/<file>.bin` | The evolutions (archive 192): `<file>` is the place of the form in the archive. | yes |
+| `trainer/data/<n>.bin`, `trainer/pokemon/<n>.bin`, `trainer/class/<n>.bin` | The data, the teams and the classes of the trainers that you changed (archives 36, 38 and 37). | yes |
 | `leveling_rate/<rate>.bin` | The experience tables (archive 194). | yes |
 | `game_text/<language>/<file>.bin` | The texts that you changed (archives 71 to 78): `ja`, `ja_kanji`, `en`, `fr`, `it`, `de`, `es`, `ko`. | yes |
 | `ability/`, `move/data/`, `move/custom/`, `item/data/`, `item/custom/`, `type/` | The new and the changed abilities, moves, items and types. | yes |

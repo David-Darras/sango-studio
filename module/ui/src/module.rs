@@ -11,6 +11,11 @@ pub trait Module {
     /// One or two characters for the button of the side bar.
     fn icon(&self) -> &str;
 
+    /// True when the page has changes that are not saved: the window asks before it closes.
+    fn unsaved(&self) -> bool {
+        false
+    }
+
     /// Draws the page in the central area.
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session);
 }

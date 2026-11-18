@@ -670,6 +670,10 @@ impl Code {
 }
 
 impl Module for Code {
+    fn unsaved(&self) -> bool {
+        self.dirty()
+    }
+
     fn title(&self) -> &str {
         "Code"
     }

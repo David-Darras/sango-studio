@@ -837,6 +837,10 @@ fn type_picker(ui: &mut egui::Ui, id: &str, value: &mut u8) {
 }
 
 impl Module for Item {
+    fn unsaved(&self) -> bool {
+        self.data.is_some() && self.dirty()
+    }
+
     fn title(&self) -> &str {
         "Item"
     }

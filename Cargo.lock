@@ -2863,7 +2863,21 @@ dependencies = [
  "sango-overworld",
  "sango-packs",
  "sango-species",
+ "sango-trainer",
  "sango-type",
+ "sango-ui",
+]
+
+[[package]]
+name = "sango-trainer"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-core",
+ "sango-modelport",
+ "sango-overworld",
+ "sango-species",
  "sango-ui",
 ]
 

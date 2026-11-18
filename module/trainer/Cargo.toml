@@ -1,0 +1,14 @@
+[package]
+name = "sango-trainer"
+version.workspace = true
+edition.workspace = true
+description = "The trainer editor of Sango Studio: the data, the teams, the classes and the names of all the trainers."
+
+[dependencies]
+sango-core.workspace = true
+sango-species.workspace = true
+sango-ui.workspace = true
+sango-modelport.workspace = true
+sango-overworld.workspace = true
+rfd.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }

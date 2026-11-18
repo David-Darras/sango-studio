@@ -696,6 +696,10 @@ fn tab(ui: &mut egui::Ui, id: (&str, usize), text: &str, place: usize, chosen: u
 }
 
 impl Module for LevelingRate {
+    fn unsaved(&self) -> bool {
+        (0..LEVELING_RATE.len()).any(|rate| self.changed(rate))
+    }
+
     fn title(&self) -> &str {
         "Leveling Rate"
     }

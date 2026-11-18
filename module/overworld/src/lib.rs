@@ -13,7 +13,7 @@ mod events;
 mod garc;
 mod icon;
 mod models;
-mod names;
+pub mod names;
 mod plugin_dir;
 mod scripts;
 mod thumb;

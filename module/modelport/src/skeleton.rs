@@ -217,6 +217,32 @@ pub fn build(source: &Source, used: &BTreeSet<usize>, scale: f32, model_name: &s
     Ok(Skeleton { joints, index })
 }
 
+/// A skeleton that is the one of an existing model: the joints stay as they are, and each joint of the skin of the glTF file goes to the
+/// joint of the model that has the same name (or, for a joint that the model does not have, to its nearest ancestor that it has).
+///
+/// The motions of the game move the joints by name, so a model that keeps the skeleton keeps its motions.
+pub fn reuse(source: &Source, original: &[Joint]) -> Result<Skeleton, String> {
+    if source.joints.is_empty() {
+        return Err("The file has no skin.".into());
+    }
+    let by_name: HashMap<String, usize> = original.iter().enumerate().map(|(i, j)| (j.name.to_lowercase(), i)).collect();
+    let node_joint: HashMap<usize, usize> = source.joints.iter().enumerate().map(|(k, &n)| (n, k)).collect();
+    let mut index = HashMap::new();
+    for (k, &node) in source.joints.iter().enumerate() {
+        let mut current = Some(node);
+        let found = loop {
+            let Some(n) = current else { break None };
+            if let Some(&place) = by_name.get(&source.nodes[n].name.to_lowercase()) {
+                break Some(place);
+            }
+            current = source.nodes[n].parent;
+        };
+        let _ = &node_joint;
+        index.insert(k, found.unwrap_or(0));
+    }
+    Ok(Skeleton { joints: original.to_vec(), index })
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

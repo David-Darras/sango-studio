@@ -30,6 +30,7 @@ pub mod moves;
 pub mod posing;
 pub mod render;
 pub mod text;
+pub mod trainer;
 
 pub use backup::Backup;
 pub use bundle::Bundle;

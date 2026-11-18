@@ -97,6 +97,11 @@ pub fn game_form_name(species: usize, form: usize) -> Option<&'static str> {
 }
 
 /// The name of a form for the menus: the name of the list, "Mega" for a form of a pack that has an item, else "Form n".
+/// The names of the forms of a species of the game, from the form 0 (a species without named forms has "Normal" only).
+pub fn names_of(species: usize) -> Vec<String> {
+    FORMS.iter().find(|(number, _)| *number as usize == species).map_or_else(|| vec!["Normal".to_string()], |(_, names)| names.iter().map(|name| name.to_string()).collect())
+}
+
 pub fn form_label(species: usize, form: usize, pack_item: bool) -> String {
     match game_form_name(species, form) {
         Some(name) => name.to_string(),

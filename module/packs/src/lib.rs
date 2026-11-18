@@ -226,7 +226,7 @@ impl Packs {
                 }
                 ui.add_enabled_ui(!busy, |ui| {
                     if installed.active {
-                        if widget::button(ui, "Remove") {
+                        if widget::confirm_button(ui, "Remove", "Click again to remove") {
                             asked = Some(Action::Remove(installed.id.clone()));
                         }
                     } else if widget::button(ui, "Install again") {

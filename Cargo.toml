@@ -28,6 +28,7 @@ sango-packs = { path = "module/packs" }
 sango-modelport = { path = "module/modelport" }
 sango-cry = { path = "module/cry" }
 sango-overworld = { path = "module/overworld" }
+sango-trainer = { path = "module/trainer" }
 
 [profile.dev]
 opt-level = 2

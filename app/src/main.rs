@@ -17,6 +17,8 @@ struct App {
     side_bar_focus: bool,
     /// The next page that is drawn out of sight to load its data (see `warm_up`).
     warmed: usize,
+    /// True while the window asks if it can close with changes that are not saved.
+    confirm_close: bool,
 }
 
 impl App {
@@ -35,13 +37,14 @@ impl App {
             Box::new(sango_move::Move::default()),
             Box::new(sango_ability::Ability::default()),
             Box::new(sango_type::Type::default()),
+            Box::new(sango_trainer::Trainer::default()),
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_code::Code::default()),
         ];
         // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
         let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).unwrap_or(0);
-        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0 }
+        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false }
     }
 
     fn side_bar(&mut self, ctx: &egui::Context) {
@@ -97,6 +100,57 @@ impl App {
         });
         session.focus_page = was;
         ctx.request_repaint();
+    }
+
+    /// The titles of the pages that have changes that are not saved.
+    fn unsaved_pages(&self) -> Vec<&str> {
+        self.modules.iter().filter(|module| module.unsaved()).map(|module| module.title()).collect()
+    }
+
+    /// When the user closes the window with changes that are not saved, the window stays and asks: "Cancel" is the first choice.
+    fn close_guard(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.unsaved_pages().is_empty() && !self.confirm_close {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.confirm_close = true;
+        }
+        if !self.confirm_close {
+            return;
+        }
+        let pages = self.unsaved_pages();
+        if pages.is_empty() {
+            self.confirm_close = false;
+            return;
+        }
+        let mut answer = None;
+        egui::Area::new(egui::Id::new("close_shade")).order(egui::Order::Foreground).fixed_pos(egui::pos2(0.0, 0.0)).show(ctx, |ui| {
+            let screen = ctx.screen_rect();
+            ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(90));
+            ui.allocate_rect(screen, egui::Sense::click_and_drag());
+        });
+        egui::Window::new("Changes not saved").order(egui::Order::Tooltip).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).show(ctx, |ui| {
+            ui.set_width(380.0);
+            ui.label(format!("These pages have changes that are not saved: {}.", pages.join(", ")));
+            ui.label(widget::hint("If you close now, you lose these changes. Press Cancel, then Save on each page."));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if widget::button_styled(ui, egui::RichText::new("Cancel").color(color::WHITE), Some(color::ACCENT)) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    answer = Some(false);
+                }
+                if widget::button(ui, "Close without saving") {
+                    answer = Some(true);
+                }
+            });
+        });
+        match answer {
+            Some(true) => {
+                self.confirm_close = false;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                // The check is over: the next request closes the window.
+                ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_close_now"), true));
+            }
+            Some(false) => self.confirm_close = false,
+            None => {}
+        }
     }
 
     fn update_ctx(&mut self, ctx: &egui::Context) {
@@ -206,6 +260,9 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         sango_ui::textures::sweep(ctx);
+        if !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sango_close_now")).unwrap_or(false)) {
+            self.close_guard(ctx);
+        }
         self.update_ctx(ctx);
         self.warm_up(ctx);
     }
@@ -217,7 +274,8 @@ fn window_icon() -> Option<egui::IconData> {
     Some(egui::IconData { width: image.width(), height: image.height(), rgba: image.into_raw() })
 }
 
-fn main() -> eframe::Result<()> {
+/// Opens the window and runs the application until it closes.
+fn run() -> eframe::Result<()> {
     // The files of the studio stay on the computer: the SD card only gets the files that the plugin reads (see `SdCard`). The variable
     // SANGO_WORKSPACE chooses another folder.
     let workspace = std::env::var_os("SANGO_WORKSPACE").map(std::path::PathBuf::from).or_else(sango_core::default_workspace);
@@ -233,9 +291,66 @@ fn main() -> eframe::Result<()> {
         renderer: eframe::Renderer::Wgpu,
         // The Overworld page draws a 3D scene that needs a depth buffer.
         depth_buffer: 32,
+        wgpu_options: wgpu_options(),
         ..Default::default()
     };
     eframe::run_native(sango_core::NAME, options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
+}
+
+/// The graphics of the window. DirectX 12 is the default. The variable SANGO_BACKEND (`dx12`, `vulkan` or `gl`) chooses another interface of
+/// the graphics card: when the card is reset by the system the window stops with "Parent device is lost".
+fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
+    let mut options = eframe::egui_wgpu::WgpuConfiguration::default();
+    let backends = match std::env::var("SANGO_BACKEND").ok().as_deref() {
+        Some("dx12") => Some(eframe::wgpu::Backends::DX12),
+        Some("vulkan") => Some(eframe::wgpu::Backends::VULKAN),
+        Some("gl") => Some(eframe::wgpu::Backends::GL),
+        _ => Some(eframe::wgpu::Backends::VULKAN),
+    };
+    if let Some(backends) = backends {
+        options.supported_backends = backends;
+    }
+    options
+}
+
+/// The number of times that the window started again after a crash, given by the environment.
+const RESTARTS: &str = "SANGO_RESTARTS";
+
+/// Writes the reason of a crash in `crash.log` in the folder of the studio, with the place and the calls.
+fn log_crash(info: &std::panic::PanicHookInfo<'_>) {
+    let folder = sango_core::default_workspace().unwrap_or_else(std::env::temp_dir);
+    let _ = std::fs::create_dir_all(&folder);
+    let text = format!("{info}
+{}
+
+", std::backtrace::Backtrace::force_capture());
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(folder.join("crash.log")) {
+        use std::io::Write;
+        let _ = file.write_all(text.as_bytes());
+    }
+}
+
+fn main() -> eframe::Result<()> {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log_crash(info);
+        default_hook(info);
+    }));
+    // A window that is left open for a long time can lose the graphics card (the system resets it): the window then stops. The studio
+    // starts again at once, at most two times, so the user finds the window again. What was not saved is lost (the window asks
+    // before it closes, but a crash cannot ask).
+    match std::panic::catch_unwind(run) {
+        Ok(result) => result,
+        Err(_) => {
+            let restarts = std::env::var(RESTARTS).ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(0);
+            if restarts < 2 {
+                if let Ok(exe) = std::env::current_exe() {
+                    let _ = std::process::Command::new(exe).env(RESTARTS, (restarts + 1).to_string()).spawn();
+                }
+            }
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -253,6 +368,7 @@ mod test {
             frames: 20,
             warmed: 0,
             side_bar_focus: false,
+            confirm_close: false,
         };
         let ctx = egui::Context::default();
         for _ in 0..6 {
@@ -292,6 +408,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: false,
+            confirm_close: false,
         };
 
         let ctx = egui::Context::default();
@@ -333,6 +450,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: true,
+            confirm_close: false,
         };
 
         let ctx = egui::Context::default();
@@ -384,6 +502,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: true,
+            confirm_close: false,
         };
 
         let ctx = egui::Context::default();
@@ -440,6 +559,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: false,
+            confirm_close: false,
         };
         let ctx = egui::Context::default();
 
@@ -489,6 +609,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: false,
+            confirm_close: false,
         };
         let ctx = egui::Context::default();
 
@@ -537,6 +658,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: false,
+            confirm_close: false,
         };
 
         let ctx = egui::Context::default();
@@ -582,6 +704,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: true,
+            confirm_close: false,
         };
 
         let ctx = egui::Context::default();
@@ -650,6 +773,7 @@ mod test {
             frames: 10,
             warmed: 0,
             side_bar_focus: false,
+            confirm_close: false,
         };
 
         let ctx = egui::Context::default();
