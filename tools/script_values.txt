@@ -1,0 +1,822 @@
+[Direction]
+0|Up
+1|Down
+2|Left
+3|Right
+4|Up and left
+5|Up and right
+6|Down and left
+7|Down and right
+9|No direction
+10|Rise
+11|Descend
+12|Rise to the left
+13|Rise to the right
+14|Rise away from the camera
+15|Rise toward the camera
+16|Descend to the left
+17|Descend to the right
+18|Descend away from the camera
+19|Descend toward the camera
+[Exit type]
+0|None
+1|Fade only
+2|Mat
+3|Door
+4|Script only (it does not work as a door, only a script command uses it)
+5|Stairs
+6|Warp
+7|Secret base entrance
+8|Mat, without fade-in
+9|Stairs, without fade-in
+15|Special 1
+16|Special 2
+17|Special 3
+18|Special 4
+19|Special 5
+20|Special 6
+21|Special 7
+22|Special 8
+23|Special 9
+24|Special 10
+25|Special 11
+26|Special 12
+27|Special 13
+28|Special 14
+29|Special 15
+30|Special 16
+31|Special 17
+32|Special 18
+33|Special 19
+34|Special 20
+35|Special 21
+36|Special 22
+37|Special 23
+38|Special 24
+39|Special 25
+40|Special 26
+41|Special 27
+42|Special 28
+43|Special 29
+44|Special 30
+45|Special 31
+46|Special 32
+47|Special 33
+48|Special 34
+49|Special 35
+50|Special 36
+51|Special 37
+52|Special 38
+53|Special 39
+54|Special 40
+55|Special 41
+56|Special 42
+57|Special 43
+58|Special 44
+59|Special 45
+60|Special 46
+61|Special 47
+62|Special 48
+63|Special 49
+64|Special 50
+[Map change]
+0|No effect
+1|Entrance event
+2|Fly
+3|Dive
+4|Escape
+5|Teleport
+6|Walk to a connected map
+[Fade-in]
+0|Black
+1|White
+2|Black, from a capture of the screen (the fade-out must be finished first)
+3|White, from a capture of the screen (the fade-out must be finished first)
+4|Capture of the screen
+5|Circle that shrinks
+6|Ball
+7|Up
+8|Down
+9|Left
+10|Right
+11|Diamond
+[Player form]
+0|Walking
+1|Mach Bike
+2|Acro Bike
+3|Roller skates
+4|Surfing
+5|Rhyhorn or Mamoswine ride (start of the climb)
+6|Gogoat ride
+7|Rhyhorn or Mamoswine ride (fast)
+8|Big Gogoat ride
+9|Sitting
+10|Climbing (not used any more)
+11|Dowsing
+12|Stealthy steps
+13|Surfing on Kyogre
+14|Surfing on Sharpedo
+15|Surfing on Wailmer
+16|Diving
+17|Diving with Kyogre
+18|Diving with Sharpedo
+19|Diving with Wailmer
+20|None (used by the requests)
+[Player action]
+0|None
+1|Spin to the right
+2|Spin to the left
+3|Parallel
+4|Dash
+5|Open turn
+7|360 to the right
+8|360 to the left
+9|Back flip
+10|Bio 540
+[Special object]
+-1|The character that the player talks to
+255|The player
+254|Object added by the script (first)
+253|Object added by the script (second)
+252|Object added by the script (third)
+240|No object
+[Pokédex count]
+0|Seen
+1|Caught
+[Trainer data]
+0|Trainer class
+1|Gender
+2|Battle rule
+3|Music when the trainer sees the player
+[Party search]
+0|Not an Egg
+1|Neither an Egg nor fainted
+[Pokémon select mode]
+0|Normal
+1|Choose a target
+2|Choose a move
+3|Pokémon Day Care
+4|Contest
+5|Choose a move (Battle Points shop)
+[Move tutor mode]
+0|Dragon moves
+1|Ultimate moves
+2|Combined moves
+3|Dragon Ascent (Rayquaza only)
+4|Battle shop (used inside the game)
+[Postman request]
+0|Is there a gift?
+1|Can the gift be received?
+2|Message when the gift is received
+3|Message when the gift cannot be received
+4|Type of the gift
+[Postman gift]
+0|Pokémon
+1|Egg
+2|Assist Power
+3|Normal item
+4|Extra stage of the sparring
+5|Special distribution event
+6|Eon Ticket item
+[PGL postman request]
+0|Read the item
+1|Read the number of items
+2|Mark the first item as taken
+3|Read the number of kinds of items
+[Field menu item]
+0|Pokémon list
+1|Pokédex
+[Field menu page flags]
+1|Training
+2|Player Search System
+4|Pokémon-Amie
+[Field menu page]
+0|No page (use needs a permission)
+1|Training
+2|Player Search System
+3|Pokémon-Amie
+[Obstacle rule]
+0|Do not ignore the obstacles
+1|Ignore the characters only
+2|Ignore the map only
+3|Ignore everything
+[Judge mode]
+0|Total of the IVs
+1|Highest IV
+2|Lowest IV
+3|HP IV
+4|Attack IV
+5|Defense IV
+6|Speed IV
+7|Sp. Atk IV
+8|Sp. Def IV
+[Trade data]
+0|Pokémon that the player receives
+1|Pokémon that the player gives
+2|Does the game accept any Pokémon?
+[Nature]
+0|Hardy
+1|Lonely
+2|Brave
+3|Adamant
+4|Naughty
+5|Bold
+6|Docile
+7|Relaxed
+8|Impish
+9|Lax
+10|Timid
+11|Hasty
+12|Serious
+13|Jolly
+14|Naive
+15|Modest
+16|Mild
+17|Quiet
+18|Bashful
+19|Rash
+20|Calm
+21|Gentle
+22|Sassy
+23|Careful
+24|Quirky
+[Berry plot value]
+0|State (see the states of a plot)
+1|Minutes since the Berry was planted
+2|Minutes until the soil is dry
+3|Berry that is planted (an item)
+4|Number of Berries to harvest
+[Berry plot state]
+0|Empty
+1|Seed
+2|Sprout
+3|Grown stem
+4|In bloom
+5|With Berries
+6|Dead
+[Word kind]
+0|Word
+1|Player name
+2|Player nickname
+3|Prefix of the player nickname
+4|Rival name
+5|Pokémon species name
+6|Item name
+7|Move name of a TM or HM item
+8|Bag pocket name
+9|Number
+10|Move name
+11|Nickname of a Pokémon of the party
+12|Nickname of a Pokémon in a Box
+13|Type name
+14|Nature name
+15|Box name
+16|Trainer class name
+17|Trainer name
+18|Place name
+19|Weather name
+20|Assist Power name
+21|Ribbon name
+23|Secret base: group name
+24|Secret base: password
+25|Secret base: word when happy
+26|Secret base: word to encourage
+27|Secret base: word on the blackboard
+28|Secret base: word on the paper ball
+29|Secret base: owner name
+30|Secret base: displayed name (the group name if there is one, else the owner name)
+33|Own secret base: group name
+34|Own secret base: password
+35|Own secret base: word when happy
+36|Own secret base: word to encourage
+37|Own secret base: word on the blackboard
+38|Own secret base: word on the paper ball
+39|Own secret base: owner name
+40|Own secret base: displayed name (the group name if there is one, else the owner name)
+[Free word input]
+0|Group name
+1|Password
+2|Word when happy
+3|Word to encourage
+4|Word on the blackboard
+5|Word on the paper ball
+[Contest data]
+0|Total score
+1|Ranking
+2|Condition of the entry
+3|Rank of the entry
+4|Ranking of Lisia
+5|Ranking of Wallace
+6|Ranking of the other characters
+[Contest condition]
+0|Cool
+1|Beautiful
+2|Cute
+3|Smart
+4|Tough
+[Contest rank]
+0|Normal
+1|Super
+2|Hyper
+3|Master
+[Special camera]
+0|Shop
+1|Secret base, view from above
+2|Secret base, view of the poster
+[Time unit]
+0|Minutes
+1|Seconds
+2|Milliseconds
+[Friendly encounter scene]
+0|Route 102 Wingull
+1|Route 102 Beautifly
+2|Route 104 Wingull 1
+3|Route 104 Wingull 2
+4|Route 104 Wingull 3
+5|Route 105 Wingull 1
+6|Route 105 Wingull 2
+7|Route 107 Wingull
+8|Route 108 Wingull 1
+9|Route 108 Wingull 2
+10|Route 109 Wingull 1
+11|Route 109 Wingull 2
+12|Route 109 Wingull 3
+13|Route 114 Swablu
+14|Route 124 Wingull 1
+15|Route 124 Wingull 2
+16|Route 124 underwater Luvdisc 1
+17|Route 124 underwater Luvdisc 2
+18|Route 124 underwater Corsola
+19|Route 126 underwater Luvdisc 1
+20|Route 126 underwater Luvdisc 2
+21|Route 126 underwater Luvdisc 3
+22|Route 127 underwater Relicanth
+23|Route 127 underwater Chinchou 1
+24|Route 127 underwater Chinchou 2
+25|Route 128 underwater Relicanth
+26|Route 128 underwater Corsola
+27|Route 128 underwater Chinchou
+[Motion blur kind]
+0|Normal
+1|Circle
+2|Blur of what is near
+[Motion blur animation]
+0|None
+1|Zoom
+[Motion blur change]
+0|Set the value
+1|Linear
+2|Spline
+3|Quadratic
+4|Base-10 logarithm
+[Hardware region]
+0|Japan
+1|America
+2|Europe and Australia
+4|China
+5|Korea
+6|Taiwan
+[Fade of the field]
+0|The script makes the fade
+1|The event makes the fade
+[Move command]
+0|None (nothing moves)
+1|Face a direction
+2|Face a direction, smooth turn, 32 frames
+3|Face a direction, smooth turn, 16 frames
+4|Face a direction, smooth turn, 14 frames
+5|Face a direction, smooth turn, 12 frames
+6|Face a direction, smooth turn, 8 frames
+7|Face a direction, smooth turn, 4 frames
+8|Face the side (camera behind the player)
+9|Face the side (stealthy steps)
+10|Face the back (camera behind the player)
+11|Walk, 32 frames
+12|Walk, 16 frames
+13|Walk, 8 frames
+14|Walk, 4 frames
+15|Walk, 2 frames
+16|Walk, 1 frame
+17|Walk, 12 frames
+18|Walk, 14 frames
+19|Walk, 7 frames
+20|Walk, 6 frames
+21|Walk, 3 frames
+22|Walk, 5 frames
+23|Dash, 6 frames
+24|Slow walk, 12 frames
+25|Stealthy walk, 16 frames
+26|Turn, 2 frames
+27|Walk in place, 32 frames
+28|Walk in place, 16 frames
+29|Walk in place, 8 frames
+30|Walk in place, 4 frames
+31|Walk in place, 2 frames
+32|Jump in place, 16 frames
+33|Jump in place, 8 frames
+34|Jump in place (hiding cloak)
+35|Jump 1 grid, 8 frames
+36|Jump 1 grid, 16 frames
+37|Jump 2 grids, 16 frames
+38|Jump 3 grids, 16 frames
+39|Jump 3 grids, 24 frames
+40|Jump 3 grids, 24 frames, no landing sound
+41|Wait, 1 frame
+42|Wait, 2 frames
+43|Wait, 4 frames
+44|Wait, 8 frames
+45|Wait, 15 frames
+46|Wait, 16 frames
+47|Wait, 32 frames
+48|Hide
+49|Show
+50|Lock the direction
+51|Unlock the direction
+52|Pause the animation
+53|Resume the animation
+54|Warp up
+55|Warp down
+56|Exclamation mark
+57|Exclamation mark with sound
+58|Free movement: weak acceleration
+59|Free movement: strong acceleration
+60|Free movement: braking
+61|Free movement: strong braking
+62|Free movement: start of a turn
+63|Free movement: turn
+64|Free movement: start of a fast turn
+65|Free movement: fast turn
+66|Free movement: jump
+67|Free movement: constant speed
+68|Free movement: end of the move
+69|Free movement: stop
+70|Free movement: constant speed (speed given directly)
+71|Roller skates: spin right
+72|Roller skates: spin left
+73|Roller skates: parallel
+74|Roller skates: open turn
+75|Roller skates: back flip
+76|Roller skates: 360 right
+77|Roller skates: 360 left
+78|Roller skates: bio 540
+79|Free movement: bad ground
+80|Stealthy steps: move
+81|Mach Bike: stop
+82|Mach Bike: move
+83|Mach Bike: bump
+84|Mach Bike: slow down without input
+85|Mach Bike: move on sand
+86|Mach Bike: slow down on sand
+87|Mach Bike: jump
+88|Acro Bike: stop
+89|Acro Bike: move
+90|Acro Bike: bump
+91|Acro Bike: move on sand
+92|Acro Bike: jump
+93|Acro Bike: wheelie jump (ledge)
+94|Acro Bike: side step
+95|Acro Bike: wheelie jump in place
+96|Acro Bike: wheelie jump in place and turn
+97|Acro Bike: wheelie jump and move
+98|Acro Bike: stepping-stone jump
+99|Acro Bike: jump and turn
+100|Turn on the last frame (value of the input)
+101|Turn on the last frame (direction)
+102|Surfing: stop
+103|Surfing: acceleration
+104|Surfing: constant speed
+105|Surfing: braking
+106|Surfing: strong braking
+107|Surfing: jump
+108|Surfing: start of a turn
+109|Surfing: turn
+110|Surfing: end of the move
+111|Surfing: stealthy steps
+112|Rhyhorn ride: stop
+113|Rhyhorn ride: walk forward
+114|Rhyhorn ride: walk back
+115|Rhyhorn ride: turn
+116|Rhyhorn ride: walk forward fast
+117|Rhyhorn ride: walk back fast
+118|Rhyhorn ride: turn fast
+119|Rhyhorn ride: walk in place
+120|Rhyhorn ride: lie down
+121|Rhyhorn ride: stand up
+122|Rhyhorn ride: wait lying down
+123|Rhyhorn ride: get on
+124|Rhyhorn ride: get off
+125|Rhyhorn ride: get on (left)
+126|Rhyhorn ride: get off (left)
+127|Rhyhorn ride: refuse
+128|Rhyhorn ride: action
+129|Gogoat ride: get on
+130|Gogoat ride: get off
+131|Gogoat ride: get on (left)
+132|Gogoat ride: get off (left)
+133|Gogoat ride: refuse
+134|Wait sitting
+135|Sit down
+136|Stand up
+137|Turn while sitting
+138|Bow
+139|Hold out the hands
+140|Pull toward oneself
+141|Put in the bag
+142|Take out of the bag
+143|Talk gesture
+144|Stop on roller skates (not idle)
+145|Write the report
+146|Writing the report
+147|Finished writing the report
+148|Crouch
+149|Crouching
+150|Stand up from the crouch
+151|Kneel
+152|Kneeling
+153|Stand up from kneeling
+154|Get up from the bed
+155|Stop lying down
+156|Put on the Devon Scope
+157|Slide down a slope
+158|Slide down a slope (secret base slide)
+159|Slide down a slope backward
+160|Skate pipe: move
+161|Skate pipe: start
+162|Skate pipe: end
+163|Conveyor belt: step on
+164|Conveyor belt: step off
+165|Conveyor belt: pushed back
+166|Walk with a smooth turn, 4 frames
+167|Camera behind the player: stop
+168|Camera behind the player: walk
+169|Camera behind the player: run
+170|Camera behind the player: jump
+171|Camera behind the player: bump
+172|Camera behind the player: walk (debug)
+173|Free movement: move on sand
+174|Fishing (male, style 1): start
+175|Fishing (male, style 1): cast
+176|Fishing (male, style 1): wait for a bite
+177|Fishing (male, style 1): bite
+178|Fishing (male, style 1): reel in
+179|Fishing (male, style 1): fail
+180|Fishing (male, style 2): start
+181|Fishing (male, style 2): cast
+182|Fishing (male, style 2): wait for a bite
+183|Fishing (male, style 2): bite
+184|Fishing (male, style 2): reel in
+185|Fishing (male, style 2): fail
+186|Fishing (male, style 3): start
+187|Fishing (male, style 3): cast
+188|Fishing (male, style 3): wait for a bite
+189|Fishing (male, style 3): bite
+190|Fishing (male, style 3): reel in
+191|Fishing (male, style 3): fail
+192|Fishing (male, style 4): start
+193|Fishing (male, style 4): cast
+194|Fishing (male, style 4): wait for a bite
+195|Fishing (male, style 4): bite
+196|Fishing (male, style 4): reel in
+197|Fishing (male, style 4): fail
+198|Fishing (female, style 1): start
+199|Fishing (female, style 1): cast
+200|Fishing (female, style 1): wait for a bite
+201|Fishing (female, style 1): bite
+202|Fishing (female, style 1): reel in
+203|Fishing (female, style 1): fail
+204|Fishing (female, style 2): start
+205|Fishing (female, style 2): cast
+206|Fishing (female, style 2): wait for a bite
+207|Fishing (female, style 2): bite
+208|Fishing (female, style 2): reel in
+209|Fishing (female, style 2): fail
+210|Fishing (female, style 3): start
+211|Fishing (female, style 3): cast
+212|Fishing (female, style 3): wait for a bite
+213|Fishing (female, style 3): bite
+214|Fishing (female, style 3): reel in
+215|Fishing (female, style 3): fail
+216|Fishing (female, style 4): start
+217|Fishing (female, style 4): cast
+218|Fishing (female, style 4): wait for a bite
+219|Fishing (female, style 4): bite
+220|Fishing (female, style 4): reel in
+221|Fishing (female, style 4): fail
+222|Watering can (male: take out)
+223|Watering can (male: use)
+224|Watering can (male: put away)
+225|Watering can (female: take out)
+226|Watering can (female: use)
+227|Watering can (female: put away)
+228|Harvest Berries
+229|Question mark
+230|Question mark with sound
+231|Get an item
+232|Turn with a look, 4 frames
+233|Turn with a look, 8 frames
+234|Angry
+235|Happy
+236|Sad
+237|Surprised
+238|Pose
+239|Move from free movement to the center of the grid
+240|Fast walk, 4 frames
+241|Slide down a slope (on a bike)
+242|Slide down a slope backward (on a bike)
+243|Face a direction (no correction of the position)
+244|Face a direction, smooth turn, 6 frames
+245|Face a direction, smooth turn, 5 frames
+246|Face a direction, smooth turn, 3 frames
+247|Face a direction, smooth turn, 2 frames
+248|Jump in place, 8 frames, height 0
+249|Camera behind the player: bump on a bike
+250|Turn with motion, 8 frames
+251|Turn with motion, 12 frames
+252|Turn with motion, 12 frames, to the right
+253|Turn with motion, 12 frames, to the left
+254|Free movement: walk
+255|Free movement: dash
+256|Stealthy steps: stop
+257|Sit on a chair (height control)
+258|Stand up from a chair (height control)
+259|Sliding: move 4 frames
+65535|End of the list
+65536|Walk (default)
+65537|Dash
+[Sound mode]
+0|Play once (default)
+1|Start a looping sound
+2|Restart the loop if it ended
+3|Stop the loop
+4|Ask if the loop has ended
+[Fade-out]
+0|Black
+1|White
+2|Black, from a capture of the screen (the fade-in must wait for the end of the fade-out)
+3|White, from a capture of the screen (the fade-in must wait for the end of the fade-out)
+4|Capture of the screen
+5|Circle that shrinks
+6|Ball
+7|Up
+8|Down
+9|Left
+10|Right
+11|Star
+[Screen]
+0|Upper screen
+1|Lower screen
+2|Both screens
+[Face game expression]
+0|Straight face
+1|Slight smile
+2|Smile (small)
+3|Smile (big)
+4|Eyes open
+5|Eyes half closed
+6|Eyes closed
+7|Wink (left)
+8|Wink (right)
+9|Pursed mouth
+10|Big mouth
+11|Eyes closed and big mouth
+12|Eyes closed and pursed mouth
+13|Eyes open and big mouth
+14|Eyes open and pursed mouth
+[Face game bubble animation]
+0|Appears
+1|Waits
+2|Forced end
+3|Right answer
+[Face game bubble tilt]
+0|Straight
+1|Left
+2|Right
+[Pokémon-Amie icon]
+0|Tap
+1|Hit
+2|Pointing finger (still)
+3|Pointing finger (animated)
+4|Open hand (still)
+5|Open hand (animated)
+6|Electric shock
+7|Beckoning hand (still)
+8|Beckoning hand (animated)
+9|Beckoning hand (fade of 30 frames)
+10|Beckoning hand (fade of 15 frames)
+11|Wavering icon
+12|Ice icon
+13|Scribble icon
+14|Burnt hand (animated)
+15|Hand hurt by thorns (animated)
+16|Mark 1 (animated)
+17|Mark 2 (animated)
+18|Mark 3 (animated)
+19|Mark 4 (animated)
+20|Mark 5 (animated)
+21|Ghost type (animated)
+[AI command]
+0|A random number is under a1
+1|A random number is over a1
+2|A random number equals a1
+3|A random number does not equal a1
+4|The HP of the side a1 is under a2 percent
+5|The HP of the side a1 is over a2 percent
+6|The HP of the side a1 equals a2 percent (rounded up)
+7|The HP of the side a1 does not equal a2 percent (rounded up)
+8|The side a1 has a status problem
+9|The side a1 has no status problem
+10|The side a1 has the status problem a2
+11|The side a1 does not have the status problem a2
+12|The side a1 is badly poisoned
+13|The side a1 is not badly poisoned
+14|The side a1 has the lasting effect a2
+15|The side a1 does not have the lasting effect a2
+16|The field of the side a1 has the side effect a2 (a screen, Tailwind...)
+17|The field of the side a1 does not have the side effect a2
+18|The user has a move that does damage
+19|The user has no move that does damage
+20|Gives the number of the turn
+21|Gives a type. a1 chooses it: 0 first type of the target, 1 first type of the user, 2 second type of the target, 3 second type of the user, 4 type of the move
+22|The move that is rated does damage (its power is not 0)
+23|Gives the power of the move that is rated
+24|Compares the damage of the move that is rated with the other moves of the user. a1: yes to use the variance of the damage. Gives 0 if it does no damage, 1 if another move does more, 2 if it is the strongest
+25|Compares the damage of the move that is rated with the other moves of the user. a1: yes to use the variance of the damage. Gives 0 if it does no damage, 1 if another move does more, 2 if it is the strongest
+26|Gives the move that the side a1 used last
+27|Who moves first. a1: 0 the user is faster, 1 the target is faster, 2 same speed
+28|Gives the number of Pokémon on the bench of the side a1 that can still fight
+29|Gives the AI sequence number of the move that is rated
+30|Gives the ability of the side a1
+31|The effectiveness of the move that is rated on the target. a1: the effectiveness to test (at most for the weakest, at least for the strongest, equal for the others)
+32|A Pokémon on the bench of the side a1 has a status problem
+33|No Pokémon on the bench of the side a1 has a status problem
+34|Gives the weather: 0 none, 1 sun, 2 rain, 3 hail, 4 sandstorm
+35|The value a2 of the side a1 is under a3 (a2: 0 HP, 1 Attack, 2 Defense, 3 Sp. Atk, 4 Sp. Def, 5 Speed, 6 accuracy, 7 evasion)
+36|The value a2 of the side a1 is over a3 (a2: 0 HP, 1 Attack, 2 Defense, 3 Sp. Atk, 4 Sp. Def, 5 Speed, 6 accuracy, 7 evasion)
+37|The value a2 of the side a1 equals a3 (a2: 0 HP, 1 Attack, 2 Defense, 3 Sp. Atk, 4 Sp. Def, 5 Speed, 6 accuracy, 7 evasion)
+38|The value a2 of the side a1 does not equal a3 (a2: 0 HP, 1 Attack, 2 Defense, 3 Sp. Atk, 4 Sp. Def, 5 Speed, 6 accuracy, 7 evasion)
+39|The move that is rated makes the target faint. a1: yes to use the variance of the damage
+40|The move that is rated does not make the target faint. a1: yes to use the variance of the damage
+41|The side a1 has the move a2
+42|The side a1 does not have the move a2
+43|The side a1 has a move with the AI sequence number a2
+44|The side a1 has no move with the AI sequence number a2
+45|Choose to run away
+46|Gives the held item of the side a1
+47|Gives the effect of the held item of the side a1
+48|Gives the gender of the side a1
+49|The side a1 already acted this turn (Fake Out check)
+50|Gives the Stockpile count of the side a1
+51|Gives the rule of the battle
+52|Gives the kind of the opponent
+53|Gives the item that the side a1 used up (the one that Recycle gives back)
+54|Gives the type of the move that is rated
+55|Gives the power of the move that is rated
+56|Gives the AI sequence number of the move that is rated
+57|Gives the count of Protect of the side a1
+58|Compares the levels. a1: 0 the user is higher, 1 the target is higher, 2 same level
+59|The target is taunted
+60|The target is taunted (the game does not invert the test here)
+61|The move aims at an ally
+62|The side a1 has the type a2
+63|The side a1 has the ability a2
+64|The side a1 already has the power-up of Flash Fire
+65|The side a1 holds the item a2
+66|The field effect a1 is active
+67|Gives the count of the side effect a2 on the side a1
+68|A Pokémon on the bench of the side a1 has lost HP
+69|A Pokémon on the bench of the side a1 has lost PP
+70|Gives the power of Fling with the item of the side a1 (0 if the item cannot be used)
+71|Gives the PP left of the move that is rated
+72|The user already used all its moves (Last Resort check)
+73|Gives the kind of damage of the move that is rated (1 physical, 2 special)
+74|Gives the kind of damage of the last move of the target (1 physical, 2 special)
+75|Gives the speed rank of the side a1
+76|Gives the number of turns of the side a1 (for Slow Start)
+77|A Pokémon on the bench would do more damage than the user. a1: yes to use the variance of the damage
+78|The user has a move that is super effective on the target
+79|The best damage of the user is less than the damage that the last move of the side a1 would do. a2: yes to use the variance of the damage
+80|Gives the total of the raised stat changes of the side a1
+81|Gives the difference of the value a2 between the side a1 and the user
+82|Gives the value a2 of the side a1
+83|Compares the damage of the move that is rated with the other moves of the user and of its partner. a1: yes to use the variance of the damage. Gives 0 if it does no damage, 1 if another move does more, 2 if it is the strongest
+84|The side a1 fainted
+85|The side a1 did not faint
+86|Gives the ability of the side a1 with the effects of the moves taken into account
+87|The side a1 has a Substitute
+88|Gives the species of the side a1
+89|The random number that all the Pokémon share this turn is under a1
+90|The random number that all the Pokémon share this turn is over a1
+91|The random number that all the Pokémon share this turn equals a1
+92|The random number that all the Pokémon share this turn does not equal a1
+93|A delayed attack (Future Sight, Doom Desire) is waiting at the place of the side a1
+94|The Attack of the side a1 is under its Sp. Atk
+95|The Attack of the side a1 is over its Sp. Atk
+96|The Attack of the side a1 differs from its Sp. Atk (the game code tests "does not equal")
+97|The side a1 has eaten a Berry
+98|The extra type of the side a1 is a2
+99|The terrain a1 is active
+100|Gives the weight of the side a1
+101|The battle is a multi battle
+102|The side a1 is Mega Evolved
+103|The side a1 is out of the field because of a move (Fly, Dig...)
+104|Gives the type of Hidden Power of the side a1

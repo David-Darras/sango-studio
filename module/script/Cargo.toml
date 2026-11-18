@@ -1,0 +1,9 @@
+[package]
+name = "sango-script"
+version.workspace = true
+edition.workspace = true
+description = "The script editor of Sango Studio: the compiled scripts of the game, as assembly that can be changed and built again."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
