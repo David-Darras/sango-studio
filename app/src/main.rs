@@ -38,6 +38,7 @@ impl App {
             Box::new(sango_ability::Ability::default()),
             Box::new(sango_type::Type::default()),
             Box::new(sango_trainer::Trainer::default()),
+            Box::new(sango_choreography::Choreography::default()),
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_code::Code::default()),

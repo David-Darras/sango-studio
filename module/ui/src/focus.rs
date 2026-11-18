@@ -1,6 +1,6 @@
 //! The keyboard focus of the page: a click on a list or a menu gives it the focus, and the arrow keys then change the choice.
 
-use sango_ui::{egui, widget};
+use crate::{egui, widget};
 
 /// Puts a widget in the navigation of the page: a click makes it the active one, and the active one has a glow. Gives true when the
 /// widget is the active one and the page has the focus (the keys are for it).

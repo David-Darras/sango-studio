@@ -19,6 +19,7 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `leveling_rate/<rate>.bin` | The experience tables (archive 194). | yes |
 | `game_text/<language>/<file>.bin` | The texts that you changed (archives 71 to 78): `ja`, `ja_kanji`, `en`, `fr`, `it`, `de`, `es`, `ko`. | yes |
 | `ability/`, `move/data/`, `move/custom/`, `item/data/`, `item/custom/`, `type/` | The new and the changed abilities, moves, items and types. | yes |
+| `choreography/` | The choreographies of the moves (the steps of the camera, the effects, the sounds and the poses): the files `<n>.bin` of the archive of the move choreographies, compressed, and the list `index.bin`. | yes |
 | `species/model/` | The 3D models of the packs: the list `0.raw`, `index.bin` and the files `<n>.pc` (8 for each model). Made again from the packs. | yes, and only there |
 | `code/`, `move/code/` | The code of the Code page. | no |
 | `overworld/land`, `overworld/area`, `overworld/matrix`, `overworld/zone`, `overworld/model` | The blocks, the tilesets, the matrices, the zones (the events) and the models of the characters that the Overworld page writes. | yes, on the SD card only |

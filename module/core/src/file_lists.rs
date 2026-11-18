@@ -22,6 +22,7 @@ pub fn folders() -> Vec<(String, usize)> {
         ("trainer/pokemon".to_string(), 38),
         ("trainer/picture".to_string(), 160),
         ("trainer/model".to_string(), 133),
+        ("choreography".to_string(), 34),
     ];
     found.extend(LANGUAGES.iter().map(|language| (format!("game_text/{}", language.folder), language.archive)));
     found
