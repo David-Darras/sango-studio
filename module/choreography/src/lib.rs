@@ -8,6 +8,9 @@
 mod move_choreography;
 mod schema;
 
+/// The names of the effects (the particle files): the number of the file and its name.
+pub use schema::EFFECT_NAMES;
+
 use move_choreography::{MoveChoreography, Value};
 use sango_core::{Dump, Garc, SdCard};
 use sango_ui::picker::{picker, Group};

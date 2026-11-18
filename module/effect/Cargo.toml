@@ -1,0 +1,13 @@
+[package]
+name = "sango-effect"
+version.workspace = true
+edition.workspace = true
+description = "The effect editor of Sango Studio: the layers of a particle effect, their emission, their shape, their colour, their size and their life."
+
+[dependencies]
+sango-core.workspace = true
+sango-choreography.workspace = true
+sango-species.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
