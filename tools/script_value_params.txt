@@ -1,0 +1,41 @@
+AIMdlAcmdSet.acmd|Move command
+AIMdlAcmdSetByRoute.acmd|Move command
+IEMdlAcmdSet.acmd|Move command
+IEMdlAcmdSetByRoute.acmd|Move command
+MdlAcmdSet.acmd|Move command
+_MdlAcmdMakeMoveCore.acmd|Move command
+_MdlAcmdSet.acmd|Move command
+CallFreeWordInput.input_type|Free word input
+CallPokeSelect.mode|Pokémon select mode
+EVCameraSetSpecialParam.nType|Special camera
+_WordSetRegister.regist_type|Word kind
+WordSetCondition.condition|Contest condition
+WordSetContestRank.rank|Contest rank
+MapChangeFake.in_exit_type|Exit type
+MapChangeFake.out_exit_type|Exit type
+FieldMenuAddPage.add|Field menu page flags
+FieldMenuPushPage.next_page|Field menu page
+BreederJudgeGetResult.mode|Judge mode
+FieldTradeGetData.trade_data_index|Trade data
+GetContestNewestData.retData|Contest data
+CallFieldDispPokePortrait.type|Contest condition
+TimeCountGet.mode|Time unit
+WazaOshieCheck.mode|Move tutor mode
+ZukanSetFlag.count_type|Pokédex count
+ZukanGetFlag.count_type|Pokédex count
+_PostmanGetParameter.req|Postman request
+_PGLPostmanFuncCall.idx|PGL postman request
+_FieldNutsGetParam.param|Berry plot value
+SetEscapeLocation.form|Player form
+PlaySE.flag|Sound mode
+FadeRequestOut.type|Fade-out
+FadeRequestOut.disp|Screen
+_FadeRequestIn.disp|Screen
+SetFacialGameIcon.id|Face game expression
+SetFacialGameIcon.dir|Face game bubble tilt
+SetFacialGameIcon.anim_id|Face game bubble animation
+ChangeFacialGameIcon.dir|Face game bubble tilt
+ChangeFacialGameIcon.anim_id|Face game bubble animation
+SetIcon.id|Pokémon-Amie icon
+SetIcon2.id|Pokémon-Amie icon
+AI_CMD.cmdID|AI command

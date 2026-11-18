@@ -1,0 +1,289 @@
+_CallTrialDownloadApp.mode|Which mode of the download application to open.
+_CallTrialDownloadApp.ret_wk|Work variable that receives the result (one of the four result variables of the script).
+GetKeyCont.@return|The keys that are held down now.
+IsKeyTrigger.key|The button to test (a button number of the game: left, right, up, down, A, B, X, Y, L, R, Start, Select, Plus, Minus).
+IsKeyTrigger.stick_f|Yes to also count a push of the stick as a press.
+IsKeyTrigger.touch_f|Yes to also count a touch of the screen as a press.
+IsKeyTrigger.@return|Yes if the input was made this frame, no if not.
+GetStickHold.@return|The stick direction that is held.
+_WordSetCurrentSecretBaseOwnerName.buf_id|Number of the text buffer that receives the name.
+WordSetSecretBaseGoodsName.buf_id|Number of the text buffer that receives the name.
+WordSetSecretBaseGoodsName.goodNo|Number of the secret base item.
+ListMenuInit_Seq.@return|Yes when the menu is finished.
+_MapChangeAndDemoCall.zone_id|Zone to go to.
+_MapChangeAndDemoCall.gx|Grid X of the destination.
+_MapChangeAndDemoCall.y|Height (Y) of the destination.
+_MapChangeAndDemoCall.gz|Grid Z of the destination.
+_MapChangeAndDemoCall.dir|Direction of the player on arrival.
+_MapChangeAndDemoCall.demo_idx|Number of the demo to play.
+ContactEncountIsActive.@return|Yes while a contact encounter is running, no if not.
+OnMotionBlur.blend_type|Kind of blend of the blur.
+OnMotionBlur.anim_type|Kind of animation of the blur.
+ControlMotionBlur.end|Final blend value, from -0.5 to 0.5.
+ControlMotionBlur.type|Kind of interpolation.
+ControlMotionBlur.frame|Number of frames of the interpolation.
+ControlMotionBlurColor.r|Final red added or removed, from -1.0 to 1.0.
+ControlMotionBlurColor.g|Final green added or removed, from -1.0 to 1.0.
+ControlMotionBlurColor.b|Final blue added or removed, from -1.0 to 1.0.
+ControlMotionBlurColor.type|Kind of interpolation.
+ControlMotionBlurColor.frame|Number of frames of the interpolation.
+IsContinueRecover.@return|Yes if the game was started again from a save, no if not.
+PokePartyGetParam.@return|The value that was read.
+PokePartySetParam.@return|The value that was set.
+PokePartyIsOwner.@return|Yes if the player is the original trainer, no if another trainer is.
+PokePartyHaveWaza.@return|With a Pokémon position: yes if it knows the move, no if not. For the whole party: the position of the first Pokémon that knows it, or the "none" value if no one does.
+PokePartyGetWazaCount.@return|The number of moves that the Pokémon knows.
+PokePartyGetWazaID.@return|The move.
+PokePartySetWaza.pos|Position of the Pokémon in the party.
+PokePartySetWaza.waza_pos|Slot of the move, from 0 to 3. 5 adds the move and pushes the oldest one out.
+PokePartySetWaza.waza_id|The move to learn. 0 makes the Pokémon forget the move of that slot.
+PokePartySetWaza.@return|The number of moves that the Pokémon knows now.
+PokePartyCheckWazaRemind.@return|Yes if the Pokémon has a move to remember, no if not.
+PokeMemoryMessageIsExistOther.@return|Yes if there is one, no if not.
+BoxPokeGetParam.@return|The value that was read.
+WazaOshieCheck.@return|Yes if the Pokémon can be taught the move.
+WazaOshieGetWazaID.@return|The move.
+TrainerBattleRuleIsDouble.obj_id|The character (object) of the trainer.
+TrainerBattleRuleIsDouble.@return|Yes for a double battle, no for a single battle.
+PokePartyCheckDistribution.@return|Yes if the Pokémon was given by a distribution.
+SecretBaseGoodsAddCheck.goodsNo|Number of the secret base item.
+SecretBaseGoodsAddCheck.num|Number to add.
+SecretBaseGoodsAddCheck.@return|Yes if the number can be added, no if not.
+SecretBaseGoodsGetNum.goodsNo|Number of the secret base item.
+SecretBaseGoodsGetNum.@return|The number that the player owns.
+SecretBaseGoodsAdd.goodsNo|Number of the secret base item.
+SecretBaseGoodsAdd.num|Number to add.
+SecretBaseGoodsAdd.@return|The number that was really added.
+SecretBaseExistDeliveryBase.@return|Yes if a distributed secret base exists, no if not.
+SetEscapeLocation.zone_id|Zone where the player goes when they escape.
+SetEscapeLocation.gx|Grid X of the place.
+SetEscapeLocation.y|Height (Y) of the place. It is a decimal number.
+SetEscapeLocation.gz|Grid Z of the place.
+SetEscapeLocation.dir|Direction of the player on arrival.
+SetEscapeLocation.form|Form of the player on arrival. The default, -1, keeps the current form of the player.
+MdlSetVisibleMesh.@return|The direction after the turn.
+CalcVecToDir.@return|The direction.
+GetReturnDir.@return|The direction.
+GetTurnDirByDir.@return|The direction after the turn.
+MdlCanUseTurnAcmd.obj_id|The character (object). -1 is the target of the talk.
+MdlCanUseTurnAcmd.@return|Yes if the turn action can be used, no if not.
+CheckWinAllSuspend.@return|Yes when all the windows are suspended.
+CheckWinSuspend.@return|Yes when all the windows are suspended.
+TalkMdlMsg_Seq.@return|Yes when it is finished.
+DispTenjiMsgWin.str_id|Number of the message in the display text file.
+PokerusCheckTemoti.@return|Yes if a Pokémon of the party has Pokérus.
+PopupMsgStartEvent.@return|Yes if the pop-up could start, no if not.
+PopupMsgParamSetCore.@return|Yes when it is finished.
+IsMugennotikettoEnable.@return|Yes while the Eon Ticket event is active, no before it starts or after it ends.
+_FieldClose.fadeout_on|Yes to fade out.
+_FieldClose.all_close|Yes to destroy the whole field. By default the field is kept.
+_FieldOpen.fadein_on|Yes to fade in.
+_CallWildBattleWithoutField.tbl_no|Number of the table of the Pokémon to add (one of the wild encounter tables).
+_CallWildBattleWithoutField.btl_bgm_play|Yes if the system plays the battle music. The default is yes.
+_CallWildBattleWithoutField.field_open_skip|Yes if the script opens the field again itself. The default is no.
+_CallWildBattleWithoutField.ret_bgm_id|Music after the battle. The default, -1, goes back to the music from before.
+_SecretBaseGetGeneralParam.param|Which general value to read (a kind of value of the secret base).
+_SecretBaseGetGeneralParam.@return|Depends on the kind of value.
+_SecretBaseGetBaseParam.pointNo|Position number of the base.
+_SecretBaseGetBaseParam.param|Which value of the base to read.
+_SecretBaseGetBaseParam.@return|Depends on the kind of value.
+_SecretBaseGetGuildParam.param|Which value of the other bases to read.
+_SecretBaseGetGuildParam.index|Index used to read the value.
+_SecretBaseGetGuildParam.@return|Depends on the kind of value.
+_SecretBaseGetGoodsParam.goodsNo|Number of the item.
+_SecretBaseGetGoodsParam.param|Which value of the item to read.
+_SecretBaseGetGoodsParam.@return|Depends on the kind of value.
+_SecretBaseGetOthersBaseParam.pointNo|Position number of the base of another player.
+_SecretBaseGetOthersBaseParam.param|Which value of the base to read.
+_SecretBaseGetOthersBaseParam.@return|Depends on the kind of value.
+_SecretBaseGetOthersBaseFlag.pointNo|Position number of the base of another player.
+_SecretBaseGetOthersBaseFlag.param|Which flag to read.
+_SecretBaseGetOthersBaseFlag.@return|Depends on the flag.
+_SecretBaseSetOthersBaseFlag.pointNo|Position number of the base of another player.
+_SecretBaseSetOthersBaseFlag.param|Which flag to set.
+_SecretBaseSetOthersBaseFlag.flag|The new value of the flag (yes or no).
+_SecretBaseIncOthersBaseSkillCount.pointNo|Position number of the base of another player.
+_SecretBaseIncOthersBaseSkillCount.@return|The number of uses of the special skill after the increase.
+_SecretBaseGetOthersBaseShitappaSex.pointNo|Position number of the base of another player.
+_SecretBaseGetOthersBaseShitappaSex.index|Number of the grunt.
+_SecretBaseGetOthersBaseShitappaSex.@return|Male or female.
+_SecretBaseGetOthersBaseShitappaBtlFlag.pointNo|Position number of the base of another player.
+_SecretBaseGetOthersBaseShitappaBtlFlag.index|Number of the grunt.
+_SecretBaseGetOthersBaseShitappaBtlFlag.@return|Yes if the player already battled this grunt today, no if not.
+_SecretBaseSetOthersBaseShitappaBtlFlag.pointNo|Position number of the base of another player.
+_SecretBaseSetOthersBaseShitappaBtlFlag.index|Number of the grunt.
+_SecretBaseSetOthersBaseShitappaBtlFlag.b32|Yes to mark the grunt as battled today.
+_SecretBaseCallBattle.pointNo|Position number of the base.
+_SecretBaseCallBattle.mode|Mode of the battle.
+_SecretBaseCallBattle.shitappaIndex|Number of the grunt.
+_SecretBaseCallBattle.@return|Yes if the battle took place, no if not (for example, not enough Pokémon).
+_SecretBaseCallQRApp.ret_wk_loaded|Work variable: was a base loaded?
+_SecretBaseCallQRApp.ret_wk_delivery|Work variable: is the loaded base a distributed one?
+_SecretBaseCallQRApp.ret_wk_point|Work variable: position number of the loaded base.
+_SecretBaseCallQRApp.is_fade|Yes to fade.
+_SecretBaseGetOthersBasePlayLog.pointNo|Position number of the base of another player.
+_SecretBaseGetOthersBasePlayLog.@return|The number of the log message if the base has a valid play log, -1 if not.
+_SecretBaseGetOthersBaseMoveFailStatus.pointNo|Position number of the base of another player.
+_SecretBaseGetOthersBaseMoveFailStatus.placeBufID|Text buffer that receives the name of the new place.
+_SecretBaseGetOthersBaseMoveFailStatus.nameBufID|Text buffer that receives the name of the owner of the new base.
+_SecretBaseGetOthersBaseMoveFailStatus.@return|0 if the move failed and the place is free now, 1 if the move failed and another base fills the place.
+_SecretBaseGetParticularParam.secretBasePointNo|Position number of the special base.
+_SecretBaseGetParticularParam.param|Which value of the special base to read.
+_SecretBaseGetParticularParam.@return|Depends on the kind of value.
+_SecretBaseMapChangeOutSide.secretBasePointNo|Position number of the base.
+_SecretBaseMapChangeOutSide.fadeFlag|Yes if the script does the fade itself.
+_SecretBaseMapChangeInSide.secretBasePointNo|Position number of the base.
+_SecretBasePreOpen.secretBasePointNo|Position number of the base.
+_SecretBaseCreateMyBase.secretBasePointNo|Position number of the place that becomes the base of the player.
+_SecretBaseDeleteOthersBaseBefore.pointNo|Position number of the base to delete.
+_SecretBaseDeleteOthersBase.pointNo|Position number of the base to delete.
+_SecretBaseDeleteOthersBase.force|Yes to also delete the secret friends (to delete an invalid base).
+_SecretBaseGetHimitunoNakamaPointNo.@return|The position number of the base.
+_SecretBaseRegistHimitunoNakama.@return|Yes if the registration worked, no if not.
+_SecretBaseUnRegistHimitunoNakama.himitunoNakamaNo|Number of the secret friend.
+_SecretBaseUnRegistHimitunoNakama.@return|Yes if it worked, no if not.
+_SecretBaseUnRegistHimitunoNakamaAfter.himitunoNakamaNo|Number of the secret friend.
+_SecretBaseGetCurrentFlag.@return|Yes if the flag could be read, no if not.
+_SecretBaseIsGetHimitunoNakamaFlag.himitunoNakamaNo|Number of the secret friend.
+_SecretBaseIsGetHimitunoNakamaFlag.@return|Yes if it can be taken, no if not.
+_SecretBaseGetHimitunoNakamaFlag.himitunoNakamaNo|Number of the secret friend.
+_SecretBaseGetHimitunoNakamaFlag.@return|0 if nothing was taken, otherwise the number that was taken.
+_SecretBaseTryRankUp.himitunoNakamaNo|Number of the secret friend.
+_SecretBaseTryRankUp.@return|Yes if the rank went up, no if not.
+_SecretBaseOthersBaseRandom.pointNo|Position number of the base of another player.
+_SecretBaseOthersBaseRandom.randomType|Kind of random number.
+_SecretBaseOthersBaseRandom.@return|The random number.
+_SecretBaseInterestGoods.objId|The character (object).
+_SecretBaseInterestGoods.goodsIndex|Placement number of the item to look at.
+_SecretBaseGoodsAction.goodIndex|Position of the item.
+_SecretBaseGoodsAction.actionNo|Number of the action.
+_SecretBaseGoodsAnimation.goodIndex|Position of the item.
+_SecretBaseGoodsAnimation.animationNo|Number of the animation.
+_SecretBaseGoodsAnimation.roopFlag|Yes to play it in a loop.
+_SecretBaseGoodsAnimation.reverseFlag|Yes to play it backwards.
+_SecretBaseIsGoodsAnimationEnd.goodIndex|Position of the item.
+_SecretBaseIsGoodsAnimationEnd.@return|Yes if the animation is finished, no if not.
+_SecretBaseIsGoodsExist.layoutIndex|Placement number.
+_SecretBaseIsGoodsExist.@return|Yes if an item is placed there, no if not.
+_SecretBaseGetGoodsLayoutParam.layoutIndex|Placement number.
+_SecretBaseGetGoodsLayoutParam.paramType|Which value of the placement to read.
+_SecretBaseGetGoodsLayoutParam.@return|0 if there is no item at that placement, otherwise depends on the kind of value.
+_SecretBaseGetSaveDataParam.paramType|Which value of the save data to read.
+_SecretBaseGetSaveDataParam.@return|0 if the save data cannot be reached, otherwise depends on the kind of value.
+_SecretBaseSetSaveDataParam.paramType|Which value of the save data to set.
+_SecretBaseSetSaveDataParam.value|The value to set.
+_SecretBaseSetSaveDataParam.@return|0 if the save data cannot be reached, otherwise depends on the kind of value.
+_SecretBaseTsupparikunEvent.paramType|Which value of the save data to use.
+_SecretBaseTsupparikunEvent.@return|0 if the save data cannot be reached, otherwise depends on the kind of value.
+_SecretBaseEventPlayerSitDownOn.dir|Direction in which the player sits.
+_SecretBaseGetGridGoodsNo.gridX|X position on the grid.
+_SecretBaseGetGridGoodsNo.gridZ|Z position on the grid.
+_SecretBaseGetGridGoodsNo.@return|The number of the item, -1 if there is none.
+_FieldNutsGetParam.pointNo|Position number of the berry plot.
+_FieldNutsGetParam.param|Which value of the plot to read.
+_FieldNutsGetParam.@return|Depends on the kind of value.
+_FieldNutsPlant.pointNo|Position number of the berry plot.
+_FieldNutsPlant.itemNo|The Berry to plant (an item).
+_FieldNutsPlantClear.pointNo|Position number of the berry plot.
+_FieldNutsPlantRebirth.pointNo|Position number of the berry plot.
+_FieldNutsCallZyoroEvent.pointNo|Position number of the berry plot.
+_IsReportLock.@return|Yes if the save is locked and cannot be overwritten, no if it can.
+MEIsFinished.@return|Yes while the jingle is still playing.
+BGMStartBattleEvent.snd_id|The music (sound number).
+BGMVolumeChange.ptr|Volume in percent. 100 is the default, 0 is silence.
+TalkMdlZoomIsEnd.@return|Yes when the zoom is finished.
+TalkMdlZoomSet.@return|Yes if the zoom was made.
+_Suspend.frame|Number of frames to wait. 0 or less suspends the script for ever.
+Random.cnt|Upper bound (excluded).
+Random.@return|A number from 0 to cnt - 1.
+PlaySE.id|Number of the sound.
+PlaySE.flag|What to do with the sound. The default plays it once.
+PlaySE.idx|Index used to ask for the state of a sound that plays.
+PlaySE.@return|For "has the loop ended": yes if it ended, no if it still plays. For the other modes: 0.
+FadeRequestOut.type|Kind of fade-out.
+FadeRequestOut.disp|Which screen. The default is both screens.
+FadeRequestOut.sync|Number of frames. The default is 4.
+_FadeRequestIn.disp|Which screen. The default is both screens.
+_FadeRequestIn.sync|Number of frames. The default is 4.
+FadeIsEnd.@return|Yes if the fade has ended, no if not.
+CheckCalledByMonster.@return|Yes if the Pokémon called the player.
+SetLoveCommand.mot|Number of the command. 0 starts nothing.
+SetLoveCommand.@return|The number of the command.
+_SetLoveMotion.mot|Number of the motion to play.
+_SetLoveMotion.@return|The running command.
+CheckLoveCommand.@return|Yes while a command runs, no if not.
+SetLoveCommandStep.step|Number of the step.
+CheckTouch.@return|Yes on the frame of the touch.
+CheckTouching.@return|Yes while the screen is touched.
+CheckRelease.@return|Yes on the frame that the finger leaves the screen.
+GetTouchX.@return|X position of the touch.
+GetTouchY.@return|Y position of the touch.
+CheckTouchingColor.@return|Colour number under the finger, 0 if nothing is touched.
+GetPadOn.@return|The buttons that were pressed on this frame.
+GetPadOff.@return|The buttons that were released on this frame.
+_SetParticle.id|Number of the particle effect.
+_SetParticle.tx|X position on the screen.
+_SetParticle.ty|Y position on the screen.
+_SetParticle.parts|Number of the part of the model where the effect starts. A number out of the range of the parts of the model starts the effect at the finger.
+SetAdjustHeadAngle.ang|Angle in degrees. 0 puts the head straight.
+SetSpringOffsetY.type|Which side (0 or 1) of the spring parts.
+SetSpringOffsetY.ofs|Vertical force to apply (a decimal number).
+SetBodyPositionY.pos|Height of the body (a decimal number).
+SetBodyRotationZ.ang|Angle in degrees around the Z axis (a decimal number).
+SetBodyRotationY.ang|Angle in degrees around the vertical axis (a decimal number).
+SetBodyScale.scalex|Size on the X axis (a decimal number, 1.0 is the normal size).
+SetBodyScale.scaley|Size on the Y axis (a decimal number).
+SetBodyScale.scalez|Size on the Z axis (a decimal number).
+SetCameraUpVector.x|X of the up direction (a decimal number).
+SetCameraUpVector.y|Y of the up direction (a decimal number).
+CheckMenuButton.@return|0 nothing, 1 snack button, 2 end button, 3 game button, 4 a game was chosen, 5 the game was cancelled, 6 the snack bar opened, 7 the snack bar closed, 8 something is running.
+SetMotionFrameSpeed.spd|Speed (a decimal number, 1.0 is normal).
+CheckMotionAvailable.num|Number of the motion.
+CheckMotionAvailable.@return|Yes if the Pokémon can play the motion now.
+SetHateParameter.frame|Number of frames of the refusal.
+SetHateParameter.angle|Limit of the refusal.
+BeginFacialGame.flag|Yes to also start the animation of the bubbles.
+CheckFacialGameOpening.@return|Yes when the opening has ended.
+SetRecognizedIcon.flag|Yes to show the icon, no to hide it.
+SetFacialGameIcon.id|The expression that the player must make.
+SetFacialGameIcon.dir|Tilt of the bubble.
+SetFacialGameIcon.anim_id|Animation of the bubble.
+CheckFacialGameIcon.@return|Yes when the animation of the bubble has ended.
+ChangeFacialGameIcon.dir|Tilt of the bubble.
+ChangeFacialGameIcon.anim_id|Animation of the bubble. The values after "waiting" also remove the message.
+GetMicVolume.@return|The loudest volume that was heard.
+SetPhysics.on_off|Yes to turn the spring physics on, no to turn it off.
+ShowObject.obj_id|Number of the object.
+ShowObject.anim_id|Number of the animation of the object.
+ShowObject.on_off|Yes to show the object, no to hide it.
+SetSmoothFrame.frame|Number of frames of the smoothing.
+SetFace.id|Kind of texture of the expression (mouth, eyes...).
+SetFace.frame|Frame of the texture.
+SetFace.replace_quit|Yes to end the forced expression and put the head back. The default is no.
+GetPastDays.days|Number of days to compare with.
+GetPastDays.@return|Yes if more days than that went by (the count is set back to 0), no if not.
+SetIcon.id|Number of the icon. A negative number does nothing.
+SetIcon.flag|Yes to show the icon, no to hide it. The default is yes.
+SetIcon2.id|Number of the icon. A negative number does nothing.
+SetIcon2.flag|Yes to show the icon, no to hide it.
+GetSickness.@return|Yes if the Pokémon has a status problem or has fainted.
+_CallPlayerName.@return|The sound that was played.
+_ChangePokemonColor.col|How white the model is (a decimal number).
+_GetBodyPositionY.@return|Height of the body.
+_GetCakePara.type|Which value of the snack to read.
+_LookEnd.speed|Speed at which the Pokémon stops looking. The default is 8.
+_PlaySEPich.se|Number of the sound.
+_PlaySEPich.pitch|Pitch from 0 (one octave lower) to 255 (one octave higher). 128 is the normal pitch.
+_SetBallYPos.y|Height of the ball (a decimal number).
+_SetDualMonsterCamera.mode|Mode of the camera.
+_SetDualMonsterCamera.force|Yes to set the mode at once, no to change it only when it makes sense.
+_SetFoodIcon.small_big|Yes for the bigger snack button, no for the normal one.
+_SetSlowMotion.on_off|Yes for half speed, no for normal speed.
+_ShowPokemon.flag|Yes to show the Pokémon, no to hide it.
+AI_CMD.Handle|The AI handler of the battle. The scripts pass the value of their public variable that holds it.
+AI_CMD.cmdID|Number of the command to run.
+AI_CMD.arg1|First argument of the command. For most commands it is the side: 0 the target of the move, 1 the user, 2 the ally of the target, 3 the ally of the user.
+AI_CMD.arg2|Second argument of the command (see the list of the commands).
+AI_CMD.arg3|Third argument of the command (see the list of the commands).
+AI_CMD.arg4|Fourth argument of the command (not used by the commands today).
+AI_CMD.@return|Yes or no for the questions, a number for the commands that read a value (see the list of the commands). 0 for an unknown command.

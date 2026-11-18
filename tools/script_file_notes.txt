@@ -1,0 +1,86 @@
+20010|Friend AI of the Pokémon that follows the player
+20000|Common AI of the characters that move by themselves
+12100|Contest: reception and other events (Master rank, event 11)
+12090|Contest: reception and other events (event 10)
+12080|Contest: reception and other events (event 9)
+12070|Contest: reception and other events (event 8)
+12060|Contest: reception and other events (event 7)
+12050|Contest: reception and other events (event 6)
+12040|Contest: reception and other events (event 5)
+12030|Contest: reception and other events (event 4)
+12020|Contest: reception and other events (event 3)
+12010|Contest: reception and other events (event 2)
+12000|Contest: events
+10900|Secret Base: decoration events
+10880|Secret Base: events of the characters
+10865|Secret Base: common events
+10845|Item use on the map (messages of the Bag)
+10840|O-Powers
+10830|Minstrel event
+10780|Hidden Power
+10660|Pop-up messages of the map devices
+10650|Television
+10640|Pokémon memories
+10580|Events of the player's house
+10540|Berry plants (talking to a tree)
+10520|Contest: reception and other events
+10510|Secret Base: tutorial
+10500|Ladders
+10490|Interviews
+10480|Vending machines
+10470|Petalburg Gym: door connection
+10450|Legendary Pokémon of the secret places (first in the team)
+10440|Shoal Cave: Shell Bell old man
+10430|Boarding the Tidal ship
+10425|Inverse Battle
+10410|Dummy
+10400|Mystery Gift delivery person
+10390|PGL delivery person
+10380|Pokédex rating
+10350|Sky Battle
+10330|Battle Subway
+10325|Item gift of the Pokémon ID lottery
+10315|Rotom form change
+10310|Judge event
+10290|Old man of the ship
+10280|Fossil revival
+10270|Deoxys form change
+10250|Mega Stones (common)
+10200|Elevators (common)
+10160|Various map events
+10110|Poké Mart
+10105|Payment of the tips (common)
+10097|Distribution event: Volcanion
+10094|Distribution event: Hoopa
+10090|Distribution event: Diancie
+10050|Hidden Machine moves
+9880|Shared script of Littleroot Town
+9870|Shared script of Route 118
+9860|Shared script of a special place
+9850|Shared script of a cave (second part)
+9840|Shared script of a cave
+9830|Shared script of a cave (first one)
+9820|Shared script of Lilycove City
+9810|Shared script of Rustboro City
+9800|Shared script of Mauville City (second part)
+9790|Shared script of Mauville City
+9780|Shared script of Slateport City
+9770|Shared script of Petalburg City
+9760|Shared script of Sootopolis City (second part)
+9750|Shared script of Sootopolis City
+9740|Shared script of the battle places (second part)
+9730|Shared script of the battle places
+9720|Shared script of Mossdeep City
+9600|Initialization script
+7999|Hidden items
+7000|Items on the map
+5000|Trainers of the double battles (2 against 2)
+3000|Trainers
+2800|Items that are found (common events)
+2500|Talking to a part of the map (attributes of the background)
+2260|Forgetting, teaching and remembering moves
+2250|Egg hatching
+2225|Name rater
+2200|Day Care
+2100|Pokémon Center
+2000|Common scripts

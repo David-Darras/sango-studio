@@ -1,0 +1,983 @@
+AICommonWeakReserveGetScrId|Gets the script number of an entry of the weak reserve list.
+AICommonWeakReserveGetWkNo|Gets the work number of an entry of the weak reserve list.
+AICommonWeakReserveGetWkVal|Gets the work value of an entry of the weak reserve list.
+AICommonWeakReserveSetData|Stores one entry of the weak reserve list (script, work number and value).
+AICreate|Starts the AI of a character.
+AIDelete|Stops and removes the AI of a character.
+AIGetForceStopFlag|Tells whether the AI of a character is forced to stop.
+AIGetOBJID|Gets the character that the AI moves.
+AIGetOption|Gets an option of the AI.
+AIIsAlive|Tells whether the AI of a character is running.
+AIIsLoaded|Tells whether the script of the AI is loaded.
+AILoad|Loads the script of a character moved by the AI.
+AIMdlAcmdIsEnd|Tells whether the action command of a character moved by the AI is over.
+AIMdlAcmdSet|Sends an action command to a character moved by the AI.
+AIMdlAcmdSetByRoute|Moves a character one step along a route that is searched to a target.
+AISetForceStopFlag|Forces the AI of a character to stop, or lets it run again.
+AIStateGet|Gets the AI state.
+AIStateSet|Sets the AI state.
+AI_CMD|Sends a command to the AI of a character.
+APowerGetFinishWaitID|Gets the O-Power that waits to finish.
+APowerLearn|Learns an O-Power.
+APowerSetFinish|Finishes the O-Power that waits to finish.
+APowerSetStart|Starts an O-Power.
+AcmdListClear|Clears the list of action commands.
+AddBraceletFashionAfter|Ends adding the bracelet to the clothes.
+AddBtlTrainerObj|Adds a battle trainer character.
+AddCommMultiTrainerObjOnGrid|Adds a trainer character of a link multi battle on a grid cell.
+AddStylishPoint|Adds stylish points.
+AddTrainerObjOnGrid|Adds a trainer character on a grid cell.
+AddWinCount|Adds one win in a row.
+ApplyFashion|Puts on the clothes that were chosen.
+ApplyKisekaeShopping|Buys the items that are checked.
+AreaR102AgehantMove|Starts the contact cutscene of the Beautifly of Route 102.
+AreaR102CamomeGlid|Starts the contact cutscene of the Wingull of Route 102.
+Assert_|Stops the game with an error when a condition is false.
+BGMChangeEvent|Changes the music of an event.
+BGMChangeNowMap|Goes back to the music of the current zone.
+BGMEndDemo|Ends the music of a cutscene and goes back to the music of the place.
+BGMEndEvent|Ends the music of an event and goes back to the music of the place.
+BGMIsPlaying|Tells whether the music is playing.
+BGMStartBattleEvent|Plays a temporary event music before a battle.
+BGMStartEvent|Starts the music of an event.
+BGMVolumeChange|Changes the volume of the music.
+BGParamPosChange|Moves a background object.
+BackupMakeData|Backs up the look data.
+BadgeGetCount|Gets the number of badges.
+BadgeGetFlag|Tells whether the player has a badge.
+BadgeResetFlag|Takes a badge away.
+BadgeSetFlag|Gives a badge.
+BallSetAnime|Plays an animation on a ball.
+BallSetAnimeFrame|Moves the animation of a ball forward.
+BallSetVisible|Shows or hides a ball.
+BallsCreate|Makes the Poké Balls of the machine.
+BallsDelete|Removes the Poké Balls of the machine.
+BallsIsLoaded|Tells whether the Poké Balls of the machine are loaded.
+BallsLoad|Loads the Poké Balls of the machine.
+BattleHouse_CallPartySelectApp|Opens the choice of the team.
+BattleHouse_CommWait|Waits for the other player.
+BattleHouse_DecideCommVsTrainer|Chooses the opponents of a link battle.
+BattleHouse_End|Ends the Battle House.
+BattleHouse_GetBgm|Gets the music of the Battle House.
+BattleHouse_IsBattleBoxUsed|Tells whether the player uses a Battle Box.
+BattleHouse_IsComm|Tells whether the link is on.
+BattleHouse_IsParent|Tells whether this console is the host of the link.
+BattleHouse_SendVsTrainer|Sends the opponents of a link battle.
+BattleHouse_SetBgm|Sets the music of the Battle House.
+BattleHouse_SetCommVsTariner|Sets the opponents of a link battle.
+BattleHouse_SetFriendName|Writes the name of the friend in a text.
+BattleHouse_SetRibbon|Gives a ribbon.
+BattleHouse_WaitSetupDressUpModel|Tells whether the dress-up models are ready.
+BattleInstWorkCreate|Makes the work of the battle facility.
+BattleInstWorkDelete|Removes the work of the battle facility.
+BattleInst_GetBattleStartMsgId|Gets the message at the start of the battle.
+BeginFacialGame|Pokémon-Amie: starts the face game.
+BootBallPowerBlue|Starts the effect of the Blue Orb.
+BootBallPowerRed|Starts the effect of the Red Orb.
+BootConcentratedLine|Starts the speed lines.
+BootMegaBangleEffect|Starts the effect of the Mega Bangle.
+BootRekkuzaDescentEffect|Starts the effect of the descent of Rayquaza.
+BootYutakaEffect|Starts the effect of the wide aura.
+BoxAddPoke|Adds a Pokémon to the Boxes.
+BoxGetPokeCount|Gets the number of Pokémon in the Boxes.
+BoxIsFull|Tells whether the Boxes are full.
+BoxMonsNoExists|Tells whether a species is in the Boxes.
+BoxPokeGetParam|Gets a parameter of a Pokémon of the Boxes.
+BreederJudgeGetResult|Gets the result of the judge of a Pokémon.
+BuildMdlAllTimeAnimeRestart|Starts the permanent animations of a map object again.
+BuildMdlAllTimeAnimeStop|Stops all the permanent animations of a map object.
+BuildMdlEventAnimeInvStart|Starts the event animation of a map object (backwards).
+BuildMdlEventAnimeIsEnd|Tells whether the event animation of a map object is over.
+BuildMdlEventAnimePause|Pauses the event animation of a map object.
+BuildMdlEventAnimeReset|Puts the event animation of a map object back as it was.
+BuildMdlEventAnimeRestart|Starts the event animation of a map object again.
+BuildMdlEventAnimeSetEnd|Puts a map object at the end of its animation.
+BuildMdlEventAnimeStart|Starts the event animation of a map object.
+BuildMdlEventAnimeStop|Stops the event animation of a map object.
+BuildMdlGetHandleByGPos|Gets the handle of a map object from its position.
+BuildMdlGetHandleByUniqID|Gets the handle of a map object from its unique number.
+BuildMdlSetVisible|Shows or hides a map object.
+CalcVecToDir|Turns a vector on the grid into a direction.
+Call3DCamera|Opens the 3D camera.
+CallAnanukenohimoEffect|Plays the effect of the Escape Rope.
+CallAnawohoruEffect|Plays the effect of Dig.
+CallApplicationDemo|Starts a demo application.
+CallBPShopBuy|Opens a shop that sells for BP.
+CallBPWazaOboeShopBuy|Opens the shop of the BP Move Tutor.
+CallBag|Opens the Bag.
+CallBigFourEffect|Controls the device of the room of the Elite Four.
+CallBoxSelect|Opens the choice of a Pokémon in the Boxes.
+CallCaptureDemo|Starts the catching cutscene.
+CallCommendation|Opens the certificate application.
+CallContest|Starts a Contest.
+CallContestCommEntryNumber|Plays the event of the entry number of a link Contest.
+CallContestConnect|Opens the link screen of the Contest.
+CallContestPhotoView|Opens the photo viewer of the Contests.
+CallDendouDemo|Starts the Hall of Fame cutscene.
+CallDivingEffect|Plays the effect of Dive.
+CallEggDemoEvent|Plays the cutscene of an Egg that hatches.
+CallFieldCaptureDemo|Plays a cutscene where a Pokémon is caught.
+CallFieldCaptureDemoMsg|Gets the message of a catching cutscene.
+CallFieldCaptureDemoSimplePoke|Plays a catching cutscene and registers the Pokémon.
+CallFieldDispPokePortrait|Shows a Pokémon of a Contest portrait on the map (with its name).
+CallFieldNotCaptureDemo|Plays a cutscene where no Pokémon is caught.
+CallFieldTradeBoxSelect|Opens the Boxes for a trade in the game.
+CallFieldTradeDemo|Plays the cutscene of a trade in the game.
+CallFlashEffect|Plays the effect of Flash.
+CallFreeWordInput|Opens the entry of free words.
+CallFriendlyShopBuy|Opens a Poké Mart to buy.
+CallFriendlyShopSell|Opens a Poké Mart to sell.
+CallGameClear|Starts the end of the game.
+CallGoodsShopBuy|Opens the shop of decorations.
+CallHallOfFameMachineEffect|Controls the effect of the Hall of Fame machine.
+CallHideItemEncount|Starts the encounter of a hidden item.
+CallHidenDemo|Plays the cutscene of a Hidden Machine move.
+CallIaigiriEffect|Plays the effect of Cut.
+CallInterviewInput|Opens the entry of an interview.
+CallIwakudakiEffect|Plays the effect of Rock Smash.
+CallKabekudakiEffect|Plays the effect of Rock Smash on a wall.
+CallKisekaeCheck|Opens the fashion check.
+CallKisekaeDisplay|Shows the clothes.
+CallKisekaeFitting|Opens the fitting room.
+CallKisekaeFittingShop|Opens the fitting room of a shop.
+CallKisekaeReset|Puts the clothes back as they were.
+CallMPShopBuy|Opens the shop that sells for MP.
+CallMapConnect|Connects the maps (the script stops).
+CallNaminoriEffect|Plays the effect of Surf.
+CallOozorawotobu|Opens the screen of Soar.
+CallPC|Opens the PC.
+CallPlayerC02PokeRideOff|Takes the player off the Pokémon of the bus.
+CallPlayerC02PokeRideOn|Puts the player on the Pokémon of the bus.
+CallPlayerSitDownOff|Makes the player stand up from a chair.
+CallPlayerSitDownOn|Makes the player sit on a chair.
+CallPokePartyNameInput|Opens the nickname entry of a Pokémon.
+CallPokeSelect|Opens the choice of a Pokémon.
+CallSakasaBattle|Checks the result of an Inverse Battle.
+CallSalonDisplay|Shows the hair salon screen.
+CallSorawotobuDemo|Plays the cutscene of Fly.
+CallTakinoboriEffect|Plays the effect of Waterfall.
+CallTeleportEffect|Plays the effect of Teleport.
+CallTrainerLose|Handles the defeat of the player against a trainer.
+CallWazaOboe|Opens the screen to learn a move.
+CallWazaOmoidashi|Opens the screen to remember a move.
+CallWazaWasure|Opens the screen to forget a move.
+CallWildBattle|Starts a battle against a wild Pokémon.
+CallWildBattleRockCrash|Starts a wild battle after Rock Smash.
+ChangeConvItem|Exchanges the item of the shortcut button (Mach and Acro Bike).
+ChangeFace|Changes the face of a character.
+ChangeFacialGameIcon|Pokémon-Amie: changes an icon of the face game.
+ChangeFashionBefore|Starts to change the clothes.
+ChangeToDefaultFashionAfter|Ends the change to the clothes of the start.
+CheckCalledByMonster|Pokémon-Amie: tells whether the Pokémon called.
+CheckEventMapReplace|Checks whether a part of the map was replaced.
+CheckFacialGameIcon|Pokémon-Amie: checks an icon of the face game.
+CheckFacialGameOpening|Pokémon-Amie: tells whether the face game opened.
+CheckFieldSkillUse|Checks whether a move can be used on the map.
+CheckLoveCommand|Pokémon-Amie: checks a command of affection.
+CheckMenuButton|Pokémon-Amie: tells whether a menu button is pressed.
+CheckMotionAvailable|Pokémon-Amie: tells whether a motion exists.
+CheckRelease|Pokémon-Amie: tells whether the stylus was lifted.
+CheckTouch|Pokémon-Amie: tells whether the screen is touched.
+CheckTouching|Pokémon-Amie: tells whether the screen is being touched.
+CheckTouchingColor|Pokémon-Amie: gets the colour that is touched.
+CheckWLANSwitch|Checks the wireless switch.
+CheckWinAllSuspend|Tells whether all the windows are suspended.
+CheckWinSuspend|Tells whether a window is suspended.
+ClearCheckedItem|Unchecks all the items.
+ClearMyStatusMakeData|Clears the look data of the player.
+ClearWinCount|Resets the number of wins in a row.
+CommandNOP|Does nothing.
+ConnectFriend|Tells whether the chosen friend is a dress-up character.
+ContactEncountEnd|Ends the encounter by contact.
+ContactEncountIsActive|Tells whether an encounter by contact is on.
+ContactEncountStart|Starts a Pokémon encounter by contact.
+ContactMovie|Plays the movie of the contact.
+ContestGetFanPoint|Gets the fan points of the Contests.
+ContestGetWinMasterCount|Gets the number of wins in the Master Rank.
+ContestSetFanPoint|Sets the fan points of the Contests.
+ContestWordSetAppeal|Puts the name of the last live appeal in a text buffer.
+ControlMotionBlur|Changes the mix of the motion blur.
+ControlMotionBlurColor|Starts a colour filter on the motion blur.
+CreateSenarioTVProgram|Makes a TV program of the story (Hoenn News).
+DelTrainerObj|Removes a trainer character.
+DestroyCameraAnimation|Removes the camera animation.
+DestroyLoveCommand|Pokémon-Amie: removes a command of affection.
+DispTenjiMsgWin|Shows a Braille message window.
+DoorParamPosChange|Moves a door.
+EVCameraBegin|Camera command: starts to play.
+EVCameraBind|Camera command: makes the camera follow the player again.
+EVCameraEnd|Camera command: ends the movement.
+EVCameraIsEndFrame|Camera command: waits for the end of the movement.
+EVCameraSetDstParam|Camera command: sets the end of the movement.
+EVCameraSetFrameParam|Camera command: sets the frames of the blend and of the animation.
+EVCameraSetGameCameraParam|Camera command: takes the camera of the game as the end.
+EVCameraSetInitParam|Camera command: resets the parameters.
+EVCameraSetSlideParam|Camera command: the end becomes the start, and a new end is set.
+EVCameraSetSpecialParam|Camera command: makes the end with a special rule.
+EVCameraSetSrcParam|Camera command: sets the start of the movement.
+EVCameraULCDBegin|Camera command: starts the control of the 3D effect.
+EVCameraULCDEnd|Camera command: ends the control of the 3D effect.
+EndFacialGame|Pokémon-Amie: ends the face game.
+EndMotionBlur|Ends the motion blur system.
+EventMapReplace|Replaces a part of the map.
+EventModelStart|Starts an event model.
+FadeIsEnd|Tells whether the fade is over.
+FadeRequestOut|Starts a fade out.
+FieldMenuAddPage|Adds a page to the lower screen.
+FieldMenuChangePagePlayNavi|Forces the lower screen to show the PlayNav.
+FieldMenuPopPage|Puts the lower screen back as it was.
+FieldMenuPushPage|Forces the lower screen to show a blank page.
+FieldTradeCheckSelectMons|Checks the Pokémon chosen for a trade in the game.
+FieldTradeGetData|Gets the data of a trade in the game.
+FlagGet|Reads an event flag.
+FlagReset|Clears an event flag.
+FlagSet|Sets an event flag.
+FlagSetReq|Requests that an event flag is set.
+FlyFlagSet|Unlocks the Fly destination of a zone.
+FriendShipDemoStart|Starts a contact cutscene.
+GetBirthdayDay|Gets the day of the birthday that the console has.
+GetBirthdayMonth|Gets the month of the birthday that the console has.
+GetCharTypeDressup|Gets the type of a dress-up character.
+GetConnectExitType|Gets the kind of exit of a map connection.
+GetContestBestRanking|Gets the best ranking in a Contest.
+GetContestFanObjCode|Gets the character code of a fan that waits at a Contest.
+GetContestNewestData|Gets the data of the last Contest.
+GetContestPortraitPokeData|Gets a datum of a Contest portrait.
+GetCoolPoint|Gets the cool points (they grow with roller skate tricks).
+GetCourse|Gets the choice of the hairstyle course.
+GetCurrentBackHair|Gets the back hair of the player.
+GetCurrentEyeColor|Gets the eye colour of the player.
+GetCurrentFrontHair|Gets the front hair of the player.
+GetCurrentHairColor|Gets the hair colour of the player.
+GetDay|Gets the day of the month.
+GetDefaultEyeColor|Gets the eye colour that the player had at the start.
+GetDirAddValueGridX|Gets the X of the cell next to a cell in a direction.
+GetDirAddValueGridZ|Gets the Z of the cell next to a cell in a direction.
+GetFashionReturnState|Gets the state after the clothes are restored.
+GetHour|Gets the hour.
+GetKeyCont|Tells whether a key is held.
+GetKisekaeCheckedNum|Gets the number of items that are checked.
+GetKisekaeCheckedPrice|Gets the price of the items that are checked.
+GetMicVolume|Pokémon-Amie: gets the volume of the microphone.
+GetMinute|Gets the minute.
+GetMirrorModelDrawFlag|Gets the flag that draws the mirror model.
+GetMoneyWinPosX|Gets the X position of the money window.
+GetMoneyWinPosY|Gets the Y position of the money window.
+GetMonth|Gets the month.
+GetMyWinCount|Gets the number of wins in a row, as saved.
+GetNutsFromFan|Gets the Berry that a fan gives.
+GetPadOff|Pokémon-Amie: tells which buttons were released.
+GetPadOn|Pokémon-Amie: tells which buttons are pressed.
+GetPastDays|Pokémon-Amie: gets the days since the last visit.
+GetPlayerCap|Gets the cap of the player.
+GetPlayerFollowerAcmd|Gets the action command for a follower from the action command of the player.
+GetPlayerFollowerGridX|Gets the X position of the grid cell behind the player.
+GetPlayerFollowerGridZ|Gets the Z position of the grid cell behind the player.
+GetPrice|Gets the price of the hairstyle.
+GetPssIconType|Gets the type of the PSS icon.
+GetRank|Gets the rank.
+GetReturnDir|Gets the opposite direction.
+GetRockCrashItemTableNo|Gets the number of the table of items of Rock Smash.
+GetRomFriendDataCode|Gets the code of the friend character of the game.
+GetSalonScene|Gets the scene of the hair salon.
+GetSavedMakeData|Gets a saved look datum.
+GetSecond|Gets the second.
+GetSickness|Pokémon-Amie: gets the state of illness of the Pokémon.
+GetStickHold|Gets the direction of the stick that is held.
+GetStylishLevel|Gets the stylish level.
+GetStylishPoint|Gets the stylish points.
+GetTimeZone|Gets the time of the day (morning, day, evening, night).
+GetTimeZoneBySkyBox|Gets the time of the day of the sky.
+GetTouchX|Pokémon-Amie: gets the X position that is touched.
+GetTouchY|Pokémon-Amie: gets the Y position that is touched.
+GetTrainerID|Gets the trainer number.
+GetTrainerObjCode|Gets the character code of a trainer.
+GetTurnDirByDir|Gets the direction of a turn.
+GetWinCount|Gets the number of wins in a row.
+GimmickAnimeReq|Requests the animation of a device.
+GimmickWorkGetBit|Gets a bit of the work of a map device.
+GimmickWorkResetBit|Clears a bit of the work of a map device.
+GimmickWorkSetBit|Sets a bit of the work of a map device.
+GlobalCall|Starts another script and waits for it.
+GlobalGetChildParam|Gets a parameter that the called script has.
+GlobalGetParentParam|Gets a parameter that the calling script has.
+GlobalSetChildParam|Sets a parameter that the called script has.
+GlobalSetParentParam|Sets a parameter that the calling script has.
+GymElecGimmickBlue|Handles the blue switch of the Electric Gym.
+GymElecGimmickRed|Handles the red switch of the Electric Gym.
+GymElecGimmickSetup|Prepares the devices of the Electric Gym.
+GymEsperStartMoveEvent|Starts the forced move on a rail of the Psychic Gym.
+GymEsperSwitchRailEvent|Handles a rail switch of the Psychic Gym that is pressed.
+GymEsperWarpEvent|Handles a warp of the Psychic Gym.
+GymFightingMoveEvent|Plays the forced move event of the Fighting Gym.
+GymFightingSwitchEvent|Plays the event of a switch of the Fighting Gym that is stepped on.
+GymFireGimmickDown|Lowers a geyser of the Fire Gym.
+GymFireGimmickUp|Raises a geyser of the Fire Gym.
+GymGetVictoryInfo|Gets the information of a victory against a Gym Leader.
+GymSetVictoryInfo|Sets the information of a victory against a Gym Leader.
+HideItemInit|Starts the hidden items.
+HidePlayerCapAfter|Ends hiding the cap of the player.
+HidePlayerCapBefore|Starts to hide the cap of the player.
+IDPresentGetID|Gets the lottery number of the day.
+IDPresentGetParam|Gets a parameter of the ID lottery.
+IECreate|Starts the interactive engine.
+IEDelete|Deletes the interactive engine.
+IEGetOBJID|Gets the character that the engine controls.
+IEIsAIEnd|Tells whether the AI is over.
+IEMdlAcmdIsEnd|Tells whether the action command of a model is over.
+IEMdlAcmdSet|Sends an action command to a model.
+IEMdlAcmdSetByRoute|Moves a model one step along a route that is searched to a target.
+IEReceiveState|Reads the state that the engine decides on.
+IEReqChangeScript|Requests that the script of an engine changes.
+IESendMessage|Sends a message from the engine to the system.
+IETerminate|Stops an engine at once.
+InitMotionBlur|Starts the motion blur system.
+InterviewCreate|Starts an interview.
+InterviewDelete|Removes the interview.
+InterviewGetTrainerID|Gets the trainer of an interview.
+InterviewLoad|Loads the interview.
+InterviewSave|Saves the interview.
+IsAlreadyOpenNewHairStyle|Tells whether the new hairstyle is already open.
+IsBagMannequin|Tells whether a Bag mannequin wears an item.
+IsBallPowerFinishedBlue|Tells whether the effect of the Blue Orb is over.
+IsBallPowerFinishedRed|Tells whether the effect of the Red Orb is over.
+IsBootMegaBangleEffectFinished|Tells whether the effect of the Mega Bangle is over.
+IsBootRekkuzaDescentFinished|Tells whether the descent of Rayquaza is over.
+IsBoss|Tells whether the opponent is the boss of the facility.
+IsCanFieldTrade|Tells whether a trade in the game can be done.
+IsContestPhoto|Tells whether there is a photo taken in a Contest.
+IsContinueRecover|Tells whether the script is called when a save is restored.
+IsFinishChangingFashion|Tells whether the change of clothes is over.
+IsFirstSalonVisit|Tells whether this is the first visit to the hair salon.
+IsHumanMannequin|Tells whether a person mannequin wears an item.
+IsKeyTrigger|Tells whether a key was just pressed.
+IsKisekaeChecked|Tells whether an item is checked.
+IsKisekaePurchasedInApp|Tells whether the clothes were bought in the application.
+IsMapFadeEnable|Tells whether the map fade is on.
+IsMugennotikettoEnable|Tells whether the event of the Eon Ticket is on.
+IsPenaltyTime|Tells whether the penalty time is on.
+IsPlayingCameraAnimation|Tells whether a camera animation plays.
+IsReadyCameraAnimation|Tells whether the camera animation is ready.
+IsReserveScriptSetting|Tells whether a script is already reserved.
+IsSameTokikakePoke|Tells whether a Pokémon of the team is the one that is already saved for the Time Certificate.
+IsSavedMakeDataForPromotion|Tells whether the look data for the promotion is saved.
+IsSelectedFriendDressup|Tells whether the chosen friend is a dress-up character.
+IsSelectedFriendMy64Bit|Tells whether the chosen friend is the character of the player.
+IsTokikakePoke|Tells whether the first Pokémon fits the condition of the Time Certificate.
+IsWearingProduct|Tells whether the player tries an item on.
+IsWin|Tells whether the player won the battle.
+IsYutakaEffectFinished|Tells whether the effect of the wide aura is over.
+ItemAdd|Adds items to the Bag.
+ItemAddCheck|Tells whether items can be added to the Bag.
+ItemGetNum|Gets the number of an item in the Bag.
+ItemGetNutsID|Gets the item of a Berry.
+ItemIsMegaStone|Tells whether an item is a Mega Stone.
+ItemIsWazaMachine|Tells whether an item is a TM.
+ItemSub|Takes items from the Bag.
+KawaigariNotifyChange|Tells the screen of Pokémon-Amie that the friendship changed.
+KisekaeItemSet|Sets an item of clothes.
+LastKeyWait|Waits for the last key of a message.
+LayoutFadeIsEnd|Waits for the end of the fade of the screen layout.
+LayoutFadeRequestIn|Starts the fade in of the screen layout.
+LayoutFadeRequestOut|Starts the fade out of the screen layout.
+ListMenuAdd|Adds a choice to the window with a list.
+ListMenuInit_Seq|Starts a window with a list of choices.
+ListMenuStart_Seq|Waits for the choice in the window with a list.
+LoadParameter|Pokémon-Amie: loads a parameter.
+MEIsFinished|Tells whether a jingle is still playing.
+MEPlay|Plays a jingle.
+MEReturnBGM|Goes back to the music after a jingle.
+MakeNetHandle|Makes the network link.
+MapChangeFake|Moves the player on the same map as if it were another map.
+MapperBlockCalcPosClear|Clears the reference position of the map blocks.
+MapperBlockCalcPosSet|Sets the reference position of the map blocks.
+MapperBlockIsLoading|Tells whether a map block is loading.
+MdlAcmdEndRequest|Asks a character to end its action command.
+MdlAcmdEndWait|Waits for the end of the action command of a character.
+MdlAcmdInit|Starts to register action commands for a character.
+MdlAcmdIsEnd|Tells whether the action commands of a character are over.
+MdlAcmdMakeMoveEx|Makes the action commands that move a character to a place.
+MdlAcmdMakeRoute|Makes the action commands of a route.
+MdlAcmdSet|Adds an action command (a step, a turn...).
+MdlAcmdSetEnd|Ends the list of action commands.
+MdlAcmdSetToOtherMdl|Ends the list and gives it to another character.
+MdlAcmdUpdate|Runs the action commands of a character.
+MdlAdd|Makes a character.
+MdlCanUseTurnAcmd|Tells whether a character can use action commands with a turn.
+MdlChangeMoveCode|Changes the movement code of a character.
+MdlCntAcquire|Gives an event character to the controller of the characters.
+MdlCntRelease|Takes an event character away from the controller of the characters.
+MdlDel|Removes a character.
+MdlDelByFlag|Removes all the characters that have a flag.
+MdlEventTypeIsAI|Tells whether a character is moved by the AI.
+MdlGetDirDisp|Gets the direction that a character faces.
+MdlGetDirMove|Gets the direction in which a character moves.
+MdlGetEventType|Gets the event type of a character.
+MdlGetGPosDirX|Gets the X position of the cell next to a character in a direction.
+MdlGetGPosDirZ|Gets the Z position of the cell next to a character in a direction.
+MdlGetGPosX|Gets the X position of a character on the grid.
+MdlGetGPosZ|Gets the Z position of a character on the grid.
+MdlGetMoveCode|Gets the movement code of a character.
+MdlGetObjCode|Gets the model code of a character.
+MdlGetObjID|Gets the character that is on a cell of the grid.
+MdlGetParam0|Gets the first parameter of a character.
+MdlGetParam1|Gets the second parameter of a character.
+MdlGetParam2|Gets the third parameter of a character.
+MdlGetPosX|Gets the X position of a character.
+MdlGetPosY|Gets the Y position of a character.
+MdlGetPosZ|Gets the Z position of a character.
+MdlGetRailPosFront|Gets the front value of the position of a character on a rail.
+MdlGetRailPosKey|Gets the key of the position of a character on a rail.
+MdlGetRailPosLineHashID|Gets the number of the rail of a character.
+MdlGetRailPosSide|Gets the side value of the position of a character on a rail.
+MdlInterestViewClear|Clears the point that a character looks at.
+MdlInterestViewIsEnable|Tells whether a character looks at a point.
+MdlInterestViewSet|Sets the point that a character looks at.
+MdlInterestViewSetMode|Sets how a character looks at a point.
+MdlIsExists|Tells whether a character exists.
+MdlIsHalfSitSkelPreset|Tells whether the talk is done half sitting.
+MdlIsMoveSpeedZero|Tells whether a character does not move.
+MdlIsRail|Tells whether a character is on a rail.
+MdlOverlapShift|Moves a character away when it overlaps another.
+MdlParamPosChange|Moves a character.
+MdlParamPosChangeRail|Moves a character (on a rail).
+MdlPauseAnim|Pauses the animation of a character.
+MdlPauseAnimNo|Locks the animation of a character (no other animation plays).
+MdlSearchByObjCode|Looks for a character by its model code.
+MdlSetCullingOff|Turns off the culling of a character.
+MdlSetDirDisp|Sets the direction that a character faces.
+MdlSetGPos|Sets the position of a character on the grid.
+MdlSetMoveSpeedZero|Sets the speed of a character to zero.
+MdlSetParam0|Sets the first parameter of a character.
+MdlSetParam1|Sets the second parameter of a character.
+MdlSetParam2|Sets the third parameter of a character.
+MdlSetPauseAutoWaitAnime|Turns on or off the waiting animation that is forced during a pause.
+MdlSetPos|Sets the position of a character.
+MdlSetPosToOBJNear|Moves a character next to another one.
+MdlSetRailPos|Sets the position of a character on a rail.
+MdlSetShadow|Shows or hides the shadow of a character.
+MdlSetTalkOffFlag|Sets the flag that keeps a character from being talked to.
+MdlSetVisible|Shows or hides a character.
+MdlSetVisibleMesh|Shows or hides a part of the model of a character.
+MdlSetWaitAnimeReq|Asks a character to play its waiting animation.
+MdlSpMotionMoveUpdate|Runs the special moving motion of a character.
+MdlSpMotionUpdate|Runs the special motion of a character.
+MegaEvolvedFlagGet|Gets the flag that says whether a Mega Evolution happened.
+MegaRekkuuzaFlagGet|Gets the flag of Mega Rayquaza.
+MegaRekkuuzaFlagSet|Sets the flag of Mega Rayquaza.
+MegaRingFlagGet|Gets a flag of the Mega Ring.
+MegaRingFlagSet|Sets a flag of the Mega Ring.
+MezameruPowerGetType|Gets the type of Hidden Power of a Pokémon.
+MotionSEPlay|Plays a sound effect that goes with a motion.
+MotionSEWait|Waits for the sound effect of a motion.
+MsgIsLoaded|Tells whether the message is loaded.
+MsgLoad|Loads a message file.
+MsgRelease|Frees the message.
+MsgSwap|Exchanges the message.
+MsgWinAllClose|Closes all the message windows.
+MsgWinClose|Closes the message window.
+MsgWinCloseNo|Closes a message window (by number).
+NeedRestoreFashionAfterReturn|Tells whether the clothes must be restored after the return.
+NiceWordComp|Compares the nice words.
+OffMotionBlur|Turns the motion blur off.
+OnMotionBlur|Turns the motion blur on.
+OozorawotobuIsUsed|Tells whether Soar was ever used.
+OpenNewHairStyle|Opens the new hairstyle.
+ParentFlagGet|Reads a flag of the parent.
+ParentFlagSetReq|Requests a flag of the parent.
+ParentSeqGet|Reads a step of the sequence of the parent.
+ParentSeqSetReq|Requests a step of the sequence of the parent.
+PlaceNameDisplay|Forces the name of the place to show.
+PlaceNameSetNotCloseFlag|Keeps the name of the place on the screen.
+PlayCameraAnimation|Plays the camera animation.
+PlaySE|Plays a sound effect.
+PlayerAddMoney|Adds money to the player.
+PlayerAttachDebonScope|Puts the Devon Scope on the player.
+PlayerCheckKisekaeImage|Checks the look of the player.
+PlayerCheckPairlook|Checks whether the player and the partner wear the same clothes.
+PlayerDetachDebonScope|Takes the Devon Scope off the player.
+PlayerGetBP|Gets the BP of the player.
+PlayerGetFieldMenu|Gets the state of the menu of the map.
+PlayerGetForm|Gets the form of the player.
+PlayerGetFrontGridPosX|Gets the X of the cell in front of the player.
+PlayerGetFrontGridPosY|Gets the height of the cell in front of the player.
+PlayerGetFrontGridPosZ|Gets the Z of the cell in front of the player.
+PlayerGetID|Gets the trainer ID of the player.
+PlayerGetMoney|Gets the money of the player.
+PlayerGetReturnDir|Gets the position of the player one step before.
+PlayerGetSex|Gets the gender of the player.
+PlayerGetZoneID|Gets the zone where the player is.
+PlayerIsKanjiMode|Tells whether the kanji mode is on.
+PlayerSetBP|Sets the BP of the player.
+PlayerSetFieldMenu|Sets the menu of the map.
+PlayerSetFormToNormalForce|Puts the player back in the normal form.
+PlayerSetKanjiMode|Sets the kanji mode.
+PlayerSetMoney|Sets the money of the player.
+PlayerSubMoney|Takes money from the player.
+PlayerTurnToObj|Turns the player toward a character.
+PocketGetID|Gets the pocket of an item.
+PocketGetTotalCount|Gets the number of items in a pocket.
+PokeAddTableGetMonsNo|Gets a species of the table of added Pokémon.
+PokeDiarySet|Writes an entry of the Pokémon Diary.
+PokeIconsDelete|Removes the Pokémon icons.
+PokeIconsIsLoaded|Tells whether the Pokémon icons are loaded.
+PokeIconsLoad|Starts to load the Pokémon icons.
+PokeIconsPreDelete|Puts the original textures back on the icons.
+PokeIconsTrans|Transfers the Pokémon icons.
+PokeMemoryMessageIsExistOther|Checks whether a Pokémon has a memory with someone else than its trainer.
+PokeMemoryMessageSetup|Prepares the memory message of a Pokémon.
+PokeMemorySet|Sets the memory of a Pokémon.
+PokePartyAdd|Adds a Pokémon to the team.
+PokePartyAddParam|Adds to a parameter of a Pokémon of the team.
+PokePartyChangeFormNo|Changes the form of a Pokémon of the team.
+PokePartyChangePoodleFormNo|Changes the form of a Furfrou.
+PokePartyChangeRotomFormNo|Changes the form of a Rotom of the team.
+PokePartyCheckDistribution|Checks whether the team has a Pokémon that was given out.
+PokePartyCheckSkyBattle|Checks whether a Pokémon of the team can fight in a Sky Battle.
+PokePartyCheckWazaRemind|Checks whether a Pokémon of the team can remember a move.
+PokePartyCrimaxCommand|Gets the species of the legendary Pokémon.
+PokePartyGetCount|Gets the number of Pokémon in the team.
+PokePartyGetParam|Gets a parameter of a Pokémon of the team.
+PokePartyGetPoodleParam|Gets a parameter of a Furfrou.
+PokePartyGetWazaCount|Gets the number of moves of a Pokémon of the team.
+PokePartyGetWazaID|Gets a move of a Pokémon of the team.
+PokePartyHaveWaza|Tells whether a Pokémon of the team knows a move.
+PokePartyIsOwner|Tells whether the player is the original trainer of a Pokémon of the team.
+PokePartyLevelUp|Raises the level of a Pokémon of the team.
+PokePartyRecover|Fully heals a Pokémon of the team.
+PokePartyRecoverAll|Fully heals all the Pokémon of the team.
+PokePartySetDefaultName|Gives a Pokémon of the team its name of the species.
+PokePartySetParam|Sets a parameter of a Pokémon of the team.
+PokePartySetWaza|Sets a move of a Pokémon of the team (adds, replaces or forgets).
+PokePartyToBox|Sends a Pokémon of the team to the Boxes.
+PokeTemotiGetBall|Gets the Poké Ball of a Pokémon of the team.
+PokeTemotiIsEgg|Tells whether a Pokémon of the team is an Egg.
+PokerusCheckTemoti|Checks whether a Pokémon of the team has Pokérus.
+PopupMsgParamSetCore|Sets the parameters of a pop-up message.
+PopupMsgStartEvent|Starts the event of a pop-up message.
+PorocAdd|Adds Poffins.
+PosParamPosChange|Moves a trigger area.
+PrepareCameraAnimation|Prepares a camera animation.
+Random|Gives a random number below a limit.
+RecordAdd|Adds to a record.
+RecordGet|Gets a record.
+RecordSet|Sets a record.
+RecreatePlayerAfter|Ends making the player again.
+RecreatePlayerBefore|Starts to make the player again.
+RegionGet|Gets the region of the console.
+ReleaseWinWork|Frees the work of the windows.
+ReserveScript|Reserves a script that runs next.
+ResetContestData|Resets the fans that wait and the like.
+ResetDecline|Pokémon-Amie: resets the decline of the mood.
+ResetFace|Pokémon-Amie: puts the face of the Pokémon back.
+ResetMirror|Turns the mirror off.
+RestoreFashionAfter|Ends putting the old clothes back.
+RestoreFashionBefore|Starts to put the old clothes back.
+RestoreMakeData|Restores the look data.
+RomGetLanguageID|Gets the language of the game.
+RomGetVersion|Gets the version of the game (Ruby or Sapphire).
+SEIsPlaying|Tells whether a sound effect is playing.
+SEPlay|Plays a sound effect.
+SEStop|Stops a sound effect.
+SaveBattleRecord|Saves the record of the battles.
+SaveCourse|Saves the choice of the hairstyle course.
+SaveCurrentFashion|Remembers the clothes that are worn.
+SaveMakeDataForPromotionFemale|Saves the look data of a female character for the promotion.
+SaveMakeDataForPromotionMale|Saves the look data of a male character for the promotion.
+SecretBaseExistDeliveryBase|Tells whether a Secret Base from a distribution exists.
+SecretBaseGoodsAdd|Adds to the number of a decoration.
+SecretBaseGoodsAddCheck|Checks whether the number of a decoration can grow.
+SecretBaseGoodsGetNum|Gets the number of a decoration.
+SecretBaseGoodsKurukuruPanel|Turns a spinning panel of the Secret Base.
+SelectPartner|Lets the player choose a partner.
+SetAdjustHeadAngle|Pokémon-Amie: sets the angle of the head.
+SetBodyPositionY|Pokémon-Amie: sets the height of the body.
+SetBodyRotationY|Pokémon-Amie: turns the body around the vertical axis.
+SetBodyRotationZ|Pokémon-Amie: tilts the body.
+SetBodyScale|Pokémon-Amie: sets the size of the body.
+SetCakeMenuButtonPassive|Pokémon-Amie: makes a button of the food menu inactive.
+SetCakeMenuButtonRecover|Pokémon-Amie: makes a button of the food menu active again.
+SetCameraAnimationBeginFrame|Sets the first frame of the camera animation.
+SetCameraAnimationEndFrame|Sets the last frame of the camera animation.
+SetCameraAnimationRotation|Sets the turn of the camera animation.
+SetCameraAnimationTranslation|Sets the movement of the camera animation.
+SetCameraUpVector|Pokémon-Amie: sets the up direction of the camera.
+SetCurrentEyeColor|Sets the eye colour of the player.
+SetDefaultEyeColor|Sets the eye colour that the player had at the start.
+SetEndConcentratedLine|Ends the speed lines.
+SetEndYutakaEffect|Ends the effect of the wide aura.
+SetEscapeLocation|Records the place where an Escape Rope leads.
+SetFace|Pokémon-Amie: sets the face of the Pokémon.
+SetFacialGameIcon|Pokémon-Amie: sets an icon of the face game.
+SetHairAndShowPlayerCapAfter|Ends setting the hair and showing the cap.
+SetHairAndShowPlayerCapBefore|Starts to set the hair and show the cap.
+SetHateParameter|Pokémon-Amie: sets the dislike value.
+SetIcon|Pokémon-Amie: shows an icon.
+SetIcon2|Pokémon-Amie: shows a second icon.
+SetKeyWaitMark|Shows the mark that waits for a key (▼).
+SetLoveCommand|Pokémon-Amie: starts a command of affection.
+SetLoveCommandStep|Pokémon-Amie: sets the step of a command of affection.
+SetMiniGame|Pokémon-Amie: sets the mini game.
+SetMirror|Turns a mirror on.
+SetMirrorModelDrawFlag|Sets the flag that draws the mirror model.
+SetMirrorNPC|Turns a mirror on for a character.
+SetMirrorParam|Sets a mirror parameter.
+SetMirrorParamSide|Sets a mirror parameter (side).
+SetMirrorParamWater|Sets a mirror parameter (water).
+SetMoneyWinPos|Sets the position of the money window.
+SetMotionFrameSpeed|Pokémon-Amie: sets the speed of a motion.
+SetPartyToEventScenePokeLog|Sets the team in the record of the credits.
+SetPhysics|Pokémon-Amie: turns the physics of the model on or off.
+SetPrice|Sets the price of the hairstyle.
+SetPssIconType|Sets the type of the PSS icon.
+SetRank|Sets the rank.
+SetRecognizedIcon|Pokémon-Amie: shows the icon of a thing that the Pokémon recognized.
+SetSalonScene|Sets the scene of the hair salon.
+SetSalonVisitDate|Records the date of the visit to the hair salon.
+SetSavedMakeDataToMyStatus|Gives the saved look data to the player.
+SetSmoothFrame|Pokémon-Amie: sets the smooth frame of a motion.
+SetSpringOffsetY|Pokémon-Amie: sets the spring height of the model.
+SetTimerIcon|Shows the timer mark.
+SetTokikakePoke|Saves the first Pokémon for the Time Certificate.
+SetTrainer|Sets the trainers of the battle.
+SetupAiPartner|Prepares the partner moved by the AI.
+SetupSangoNetworkData|Prepares the data of the network.
+ShakeCameraBegin|Camera command: shakes the camera.
+ShakeCameraBeginEndFrame|Camera command: shakes the camera until a frame.
+ShakeCameraBeginLoop|Camera command: shakes the camera again and again.
+ShakeCameraEndAll|Camera command: stops all the shakes.
+ShowObject|Pokémon-Amie: shows or hides an object.
+SkyBattleResultGet|Gets the result of a Sky Battle.
+SkyboxEventTimeReset|Resets the time of the sky for an event.
+SkyboxEventTimeSet|Sets the time of the sky for an event.
+SodateyaIsEggExist|Tells whether the Day Care has an Egg.
+SpMotionDelete|Removes the special motion.
+SpMotionLoadIsEnd|Tells whether the special motion is loaded.
+SpMotionPlay|Plays a special motion on a character.
+SpMotionPlayMove|Plays a special motion that moves a character.
+SpMotionReqLoad|Asks to load a special motion.
+SpMotionSetup|Prepares the special motion.
+StartBattle|Starts the battle.
+TVSaveDaisuki|Saves the TV information: Super Fan Club.
+TVSaveDaisukiNick|Saves the TV information: Super Fan Club nickname.
+TVSaveInterviewer|Saves the TV information: interviewer.
+TVSaveNews|Saves the TV information: recent news.
+TVSaveTrend|Saves the TV information: trendy word.
+TalkMdlClearEye|Stops a character looking at another one.
+TalkMdlClearEyeToEye|Stops the character and the player looking at each other.
+TalkMdlIsExist|Tells whether the character that is talked to exists.
+TalkMdlMsg_Seq|Shows a message by a character, with the window and its tail.
+TalkMdlSetDir|Turns the character that is talked to toward the player.
+TalkMdlSetEye|Makes a character look at another one.
+TalkMdlSetEyeToEye|Makes the character and the player look at each other.
+TalkMdlSetTalkMotion|Plays the talking motion of a character.
+TalkMdlZoomIsEnd|Tells whether the zoom is over.
+TalkMdlZoomSet|Starts the zoom of the talk.
+TimeCountGet|Gets the time that the counter has counted.
+TimeCountStart|Starts a time counter.
+TrainerBattleRuleGet|Gets the battle rule of a trainer (not to be used: it loads at once).
+TrainerBattleRuleIsDouble|Tells whether the battle rule is a double battle.
+TrainerCardGetRank|Gets the rank of the Trainer Card.
+TrainerCardGetRankGold|Gets the gold rank of the Trainer Card.
+TrainerGetDir|Gets the direction of a trainer that sees the player.
+TrainerGetEyeMoveType|Gets the way a trainer moves when it looks for the player.
+TrainerGetInfo|Gets the information of a trainer.
+TrainerGetMsgID|Sets the message of a trainer.
+TrainerGetObjID|Gets the character of a trainer that sees the player.
+TrainerGetScrID|Gets the script of a trainer that sees the player.
+TrainerItemGet|Gets the item that a trainer gives.
+TrainerMoveOff|Stops the movement of a trainer that sees the player.
+TrainerSPTypeGet|Gets the special type of a trainer.
+TrainerTalkTypeGet|Gets the way a trainer talks.
+TrendGet|Gets a trendy word.
+TrendSet|Sets a trendy word.
+TrialHouse_AddBtlResultPoint|Adds points to the result of a battle.
+TrialHouse_CallBtlResultApp|Opens the screen of the result of a battle.
+TrialHouse_GetBtlResultFixPoint|Gets the points of a battle (with the penalties).
+TrialHouse_GetDLItem|Gets the downloaded item of the Trial House.
+TrialHouse_SetTrainer|Sets the trainers of a battle of the Trial House.
+UseSprayContinue|Uses the last Repel again.
+VanishKeyWaitMark|Hides the mark that waits for a key.
+VanishTimerIcon|Hides the timer mark.
+VoiceIsEnd|Tells whether the cry is over.
+VoicePlay|Plays the cry of a Pokémon.
+WaitCommYesNo|Waits for the answer of the other player to a yes or no.
+WaitControlMotionBlur|Waits for the end of the change of the mix of the motion blur.
+WaitControlMotionBlurColor|Waits for the end of the colour filter.
+WaitInitMotionBlur|Waits for the start of the motion blur system.
+WarpSetID|Sets the number of the warp.
+WazaOshieCheck|Gets the move that a Move Tutor can teach.
+WazaOshieGetWazaID|Gets the move that is taught.
+WeakReserveScript|Reserves a script that is dropped when another call comes.
+WeatherEffectAlphaSet|Sets the transparency of the weather effect.
+WeatherEffectFollowSet|Makes the weather follow the camera.
+WildBattleResultGet|Gets the result of a wild battle.
+WordSetAPowerName|Puts the name of an O-Power in a text buffer.
+WordSetBoxTrayName|Puts the name of a Box in a text buffer.
+WordSetBtlRuleTypeName|Puts the name of a battle rule in a text buffer.
+WordSetCondition|Puts the name of a condition in a text buffer.
+WordSetContestNewestNickname|Puts the nickname of the Pokémon of the last Contest in a text buffer.
+WordSetContestPortraitNickname|Puts the nickname of a portrait in a text buffer.
+WordSetContestRank|Puts the rank of a Contest in a text buffer.
+WordSetFashionBuy|Puts the names of the items for a fashion purchase in text buffers.
+WordSetFashionItem|Puts the name of an item of clothes in a text buffer.
+WordSetFashionTalk|Puts the names of the items for a fashion talk in text buffers.
+WordSetInterview|Puts the content of an interview in a text buffer.
+WordSetItemName|Puts the name of an item in a text buffer.
+WordSetItemPocketName|Puts the name of a Bag pocket in a text buffer.
+WordSetItemWazaName|Puts the name of the move of a TM in a text buffer.
+WordSetMoney|Puts the money in a text buffer.
+WordSetMonsName|Puts the name of a species in a text buffer.
+WordSetNumber|Puts a number in a text buffer.
+WordSetNutsTypeName|Puts the name of a kind of Berry in a text buffer.
+WordSetPCMonsNickName|Puts the nickname of a Pokémon of the PC in a text buffer.
+WordSetPlaceName|Puts the name of a place in a text buffer.
+WordSetPlayerName|Puts the name of the player in a text buffer.
+WordSetPlayerNickName|Puts the nickname of the player in a text buffer.
+WordSetPokeTypeName|Puts the name of a type in a text buffer.
+WordSetRivalName|Puts the name of the rival in a text buffer.
+WordSetSecretBaseGoodsName|Puts the name of a Secret Base decoration in a text buffer.
+WordSetSeikakuName|Puts the name of a nature in a text buffer.
+WordSetTemotiMonsNickName|Puts the nickname of a Pokémon of the team in a text buffer.
+WordSetTokuseiName|Puts the name of an ability in a text buffer.
+WordSetTrainerName|Puts the name of a trainer in a text buffer.
+WordSetTrainerTypeName|Puts the class of a trainer in a text buffer.
+WordSetTrainerTypeNameFromTrainerID|Puts the class of a trainer (found from its number) in a text buffer.
+WordSetTrendCategory|Puts a trendy word in a text buffer.
+WordSetWazaName|Puts the name of a move in a text buffer.
+WordSetWearingProduct|Puts the name of the item that is tried on in a text buffer.
+WordSetWeatherName|Puts the name of a weather in a text buffer.
+WordSetWordWithCount|Puts the text that is loaded in a text buffer, with a count.
+WorkGet|Reads an event work value.
+WorkSet|Writes an event work value.
+WorkSetReq|Requests that an event work value is written.
+YesNoWin_Seq|Waits for the answer to a window with yes and no.
+ZoneIsPokecen|Tells whether the zone is a Pokémon Center.
+ZukanGetFlag|Gets a Pokédex flag.
+ZukanGetOpenFlag|Gets the flag that opens the Pokédex.
+ZukanHyouka|Gives the rating of the Pokédex.
+ZukanSetFlag|Sets a Pokédex flag (with the table).
+ZukanSetOpenFlag|Sets the flag that opens the Pokédex.
+_ABKeyWait|Waits for the A or B button.
+_BattleGetResult|Handles the defeat of a trainer.
+_CallApplicationDemoNotFieldControl|Starts a demo application.
+_CallBackGetScriptID|Gets the number of the script called back.
+_CallBackRegist|Registers the script that is called after a trainer battle.
+_CallPhotoViewer|Opens the photo viewer.
+_CallPlayerName|Pokémon-Amie: says the name of the player.
+_CallPoke3Select|Opens the choice of three Pokémon.
+_CallTrainerBattleCore|Starts a trainer battle.
+_CallTrialDownloadApp|Opens the choice of the rules and the download of the data (shared by the Battle House and the Trial House).
+_CallWazaApps|Opens the screens to remember, forget and learn a move.
+_CallWildBattleWithoutField|Starts a wild battle without the map.
+_CallWildLose|Handles the defeat of the player against a wild Pokémon.
+_Camera3DCanShot|Checks whether a photo can be taken.
+_Camera3DGetStartPos|Gets the position where the application starts.
+_Camera3DIsEndLoadMap|Tells whether the map is loaded.
+_Camera3DIsExistSavePhoto|Tells whether a saved photo exists.
+_Camera3DIsOverrideAlert|Tells whether a warning about overwriting is shown.
+_Camera3DStartPetitAnime|Starts the small animation.
+_Camera3DStopPetitAnime|Stops the small animation.
+_ChangePokemonColor|Pokémon-Amie: changes the colour of the Pokémon.
+_CycleRaceScoreGet|Gets a score of the bike race.
+_CycleRaceScoreSet|Sets a score of the bike race.
+_CycleRaceTimeCountGet|Gets the time of the bike race.
+_CycleRaceTimeCountStart|Starts the time counter of the bike race.
+_EventModelFinalize|Ends an event model.
+_EventModelInitialize|Starts an event model.
+_EventModelIsEnd|Tells whether an event model is over.
+_FadeRequestIn|Starts a fade in.
+_FadeRequestIn_Ex|Starts a fade in with a colour and a time.
+_FieldClose|Removes the map.
+_FieldMapBlockIsLoading|Tells whether a block of the map is loading.
+_FieldNutsCallZyoroEvent|Plays the event of the watering can.
+_FieldNutsGetParam|Gets the state of a Berry patch.
+_FieldNutsPlant|Plants a Berry.
+_FieldNutsPlantClear|Empties a Berry patch.
+_FieldNutsPlantRebirth|Makes a dead plant grow again.
+_FieldOpen|Makes the map.
+_FieldPhotoCreate|Makes the photo of the map.
+_FieldPhotoDelete|Removes the photo of the map.
+_GetBodyPositionY|Pokémon-Amie: gets the height of the body.
+_GetCakePara|Pokémon-Amie: gets a parameter of the food.
+_GetDateTimeToDay|Gets the days since January 1, 2000.
+_GetDateTimeToSecond|Gets the seconds since January 1, 2000.
+_GetGameStartTimeToSecond|Gets the seconds since the game was started.
+_GetMaxWinCount|Gets the largest number of wins in a row.
+_GetRealTimeToDay|Gets the days since January 1, 2000 (real time).
+_GetRealTimeToSecond|Gets the seconds since January 1, 2000 (real time).
+_GimmickAnimeWait|Waits for the end of the animation of a device.
+_IsReportLock|Tells whether the save is locked.
+_LookEnd|Pokémon-Amie: ends the look at a point.
+_MapChangeAndDemoCall|Moves the player to another map and plays a cutscene.
+_MapChangeCore|Moves the player to another map.
+_MapChangeRailCore|Moves the player to another map (on a rail).
+_MdlAcmdMakeMoveCore|Makes the action commands that move a character from a place to another.
+_MdlAcmdSet|Forces an action command on a character.
+_MdlProperties|Sets or gets a property of a model.
+_MdlSetSitWait|Makes a character wait sitting.
+_PGLPostmanFuncCall|Delivery person of the Mystery Gift: calls a function.
+_PSSSendBeacon|Sends the beacon of the PSS.
+_PlaySEPich|Plays a sound effect with a pitch.
+_PostmanGetParameter|Delivery person of the Mystery Gift: gets a parameter.
+_PostmanReceivePresent|Delivery person of the Mystery Gift: receives the gift.
+_RentPokeEventCommand|Runs a command of the rental Pokémon event.
+_ReportStart|Starts to write the save.
+_ReportWait|Waits for the end of the save.
+_SecretBaseCallBattle|Starts a battle of the Secret Bases.
+_SecretBaseCallGoodsLayoutEvent|Plays the event of the layout of the decorations.
+_SecretBaseCallGuildPhotoApp|Opens the photo application of the team of the base.
+_SecretBaseCallOtherPcEvent|Plays the event of the PC of the base of someone else.
+_SecretBaseCallOthersTokikakeCommendation|Opens the Time Certificate application of the base of someone else.
+_SecretBaseCallPcEvent|Plays the event of the PC of the base.
+_SecretBaseCallQRApp|Opens the QR code application of the Secret Bases.
+_SecretBaseCreateMyBase|Makes the Secret Base of the player.
+_SecretBaseDanEventSetDefaultWord|Sets the default free words (before the creation of the team).
+_SecretBaseDeleteOthersBase|Removes the base of someone else.
+_SecretBaseDeleteOthersBaseBefore|Prepares to remove the base of someone else.
+_SecretBaseEventPlayerSitDownOn|Makes the player sit down (event).
+_SecretBaseGetBaseParam|Gets a parameter of the inside of a base.
+_SecretBaseGetCurrentFlag|Gets the flag of the base where the player is.
+_SecretBaseGetGeneralParam|Gets a general parameter of the Secret Bases.
+_SecretBaseGetGoodsLayoutParam|Gets the layout of the decorations.
+_SecretBaseGetGoodsParam|Gets a parameter of a decoration.
+_SecretBaseGetGridGoodsNo|Gets the top decoration at a position.
+_SecretBaseGetGuildParam|Gets a parameter of the team of the base.
+_SecretBaseGetHimitunoNakamaFlag|Gets the flag of a secret friend.
+_SecretBaseGetHimitunoNakamaPointNo|Gets the position of the base of the secret friend.
+_SecretBaseGetOthersBaseFlag|Gets a flag of the base of someone else.
+_SecretBaseGetOthersBaseMoveFailStatus|Gets the state of a caretaker that failed to move.
+_SecretBaseGetOthersBaseParam|Gets a parameter of the base of someone else.
+_SecretBaseGetOthersBasePlayLog|Gets the play log message of the base of someone else.
+_SecretBaseGetOthersBaseShitappaBtlFlag|Tells whether the member of the base of someone else was fought today.
+_SecretBaseGetOthersBaseShitappaSex|Gets the gender of a member of the base of someone else.
+_SecretBaseGetParticularParam|Gets a particular parameter of the Secret Bases.
+_SecretBaseGetSaveDataParam|Gets a datum of the save.
+_SecretBaseGoodsAction|Runs the action of a decoration.
+_SecretBaseGoodsAnimation|Plays the animation of a decoration.
+_SecretBaseIncOthersBaseSkillCount|Counts one more use of the special move of the base of someone else.
+_SecretBaseInterestGoods|Makes a character look at a decoration.
+_SecretBaseIsGetHimitunoNakamaFlag|Tells whether the flag of a secret friend can be got.
+_SecretBaseIsGoodsAnimationEnd|Tells whether the animation of a decoration is over.
+_SecretBaseIsGoodsExist|Tells whether a decoration is at a position.
+_SecretBaseMapChangeForMyBaseCreate|Moves from the inside of the base to the PC.
+_SecretBaseMapChangeInSide|Moves to the inside of the Secret Base.
+_SecretBaseMapChangeOutSide|Moves to the outside of the Secret Base.
+_SecretBaseMoveGridRequest|Sets a request to move on the grid in the Secret Base.
+_SecretBaseOthersBaseRandom|Gets a random number for the base of someone else (the same all day).
+_SecretBasePreOpen|Opens the entrance of a Secret Base for a while.
+_SecretBaseRegistHimitunoNakama|Registers the caretaker of the base as a secret friend.
+_SecretBaseSetOthersBaseFlag|Sets a flag of the base of someone else.
+_SecretBaseSetOthersBaseShitappaBtlFlag|Sets that the member of the base of someone else was fought today.
+_SecretBaseSetSaveDataParam|Sets a datum of the save.
+_SecretBaseTalkAppChangeBefore|Prepares the change to an application when talking.
+_SecretBaseTryRankUp|Tries to raise the rank of the team of the base.
+_SecretBaseTsupparikunEvent|Plays the event of the tough guy.
+_SecretBaseTutorialEventSetDefaultWord|Sets the default free words (before the tutorial event).
+_SecretBaseUnRegistHimitunoNakama|Removes a secret friend from the list.
+_SecretBaseUnRegistHimitunoNakamaAfter|Finishes the removal of a secret friend (during the black screen).
+_SetBallYPos|Pokémon-Amie: sets the height of the ball.
+_SetDualMonsterCamera|Pokémon-Amie: sets the camera for two Pokémon.
+_SetFoodIcon|Pokémon-Amie: shows the icon of a food.
+_SetLoveMotion|Pokémon-Amie: plays a motion of affection.
+_SetParticle|Pokémon-Amie: starts a particle effect.
+_SetPokeMemory|Pokémon-Amie: sets a memory of the Pokémon.
+_SetSlowMotion|Pokémon-Amie: sets the slow motion.
+_ShowBall|Pokémon-Amie: shows or hides a ball.
+_ShowPokemon|Pokémon-Amie: shows or hides the Pokémon.
+_SodateyaEggAdopt|Day Care: adds the Egg to the team.
+_SodateyaEggDelete|Day Care: removes the Egg.
+_SodateyaLoveCheck|Day Care: checks the compatibility.
+_SodateyaPokeLeave|Day Care: leaves a Pokémon of the team.
+_SodateyaPokeNumGet|Day Care: gets the number of Pokémon that it keeps.
+_SodateyaPokeTakeBack|Day Care: takes a Pokémon back.
+_SodateyaWordsetPokeLevelUp|Day Care: puts the levels gained by a kept Pokémon in a text buffer.
+_SodateyaWordsetPokeName|Day Care: puts the nickname of a kept Pokémon in a text buffer.
+_SodateyaWordsetPokeTakeBackMenu|Day Care: puts the menu to take a Pokémon back in text buffers.
+_Suspend|Pokémon-Amie: suspends the script.
+_TalkMdlEndInit|Ends the talk with a character (preparation).
+_TalkMdlStartInit|Starts the talk with a character (preparation).
+_TalkTargetObjWorkSet|Sets the character that the player talks to.
+_TrainerBGMPlay|Plays the music of a trainer that sees the player.
+_TrainerEyeBattleStart|Starts the battle against a trainer that sees the player.
+_TrainerEyeGetBattleTrainerID|Gets the trainer of the battle of a trainer that sees the player.
+_TrainerEyeGetItemNo|Gets the number of the item of a trainer that sees the player.
+_TrainerEyeGetLotItem|Gets the item that a trainer that sees the player gives.
+_TrainerEyeIsBattleEnable|Tells whether a trainer that sees the player can fight.
+_TrainerEyeIsBattleFirst|Tells whether it is the first battle against a trainer.
+_TrainerEyeRegist|Registers a trainer that sees the player.
+_TrainerEyeSetBattleWin|Sets that the player won against a trainer that sees it.
+_UpdateCakeButton|Pokémon-Amie: updates the buttons of the food menu.
+_WordSetCurrentSecretBaseOwnerName|Puts the name of the owner of the Secret Base in a text buffer.
+_WordSetRegister|Puts a value in a text buffer (a stick direction or a point).
+_ZukanGetCount|Gets the count of a mode of the Pokédex.
+_ZukanIsComplete|Tells whether the Pokédex is complete.
+_Suspend|Suspends the script for a number of frames. The script of Pokémon-Amie calls it through the stock function Suspend, which then sleeps.
+Random|Gives a random number from 0 to the maximum minus 1.
+PlaySE|Plays a sound effect. It can also start, restart or stop a looping sound, and tell if a looping sound has ended.
+FadeRequestOut|Starts a fade-out on one screen or on both.
+_FadeRequestIn|Starts a fade-in on one screen or on both. The script uses the stock function FadeRequestIn instead.
+FadeIsEnd|Tells whether the fade has ended.
+CheckCalledByMonster|Tells whether the Pokémon called the player (and not the other way round).
+SetLoveCommand|Starts a pampering command (a way to play with the Pokémon). It does nothing if the same command already runs.
+_SetLoveMotion|Starts a pampering command that plays one motion of the Pokémon.
+CheckLoveCommand|Tells whether a pampering command is still running. A motion command is over when its animation reaches the last frame.
+SetLoveCommandStep|Moves the running pampering command to another step (used to end it).
+DestroyLoveCommand|Stops the running pampering command completely.
+CheckTouch|Tells whether the touch screen was touched on this frame.
+CheckTouching|Tells whether the touch screen is touched now.
+CheckRelease|Tells whether the finger left the touch screen on this frame.
+GetTouchX|Gives the X position of the touch on the touch screen.
+GetTouchY|Gives the Y position of the touch on the touch screen.
+CheckTouchingColor|Gives the colour number of the picture under the finger, or 0 if nothing is touched or the colour is not a marked one.
+GetPadOn|Gives the buttons that were pressed on this frame.
+GetPadOff|Gives the buttons that were released on this frame.
+SetMiniGame|Starts the mini-game mode.
+_SetParticle|Creates a particle effect. It follows the touch if the part number is out of range.
+SetAdjustHeadAngle|Turns the head of the Pokémon by an angle.
+SetSpringOffsetY|Adds a vertical force to the spring parts (ears, tail...) of one side of the Pokémon.
+SetBodyPositionY|Sets the height of the body of the Pokémon.
+SetBodyRotationZ|Rotates the body of the Pokémon around the Z axis.
+SetBodyRotationY|Rotates the body of the Pokémon around the vertical axis.
+SetBodyScale|Sets the size of the Pokémon.
+SetCameraUpVector|Sets the up direction of the camera.
+CheckMenuButton|Tells which button of the menu was pressed.
+SetCakeMenuButtonPassive|Turns off the snack button.
+SetCakeMenuButtonRecover|Turns the snack button on again.
+SetMotionFrameSpeed|Sets the speed of the animation of the Pokémon.
+CheckMotionAvailable|Tells whether the Pokémon can play a motion now.
+SetHateParameter|Sets the time and the limit of the refusal of the Pokémon (only while the refusal command runs).
+ResetDecline|Puts the tilt of the head back to normal.
+BeginFacialGame|Starts the face game (the player makes faces at the Pokémon).
+EndFacialGame|Ends the face game.
+CheckFacialGameOpening|Tells whether the opening animation of the face game has ended.
+SetRecognizedIcon|Shows or hides the icon of the recognised face.
+SetFacialGameIcon|Shows an expression bubble of the face game, and its message.
+CheckFacialGameIcon|Tells whether the animation of the bubble of the face game has ended.
+ChangeFacialGameIcon|Changes the tilt and the animation of the bubble of the face game.
+ResetFace|Resets the face recognition.
+GetMicVolume|Gives the loudest volume that the microphone heard.
+LoadParameter|Loads the parameters that belong to this Pokémon (sounds, cameras, options, motions and snacks).
+SetPhysics|Turns the spring physics (ears, tail...) on or off.
+ShowObject|Shows or hides an object of the pampering scene.
+SetSmoothFrame|Sets the number of frames that smooth the change from one motion to the next.
+SetFace|Sets an expression of the Pokémon for a time, or ends the forced expression.
+GetPastDays|Tells whether more than a number of days went by since the last time, and if so, sets the count back to 0.
+SetIcon|Shows or hides an icon at the finger and hides the one that was shown before.
+SetIcon2|Shows or hides an icon at the finger.
+GetSickness|Tells whether the Pokémon has a status problem or has fainted.
+_CallPlayerName|Plays the voice that says the name of the player. It gives the sound that was played.
+_ChangePokemonColor|Turns the model of the Pokémon white by an amount (used for the fade-out).
+_GetBodyPositionY|Gives the height of the body of the Pokémon.
+_GetCakePara|Gives a value of the snack that the player gave.
+_LookEnd|Stops the Pokémon looking at the finger.
+_PlaySEPich|Plays a sound effect with another pitch.
+_SetBallYPos|Sets the height of the Poké Ball.
+_SetDualMonsterCamera|Moves the camera for a Pokémon that is drawn on both screens.
+_SetFoodIcon|Makes the snack button bigger or normal.
+_SetSlowMotion|Plays the animation of the Pokémon at half speed or at normal speed.
+_SetPokeMemory|Writes the memory of the Pokémon: it ate a snack.
+_ShowBall|Shows the Poké Ball.
+_ShowPokemon|Shows or hides the Pokémon.
+_UpdateCakeButton|Redraws the snack button.
+AI_CMD|The only native function of the battle AI scripts. It asks the battle a question about the Pokémon (the answer is yes or no, or a number) or gives an order (run away). The first parameter is the AI handler, which the script keeps in a public variable, and the command is chosen by its number.

@@ -1,0 +1,255 @@
+acchat_id|Number of the accessory (chat) item that the player wears.
+add|Yes to add the page, no to remove it.
+add_level|Number of levels to add.
+add_point|Number of points to add.
+all|Yes for all the Pokémon, no for one.
+alpha|Opacity, from 0.0 (invisible) to 1.0 (solid).
+anime_frame|Number of frames of the animation.
+anm_id|Number of the animation.
+answer|Work variable that receives the answer.
+archive|Number of the archive that holds the motion file.
+b_msgbuf|Text buffer that receives the text.
+back|Number of the back hair or back item.
+bag_id|Number of the bag item that the player wears.
+bgm_change|Yes if the music changes for the battle.
+bgm_fade_frame|Number of frames of the fade of the music.
+blend_frame|Number of frames of the blend.
+bm_gx|Grid X of the position.
+bm_gz|Grid Z of the position.
+bottoms_id|Number of the bottom clothes that the player wears.
+btl_count|Number of battles.
+c_stop|Yes to stop the counter.
+category|Category (a kind of value of the game).
+change_sync|Yes to change at the same time as the weather.
+cheek|Number of the cheek make-up.
+code|Movement code (a kind of motion of the character).
+color|Colour number.
+comNum|Number of players that are controlled by the console.
+condition|Condition (a kind of value of the game).
+connectNum|Number of players that are connected.
+count_type|Which count to change (seen or caught).
+course|Number of the course.
+cur_gx|Current grid X.
+cur_gy|Current grid Y.
+cur_gz|Current grid Z.
+curpos|Position of the cursor when the menu opens.
+cursor_pos|Position of the cursor when the menu opens.
+data|Value to store.
+dataType|Which kind of data to read.
+data_idx|Index of the data.
+decoration|Number of the decoration.
+disp|Mode of display (number of digits, with or without a leading zero).
+dist_begin_pos_z|Z position of the start of the distance.
+dist_center_pos_z|Z position of the middle of the distance.
+dist_end_pos_z|Z position of the end of the distance.
+dividend|The number to divide.
+drawFlag|Yes to draw, no to hide.
+dressup|Yes if the character is dressed with the style of the player.
+dst_dir|Direction at the end of the move.
+enc_id|Number of the encounter.
+endFrame|Frame where the shake ends.
+entryNo|Number of the entry.
+eventFlg|Yes if the contest is an event contest.
+exFlag|Yes to turn on the extra mode.
+eye_color|Number of the eye colour.
+eye_shadow|Number of the eye shadow.
+fDepthLevel|Depth level of the 3D effect.
+fLimitParallax|Limit of the parallax of the 3D effect.
+f_param|The value to set (a decimal number).
+first|The first number.
+flag_result|Work variable that receives the flag.
+fovy_begin_pos_z|Z position of the start of the change of the field of view.
+fovy_center_pos_z|Z position of the middle of the change of the field of view.
+fovy_end_pos_z|Z position of the end of the change of the field of view.
+frame|Number of frames.
+front|Yes if the player enters from the front.
+gridX|X position on the grid.
+gridZ|Z position on the grid.
+hair_id|Number of the hair that the player wears.
+halfSitFlag|Yes to sit halfway.
+hat_id|Number of the hat that the player wears.
+hereitis_msg|Number of the message when the item is given.
+hige|Number of the beard.
+hit|Number of hits.
+hour|Hour, from 0 to 23.
+howmany_msg|Number of the message that asks how many.
+id|Number to identify the data.
+image|Number of the picture.
+init_pos|Position of the cursor when the window opens.
+input_type|Kind of text that the player writes.
+isParent|Yes if the console is the host.
+isPhotBg|Yes to use a photo as the background.
+is_add_front|Yes to add at the front of the party.
+is_bgm_keep|Yes to keep the music of the old map.
+is_c2|Yes to use the second check.
+is_cancel|Yes if the player can cancel with B.
+is_ctrl_str|Yes if the text has control codes.
+is_culling_off|Yes to turn off the culling.
+is_default|Yes to show a default text.
+is_default_nickname|Yes if the default name is the nickname.
+is_dir_8_or_4|Yes for eight directions, no for four.
+is_enable|Yes to turn on, no to turn off.
+is_fade_enable|Yes to fade during the change of map.
+is_female|Yes for a female mannequin.
+is_first|Yes for the first one.
+is_force|Yes to force the change.
+is_force_end|Yes to force the end.
+is_friend|Yes if the trainer is a friend.
+is_low|Yes for the low version.
+is_mdl_follow|Yes if the window follows the model.
+is_parent|Yes if the console is the host.
+is_place_name_enable|Yes to show the name of the place after the change.
+is_right|Yes to open the menu on the right.
+is_script_message|Yes if the message is a text of the scripts.
+is_set_tail_param|Yes to set the tail of the window.
+is_start_endframe|Yes to start at the last frame.
+is_use_camear|Yes to use the camera.
+is_use_mdl|Yes to use a model.
+is_win_pos_auto|Yes if the window is placed by itself.
+is_with_egg|Yes to count the Eggs too.
+is_y_ignore|Yes to ignore the height.
+is_zoom_out|Yes to zoom out.
+item_num|Number of items.
+item_or_category|Item or category to read.
+judge_result|Work variable that receives the result of the judge.
+key|Key of the data.
+kind_id|Kind of talk (a value of the game).
+label|Name of the label of the motion.
+level|Level of the Pokémon.
+line_hash_id|Number of the rail line.
+lip|Number of the lip make-up.
+loopFlag|Yes to play in a loop.
+lv_lower_fix|Yes to lower the levels to a fixed level.
+main_rail_seq|Number of the main rail sequence.
+mane_id|Number of the manners item.
+masukara|Number of the mascara.
+message|Number of the message.
+monety|Price of the item.
+money|Amount of money.
+motion|Number of the motion.
+move_type|Kind of move.
+msg_dat_index|Index of the message file.
+nType|Kind of the effect.
+new_item|The item that replaces the old one.
+next_page|The page that opens next.
+no|Number of the entry.
+nomoney_msg|Number of the message when the player has not enough money.
+number|The number to show.
+offset_y|Shift on the Y axis.
+ofs|Shift.
+old_item|The item that is replaced.
+option|Option (a kind of value of the game).
+param|Which parameter to use (a kind of value of the game).
+parameter|Which parameter to read (a kind of value of the game).
+party_idx|Position of the Pokémon in the party.
+place|Number of the place.
+playMode|Mode of play.
+poffin|Number of the Poffin.
+point|Number of points.
+pointType|Kind of position.
+pokeNo|Number of the Pokémon.
+poke_idx|Position of the Pokémon.
+poke_obj_id|The character (object) of the Pokémon.
+pokepos|Position of the Pokémon in the party.
+posx|X position of the window.
+posy|Y position of the window.
+pos_x|X position.
+pos_y|Y position.
+pos_z|Z position.
+powerRand|Yes if the power is random.
+range|Range.
+rank|Rank.
+rate|Strength of the shake.
+really_msg|Number of the message that asks if the player is sure.
+really_msg2|Number of the second message that asks if the player is sure.
+regist_type|Kind of registration of the word.
+repeat|Number of times that the motion is repeated.
+retData|Work variable that receives the data.
+retWk|Work variable that receives the result.
+ret_wk_bp|Work variable that receives the Battle Points.
+ret_wk_is_decide|Work variable: did the player decide?
+ret_wk_is_select|Work variable: did the player choose?
+ret_wk_join|Work variable: did the player join?
+ret_wk_no_end_mode|Work variable that receives the way the menu was closed.
+ret_wk_no_sel_item|Work variable that receives the chosen item.
+ret_wk_rule|Work variable that receives the chosen rule.
+ret_wk_select|Work variable that receives the choice.
+ret_wk_select_idx|Work variable that receives the index of the choice.
+ret_wk_select_pos|Work variable that receives the position of the choice.
+ret_wk_time|Work variable that receives the time.
+ret_wk_wazano|Work variable that receives the chosen move.
+ret_wk_zone|Work variable that receives the zone.
+ribbon|Number of the ribbon.
+rule|Rule of the battle.
+s_double|Yes to allow the double battle.
+s_multi|Yes to allow the multi battle.
+s_rotate|Yes to allow the rotation battle.
+s_single|Yes to allow the single battle.
+s_triple|Yes to allow the triple battle.
+scale|Size of the effect.
+scene|Number of the scene.
+scr_id|Number of the script.
+scrmode|Mode of the screen.
+seal|Number of the seal.
+second|The second number.
+sel_id|Number that the entry returns when it is chosen.
+select_idx|Index of the choice.
+select_index|Index of the choice.
+select_pos|Position of the choice.
+self_or_other|Yes for the player, no for another player.
+send_after|Yes to send after the battle.
+seq_id|Number of the sequence.
+seq_no|Number of the sequence.
+sex|Gender of the Pokémon.
+shift|Yes to shift.
+shift_obj_id|The character (object) that is shifted.
+shoes_id|Number of the shoes that the player wears.
+shop_id|Number of the shop.
+side|Which side.
+size|Size.
+socks_id|Number of the socks that the player wears.
+speed|Speed.
+src_dir|Direction at the start of the move.
+str1_id|Number of the first text.
+str2_id|Number of the second text.
+super|Yes for the super rank.
+sync|Yes to wait until it is finished.
+table|Number of the table.
+tail_ang|Angle of the tail of the window.
+tail_pos_ang|Angle of the position of the tail of the window.
+talk_off_flag|Yes to forbid the talk.
+tar_gx|Grid X of the target.
+tar_gy|Grid Y of the target.
+tar_gz|Grid Z of the target.
+tar_y|Height (Y) of the target.
+target_monsno|The Pokémon (species) to look for.
+th_win_rank|Rank of the win.
+time|Time.
+time_f|Time (a decimal number).
+timer|Number of frames before the window closes.
+tops_id|Number of the top clothes that the player wears.
+trade_data_index|Index of the trade data.
+trainer_id|The trainer.
+tray|Number of the box.
+tray_no|Number of the box.
+turn_replace_flag|Yes to replace the turn.
+type|Kind (a value of the game).
+typeId|Kind of data to read.
+uniq_id|Number that identifies the model.
+val|The value.
+volume|Volume in percent.
+warp_id|Number of the warp.
+wazano|The move.
+wazapos|Slot of the move, from 0 to 3.
+win_ofs_x|Shift of the window on the X axis.
+win_ofs_y|Shift of the window on the Y axis.
+win_ofs_z|Shift of the window on the Z axis.
+win_pos_x|X position of the window.
+win_pos_y|Y position of the window.
+win_pos_z|Z position of the window.
+win_type|Kind of window.
+work_number|Number of the work variable.
+work_value|Value of the work variable.
+wset_buf_idx|Number of the text buffer.
+youcanttake_msg|Number of the message when the player cannot take the item.
+zoom_in_val|Amount of the zoom.
