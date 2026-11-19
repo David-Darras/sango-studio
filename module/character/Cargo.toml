@@ -1,0 +1,12 @@
+[package]
+name = "sango-character"
+version.workspace = true
+edition.workspace = true
+description = "The Character page of Sango Studio: export, import and swap the models of the characters of the overworld."
+
+[dependencies]
+sango-core.workspace = true
+sango-species.workspace = true
+sango-ui.workspace = true
+sango-modelport.workspace = true
+rfd.workspace = true

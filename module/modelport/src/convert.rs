@@ -64,6 +64,11 @@ pub struct Converted {
 /// A texture for the game from a picture: sides that are powers of two, at most 256 x 256 pixels (or `pixels`), RGBA8 for a picture with
 /// transparency or RGB8, tiled.
 pub fn make_texture(name: &str, rgba: &[u8], width: usize, height: usize, alpha: bool, pixels: Option<usize>) -> Texture {
+    make_texture_with(name, rgba, width, height, alpha, pixels, false)
+}
+
+/// The same; with `compress` the picture is written in 16 bits for a pixel (RGB565, or RGBA4444 with transparency) as most pictures of the game are.
+pub fn make_texture_with(name: &str, rgba: &[u8], width: usize, height: usize, alpha: bool, pixels: Option<usize>, compress: bool) -> Texture {
     let (mut w, mut h) = (width, height);
     let limit = pixels.unwrap_or(TEXTURE_PIXELS);
     while w * h > limit && w.min(h) > 8 {
@@ -79,6 +84,14 @@ pub fn make_texture(name: &str, rgba: &[u8], width: usize, height: usize, alpha:
         let image = image::RgbaImage::from_raw(width as u32, height as u32, rgba.to_vec()).expect("a picture of the right size");
         image::imageops::resize(&image, w as u32, h as u32, image::imageops::FilterType::Lanczos3).into_raw()
     };
+    if compress {
+        let format = if alpha { 4 } else { 3 };
+        // The encoder wants the first row at the bottom of the picture of the game.
+        let flipped: Vec<u8> = source.chunks(w * 4).rev().flatten().copied().collect();
+        if let Some(pixels) = sango_core::model::encode_texture(format, w, h, &flipped) {
+            return Texture { name: name.to_string(), width: w, height: h, format, mips: 1, pixels };
+        }
+    }
     let bpp = if alpha { 4 } else { 3 };
     // The pixels as the game reads them: ABGR (with alpha) or BGR, column by column ([x][y]), then tiled.
     let mut columns = Vec::with_capacity(w * h * bpp);
@@ -143,6 +156,11 @@ pub struct Prepared {
 /// The skeleton, the textures, the materials and the meshes of a glTF file, for the game.
 /// `keep_all_joints` keeps the joints that no vertex uses: the motions of a model move them by name.
 pub fn prepare(source: &Source, model_name: &str, scale_factor: f64, flip_pictures: bool, keep_all_joints: bool, original: Option<&[skeleton::Joint]>) -> Result<Prepared, String> {
+    prepare_with(source, model_name, scale_factor, flip_pictures, keep_all_joints, original, false)
+}
+
+/// The same; with `compress` the pictures are written in 16 bits for a pixel.
+pub fn prepare_with(source: &Source, model_name: &str, scale_factor: f64, flip_pictures: bool, keep_all_joints: bool, original: Option<&[skeleton::Joint]>, compress: bool) -> Result<Prepared, String> {
     let scale = UNITS_PER_METER * scale_factor;
     // The joints that some vertex is weighted to.
     let mut used = BTreeSet::new();
@@ -206,7 +224,7 @@ pub fn prepare(source: &Source, model_name: &str, scale_factor: f64, flip_pictur
                 let name = format!("{model_name}_{}", info.name);
                 // An eye is a few pixels of the screen: 128 x 128 is plenty.
                 let small = info.name.contains("eye").then_some(128 * 128);
-                textures.push(make_texture(&name, &info.image.2, info.image.0, info.image.1, info.blend && !info.additive, small));
+                textures.push(make_texture_with(&name, &info.image.2, info.image.0, info.image.1, info.blend && !info.additive, small, compress));
                 groups.insert(key, name.clone());
                 name
             }
@@ -219,7 +237,7 @@ pub fn prepare(source: &Source, model_name: &str, scale_factor: f64, flip_pictur
             layout: material_layout(info.blend, info.wrap),
         });
     }
-    textures.push(make_texture("DummyTex", &[255; 32 * 32 * 4], 32, 32, true, None));
+    textures.push(make_texture_with("DummyTex", &[255; 32 * 32 * 4], 32, 32, true, None, compress));
     let texture_names: HashMap<String, String> = textures.iter().map(|t| (format!("{}.tga", t.name), t.name.clone())).collect();
 
     // The meshes.

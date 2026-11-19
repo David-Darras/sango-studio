@@ -99,6 +99,11 @@ fn resizable(t: &Texture) -> bool {
 
 /// Makes the textures smaller, the biggest first, until they fit the limits (the size of one, then the weight of all).
 pub fn fit_budget(textures: &mut [Texture]) {
+    fit_budget_to(textures, TEXTURE_BUDGET);
+}
+
+/// The same with another weight for all the textures.
+pub fn fit_budget_to(textures: &mut [Texture], budget: usize) {
     let mut linear: Vec<Option<Vec<u8>>> = vec![None; textures.len()];
     let mut shrink = |textures: &mut [Texture], i: usize| {
         let t = &textures[i];
@@ -118,7 +123,7 @@ pub fn fit_budget(textures: &mut [Texture]) {
             shrink(textures, i);
         }
     }
-    while textures.iter().map(|t| t.pixels.len()).sum::<usize>() > TEXTURE_BUDGET {
+    while textures.iter().map(|t| t.pixels.len()).sum::<usize>() > budget {
         let biggest = (0..textures.len()).filter(|&i| resizable(&textures[i])).max_by_key(|&i| textures[i].pixels.len());
         match biggest {
             Some(i) => shrink(textures, i),

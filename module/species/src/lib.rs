@@ -18,7 +18,7 @@ mod learnset_csv;
 mod machines;
 pub mod battle_icons;
 pub mod custom_moves;
-mod model_export;
+pub mod model_export;
 mod model_import;
 mod old_layout;
 mod model_tab;
