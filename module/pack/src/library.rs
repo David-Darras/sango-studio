@@ -45,6 +45,19 @@ pub const MODEL_ARCHIVE: usize = 8;
 /// the list in memory, so every new slot needs its entry.
 const SPECIES_ENTRIES: usize = 722;
 
+/// A model file of a pack as the engine of the game reads it: the first file of a model (the model and its shadow) gets the fields that
+/// the models of the game have (see `sango_core::model::normalize_for_engine`). The other files stay as they are.
+fn engine_ready(file: usize, bytes: &[u8]) -> std::borrow::Cow<'_, [u8]> {
+    if file != 0 {
+        return std::borrow::Cow::Borrowed(bytes);
+    }
+    match sango_core::model::normalize_pack_for_engine(bytes) {
+        Ok(Some(changed)) => std::borrow::Cow::Owned(changed),
+        _ => std::borrow::Cow::Borrowed(bytes),
+    }
+}
+
+
 /// The `model_form` of the model that has this place in the list of the models of the registry: the carrier and the form of
 /// the carrier, as the plugin reads them (1 to 254 for the first carrier, 257 to 510 for the second).
 pub fn carrier_form(index: usize) -> u16 {
@@ -625,7 +638,7 @@ impl Library {
                     for (place, model) in [form.model.as_ref(), form.female_model.as_ref()].into_iter().flatten().enumerate() {
                         let ModelRef::File { file: name } = model else { continue };
                         for (file, bytes) in pack.read_model(name)?.iter().enumerate() {
-                            write((start + offset + place) * 8 + 3 + file, bytes)?;
+                            write((start + offset + place) * 8 + 3 + file, &engine_ready(file, bytes))?;
                         }
                         written += 1;
                     }
@@ -635,7 +648,7 @@ impl Library {
             // The models that replace the models of the game: they come last, so they win over the models of the forms.
             for (pack, replacement) in replacements.iter().filter(|(_, r)| r.species == species && (r.slot as usize) < total) {
                 for (file, bytes) in pack.read_model(&replacement.model)?.iter().enumerate() {
-                    write((start + replacement.slot as usize) * 8 + 3 + file, bytes)?;
+                    write((start + replacement.slot as usize) * 8 + 3 + file, &engine_ready(file, bytes))?;
                 }
                 written += 1;
             }
@@ -651,7 +664,7 @@ impl Library {
             let (carrier, form) = (index_in_registry / MODELS_PER_CARRIER, index_in_registry % MODELS_PER_CARRIER + 1);
             let files = pack.read_model(&model.name)?;
             for (file, bytes) in files.iter().enumerate() {
-                write((block_start[carrier] + form) * 8 + 3 + file, bytes)?;
+                write((block_start[carrier] + form) * 8 + 3 + file, &engine_ready(file, bytes))?;
             }
             written += 1;
         }

@@ -319,6 +319,347 @@ pub fn first_bone_name(data: &[u8]) -> Option<String> {
     Some(file.name(file.u32(bones + 0x5c).ok()?))
 }
 
+
+/// The alignment that the graphics chip needs for each kind of buffer of the raw data of a model: 16 bytes for the vertices, 4 for the indices.
+fn buffer_alignment(kind: u32) -> usize {
+    if kind == 0x26 {
+        16
+    } else {
+        4
+    }
+}
+
+/// Rewrites a model file (BCH) so that every vertex buffer starts on 16 bytes and every index buffer on 4 bytes, and the raw data ends on 16
+/// bytes, as the models of the game do. The graphics chip of the console can lock up on a buffer that is not aligned, where an emulator does
+/// not care. Returns `None` when the file is already right.
+pub fn align_buffers(data: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let file = File::new(data)?;
+    let word = |index: usize| file.u32(4 * index);
+    let (commands, raw, reloc_table) = (file.commands, file.raw, word(7)? as usize);
+    let (raw_length, reloc_length) = (word(11)? as usize, word(13)? as usize);
+    // The words of the commands that hold an address in the raw data: the place of the word, the address, the kind.
+    let mut words: Vec<(usize, usize, u32)> = Vec::new();
+    for entry in 0..reloc_length / 4 {
+        let value = file.u32(reloc_table + 4 * entry)?;
+        let kind = value >> 25;
+        if (0x26..=0x28).contains(&kind) {
+            let place = commands + (value & 0x01ff_ffff) as usize * 4;
+            words.push((place, (file.u32(place)? & 0x7fff_ffff) as usize, kind));
+        }
+    }
+    if words.is_empty() {
+        return Ok(None);
+    }
+    // The buffers: from one address to the next.
+    let mut starts: Vec<(usize, u32)> = Vec::new();
+    for &(_, address, kind) in &words {
+        match starts.iter_mut().find(|(a, _)| *a == address) {
+            Some(found) => {
+                if buffer_alignment(kind) > buffer_alignment(found.1) {
+                    found.1 = kind;
+                }
+            }
+            None => starts.push((address, kind)),
+        }
+    }
+    starts.sort_unstable();
+    if starts.last().is_some_and(|&(a, _)| a >= raw_length) {
+        return Err("A buffer starts after the end of the raw data.".into());
+    }
+    let mut new_raw: Vec<u8> = Vec::with_capacity(raw_length + 64);
+    let mut moved: HashMap<usize, usize> = HashMap::new();
+    // Data before the first buffer stays where it is.
+    let first = starts[0].0;
+    new_raw.extend_from_slice(file.data.get(raw..raw + first).ok_or("The raw data stops too early.")?);
+    for (k, &(address, kind)) in starts.iter().enumerate() {
+        let end = starts.get(k + 1).map_or(raw_length, |&(a, _)| a);
+        let alignment = buffer_alignment(kind);
+        while new_raw.len() % alignment != 0 {
+            new_raw.push(0);
+        }
+        moved.insert(address, new_raw.len());
+        new_raw.extend_from_slice(file.data.get(raw + address..raw + end).ok_or("A buffer is outside the file.")?);
+    }
+    while new_raw.len() % 16 != 0 {
+        new_raw.push(0);
+    }
+    if new_raw.len() == raw_length && moved.iter().all(|(old, new)| old == new) {
+        return Ok(None);
+    }
+    // The file again: the parts before the raw data stay, the addresses in the commands change, the table of addresses moves.
+    let reloc_new = (raw + new_raw.len() + 0xff) & !0xff;
+    let mut out = file.data[..raw].to_vec();
+    out.extend_from_slice(&new_raw);
+    out.resize(reloc_new, 0);
+    out.extend_from_slice(file.data.get(reloc_table..reloc_table + reloc_length).ok_or("The table of addresses is outside the file.")?);
+    while out.len() % 128 != 0 {
+        out.push(0);
+    }
+    for &(place, address, _) in &words {
+        let flag = file.u32(place)? & 0x8000_0000;
+        let value = moved[&address] as u32 | flag;
+        out[place..place + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    let set = |out: &mut Vec<u8>, index: usize, value: u32| out[4 * index..4 * index + 4].copy_from_slice(&value.to_le_bytes());
+    set(&mut out, 11, new_raw.len() as u32);
+    set(&mut out, 6, reloc_new as u32);
+    set(&mut out, 7, reloc_new as u32);
+    Ok(Some(out))
+}
+
+
+
+
+
+
+/// The bits of the flags of a bone that tell the engine that its scale is one. The models of the game set them on every bone that
+/// has the scale 1 (the bits for a rotation or a translation of zero are set only on a few bones: they are left as they are).
+const BONE_SCALE_ONE: u32 = 0x0280_0000;
+/// The bit of a bone that is computed with the rule of Maya (the scale of the parent does not reach the rotation of the bone).
+const BONE_SEGMENT_SCALE_COMPENSATE: u32 = 0x0040_0000;
+
+/// Puts in a model file (BCH) the fields that the engine reads in the way that the models of the game have them, without changing the
+/// size of the file. Returns `None` when the file has nothing to change (the models of the game, a file of textures).
+///
+/// - The flags of the bones say that the scale is one when it is (`BONE_SCALE_ONE`).
+/// - The rule that scales the skeleton is the one of the game (Maya) when the bones are those of Maya and every bone has the scale 1:
+///   the rule does not change a pose then.
+/// - The type of skinning of the meshes is the mixed one (0), as the engine chooses the skinning for each sub-mesh.
+/// - The booleans of the vertex shader (register 0x2B0) say which texture coordinates the shader writes: a material that turns on the
+///   texture unit 1 or 2 needs the bit 13 or 14, as in every model of the game (a material can have more bits than units, never
+///   fewer). A texture unit that is on without its coordinates reads values that nobody wrote. The bits that are set stay.
+pub fn normalize_for_engine(data: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let lists = align_command_lists(data)?;
+    let base = lists.as_deref().unwrap_or(data);
+    let fields = normalize_fields(base)?;
+    Ok(fields.or(lists))
+}
+
+/// The size of a list of commands that the graphics chip runs from the memory: a multiple of 16 bytes, and the list starts on 16 bytes.
+const LIST_ALIGNMENT: usize = 16;
+
+/// Moves every list of commands of a model file (BCH) to an address that is a multiple of 16 and makes its size a multiple of 16 bytes (4 words),
+/// as every model of the game has it. The console runs a list that does not have them in a way that never ends (the graphics chip does not
+/// send its signal and the game waits for ever), where an emulator does not care. The padding is zero words, which write nothing. Returns `None`
+/// when the lists are right (the models of the game).
+pub fn align_command_lists(data: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let file = File::new(data)?;
+    let word = |index: usize| file.u32(4 * index);
+    let (content, commands, raw) = (file.content, file.commands, file.raw);
+    let (raw_extra, reloc_table) = (word(6)? as usize, word(7)? as usize);
+    let (commands_length, raw_length, reloc_length) = (word(10)? as usize, word(11)? as usize, word(13)? as usize);
+    if reloc_table < raw_extra || reloc_table + reloc_length > data.len() {
+        return Err("The table of addresses is outside the file.".into());
+    }
+    let entries: Vec<u32> = (0..reloc_length / 4).map(|i| file.u32(reloc_table + 4 * i)).collect::<Result<_, _>>()?;
+    // The places in the content that hold the start of a list: the table of addresses says which words are such places (kind 2).
+    let mut starts: Vec<usize> = Vec::new();
+    for &entry in &entries {
+        if entry >> 25 == 2 {
+            starts.push(file.u32(content + (entry & 0x01ff_ffff) as usize * 4)? as usize);
+        }
+    }
+    starts.sort_unstable();
+    starts.dedup();
+    if starts.is_empty() {
+        return Ok(None);
+    }
+    // The shift of each list: the lists that are not on 16 bytes move up, and every list after them with them.
+    let mut shifts: Vec<(usize, usize)> = Vec::with_capacity(starts.len());
+    let mut shift = 0;
+    for &start in &starts {
+        let moved = (start + shift).next_multiple_of(LIST_ALIGNMENT);
+        shift = moved - start;
+        shifts.push((start, shift));
+    }
+    let shift_of = |offset: usize| shifts.iter().rev().find(|&&(start, _)| start <= offset).map_or(0, |&(_, shift)| shift);
+    // The sizes in words that are not a multiple of 4: the places of the sizes in the content, with the start of their list.
+    let mut sizes: Vec<usize> = Vec::new();
+    let table = content + file.u32(content)? as usize;
+    let model = content + file.u32(table)? as usize;
+    let material_table = content + file.u32(model + 0x34)? as usize;
+    for i in 0..file.u32(model + 0x38)? as usize {
+        let material = content + file.u32(material_table + 0x2c * i)? as usize;
+        sizes.extend([material + 0xcc, material + 0xd4]);
+    }
+    let mesh_table = content + file.u32(model + 0x40)? as usize;
+    for i in 0..file.u32(model + 0x44)? as usize {
+        let mesh = mesh_table + 0x38 * i;
+        sizes.push(mesh + 12);
+        let parts = content + file.u32(mesh + 16)? as usize;
+        for part in 0..file.u32(mesh + 20)? as usize {
+            sizes.push(parts + 0x34 * part + 0x30);
+        }
+    }
+    let lut_sets = file.u32(content + 12 * 4 + 4)? as usize;
+    if lut_sets > 0 {
+        let list = content + file.u32(content + 12 * 4)? as usize;
+        for i in 0..lut_sets {
+            let set = content + file.u32(list + 4 * i)? as usize;
+            for sampler in 0..file.u32(set + 4)? as usize {
+                sizes.push(set + 0xc + 0x10 * sampler + 8);
+            }
+        }
+    }
+    let padded: Vec<(usize, u32)> = sizes
+        .iter()
+        .filter_map(|&at| file.u32(at).ok().filter(|&words| words > 0 && words % 4 != 0).map(|words| (at, words.next_multiple_of(4))))
+        .collect();
+    if shift == 0 && padded.is_empty() {
+        return Ok(None);
+    }
+    // The new commands.
+    let old_commands = data.get(commands..commands + commands_length).ok_or("The commands are outside the file.")?;
+    let mut new_commands: Vec<u8> = Vec::with_capacity(commands_length + shift + 64);
+    let mut previous = 0;
+    for &(start, shift) in &shifts {
+        new_commands.extend_from_slice(&old_commands[previous..start]);
+        new_commands.resize(start + shift, 0);
+        previous = start;
+    }
+    new_commands.extend_from_slice(&old_commands[previous..]);
+    while new_commands.len() % LIST_ALIGNMENT != 0 {
+        new_commands.push(0);
+    }
+    // The file again: the parts before the commands stay, the raw data keeps its place on 128 bytes.
+    let new_raw_at = (commands + new_commands.len()).next_multiple_of(128);
+    let mut out = data[..commands].to_vec();
+    out.extend_from_slice(&new_commands);
+    out.resize(new_raw_at, 0);
+    out.extend_from_slice(data.get(raw..raw + raw_length).ok_or("The raw data is outside the file.")?);
+    let extra_at = out.len();
+    out.extend_from_slice(data.get(raw_extra..reloc_table).ok_or("The extra raw data is outside the file.")?);
+    let reloc_at = out.len();
+    let new_entries: Vec<u32> = entries
+        .iter()
+        .map(|&entry| {
+            // The words of the table that are in the commands (the kinds 0x20 to 0x2f) move with their list.
+            if (0x20..0x30).contains(&(entry >> 25)) {
+                let place = (entry & 0x01ff_ffff) as usize * 4;
+                (entry & !0x01ff_ffff) | ((place + shift_of(place)) / 4) as u32
+            } else {
+                entry
+            }
+        })
+        .collect();
+    for entry in &new_entries {
+        out.extend_from_slice(&entry.to_le_bytes());
+    }
+    out.extend_from_slice(data.get(reloc_table + reloc_length..).unwrap_or(&[]));
+    let set = |out: &mut Vec<u8>, index: usize, value: u32| out[4 * index..4 * index + 4].copy_from_slice(&value.to_le_bytes());
+    set(&mut out, 10, new_commands.len() as u32);
+    set(&mut out, 5, new_raw_at as u32);
+    set(&mut out, 6, extra_at as u32);
+    set(&mut out, 7, reloc_at as u32);
+    while out.len() % 128 != 0 {
+        out.push(0);
+    }
+    // The pointers to the lists in the content, and the sizes.
+    for &entry in &entries {
+        if entry >> 25 == 2 {
+            let at = content + (entry & 0x01ff_ffff) as usize * 4;
+            let start = file.u32(at)? as usize;
+            out[at..at + 4].copy_from_slice(&((start + shift_of(start)) as u32).to_le_bytes());
+        }
+    }
+    for &(at, words) in &padded {
+        out[at..at + 4].copy_from_slice(&words.to_le_bytes());
+    }
+    Ok(Some(out))
+}
+
+fn normalize_fields(data: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let file = File::new(data)?;
+    let content = file.content;
+    if file.u32(content + 4)? == 0 {
+        return Ok(None);
+    }
+    let table = content + file.u32(content)? as usize;
+    let model = content + file.u32(table)? as usize;
+    let mut out = data.to_vec();
+    let mut changed = false;
+    let put32 = |out: &mut Vec<u8>, at: usize, value: u32, changed: &mut bool| {
+        if out[at..at + 4] != value.to_le_bytes() {
+            out[at..at + 4].copy_from_slice(&value.to_le_bytes());
+            *changed = true;
+        }
+    };
+
+    // The bones.
+    let bone_table = content + file.u32(model + 0x70)? as usize;
+    let bone_count = file.u32(model + 0x74)? as usize;
+    let mut all_scales_one = true;
+    let mut compensates = false;
+    for i in 0..bone_count {
+        let at = bone_table + 0x64 * i;
+        let flags = file.u32(at)?;
+        let scale = file.vec3(at + 8)?;
+        compensates |= flags & BONE_SEGMENT_SCALE_COMPENSATE != 0;
+        let mut new = flags;
+        if scale == [1.0; 3] {
+            new |= BONE_SCALE_ONE;
+        } else {
+            all_scales_one = false;
+        }
+        put32(&mut out, at, new, &mut changed);
+    }
+    // The rule of the scale of the skeleton: the second byte of the model. A bone that compensates the scale of its parent is a bone
+    // of the rule of Maya.
+    if compensates && all_scales_one && out[model + 1] == 0 {
+        out[model + 1] = 1;
+        changed = true;
+    }
+
+    // The texture units that each material turns on.
+    let material_table = content + file.u32(model + 0x34)? as usize;
+    let material_count = file.u32(model + 0x38)? as usize;
+    let mut units: Vec<Option<u32>> = Vec::with_capacity(material_count);
+    for i in 0..material_count {
+        let at = material_table + 0x2c * i;
+        let words = file.words(file.u32(at + 16)? as usize, file.u32(at + 20)? as usize)?;
+        units.push(registers(&words).get(&0x80).map(|(value, _)| *value & 7));
+    }
+
+    // The meshes and their draws.
+    let mesh_table = content + file.u32(model + 0x40)? as usize;
+    let mesh_count = file.u32(model + 0x44)? as usize;
+    for i in 0..mesh_count {
+        let at = mesh_table + 0x38 * i;
+        if out[at + 2] != 0 {
+            out[at + 2] = 0;
+            changed = true;
+        }
+        let material = (file.u32(at)? & 0xffff) as usize;
+        let parts = file.u32(at + 20)? as usize;
+        for part in 0..parts.clamp(1, 16) {
+            let header = content + file.u32(at + 16)? as usize + 0x34 * part;
+            let (commands, words) = (file.u32(header + 0x2c)? as usize, file.u32(header + 0x30)? as usize);
+            let found = registers(&file.words(commands, words)?);
+            let (Some(&(value, place)), Some(Some(on))) = (found.get(&0x2b0), units.get(material)) else { continue };
+            let bits = ((on >> 1) & 3) << 13;
+            put32(&mut out, file.commands + commands + 4 * place, value | bits, &mut changed);
+        }
+    }
+    Ok(changed.then_some(out))
+}
+
+/// The same for a pack of model files (`PC`): every part that is a model is changed, the other parts stay.
+pub fn normalize_pack_for_engine(pack: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    let (_, parts) = crate::bundle::split(pack)?;
+    let mut result: Option<Vec<u8>> = None;
+    for (index, part) in parts.iter().enumerate() {
+        if part.get(..4) != Some(b"BCH ") {
+            continue;
+        }
+        if let Some(new) = normalize_for_engine(part)? {
+            let base = result.as_deref().unwrap_or(pack);
+            result = Some(crate::bundle::replace_part_with(base, index, &new, 128)?);
+        }
+    }
+    Ok(result)
+}
+
+
 /// Reads the first model of a model file.
 pub fn parse_model(data: &[u8]) -> Result<Model, String> {
     let file = File::new(data)?;
@@ -995,6 +1336,45 @@ mod test {
         assert_eq!(decode_texture(0, width, height, &bytes).unwrap(), rgba);
         assert!(encode_texture(6, 8, 8, &[0; 256]).is_none());
         assert!(encode_texture(7, 7, 8, &[0; 256]).is_none());
+    }
+
+    /// With the dump (`SANGO_DUMP`): the models of the game are already as the engine wants them, and a model with the
+    /// booleans of the vertex shader that do not follow its texture units (`SANGO_CONVERTED_MODEL`: a pack of model files made by a
+    /// converter) is changed once, keeps its geometry, and is then stable.
+    #[test]
+    fn the_fields_of_the_engine_are_the_ones_of_the_game() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = crate::Dump::open(&root).unwrap();
+        let archive = crate::Garc::open(&dump.archive(8)).unwrap();
+        // The model of every slot of the game.
+        let mut checked = 0;
+        for id in (3..archive.file_count()).step_by(8) {
+            let Some(pack) = archive.first_file_decompressed(id) else { continue };
+            if pack.get(..2) != Some(b"PC") {
+                continue;
+            }
+            assert!(normalize_pack_for_engine(&pack).unwrap().is_none(), "the file {id} of the game stays as it is");
+            checked += 1;
+        }
+        assert!(checked > 700, "{checked} models");
+        let Ok(path) = std::env::var("SANGO_CONVERTED_MODEL") else { return };
+        let bytes = std::fs::read(path).unwrap();
+        let pack = &bytes[4..];
+        let fixed = normalize_pack_for_engine(pack).unwrap().expect("the converted model changes");
+        let (before, after) = (crate::bundle::split(pack).unwrap().1, crate::bundle::split(&fixed).unwrap().1);
+        // The lists of commands are on 16 bytes and are a multiple of 16 bytes: a second pass has nothing to move.
+        for part in &after {
+            if part.get(..4) == Some(b"BCH\0") {
+                assert!(align_command_lists(part).unwrap().is_none(), "the lists of commands are aligned");
+            }
+        }
+        let (a, b) = (parse_model(before[0]).unwrap(), parse_model(after[0]).unwrap());
+        assert_eq!(a.meshes.len(), b.meshes.len());
+        for (x, y) in a.meshes.iter().zip(&b.meshes) {
+            assert_eq!(x.triangles, y.triangles);
+            assert_eq!(x.vertices.len(), y.vertices.len());
+        }
+        assert!(normalize_pack_for_engine(&fixed).unwrap().is_none(), "a second pass changes nothing");
     }
 
     #[test]
