@@ -104,7 +104,7 @@ impl MotionPack {
     /// Reads the rest pose and the places of the motions.
     pub fn parse(data: &[u8]) -> Result<MotionPack, String> {
         let count = u32_at(data, 0)? as usize;
-        if count > 200 {
+        if count > 512 {
             return Err("This is not a motion file.".into());
         }
         let base = u32_at(data, 4)? as usize;

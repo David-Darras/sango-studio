@@ -28,6 +28,7 @@ pub fn folders() -> Vec<(String, usize)> {
         ("script/ai".to_string(), 7),
         ("script/amie".to_string(), 89),
         ("dexnav".to_string(), 248),
+        ("overworld/model".to_string(), 21),
     ];
     found.extend(LANGUAGES.iter().map(|language| (format!("game_text/{}", language.folder), language.archive)));
     found

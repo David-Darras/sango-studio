@@ -44,6 +44,8 @@ impl App {
             Box::new(sango_encounter::EncounterPage::default()),
             Box::new(sango_formula::Formula::default()),
             Box::new(sango_nature::Nature::default()),
+            Box::new(sango_character::Character::default()),
+
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_code::Code::default()),
