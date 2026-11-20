@@ -124,6 +124,32 @@ pub struct ModelReplacement {
     pub model: String,
 }
 
+/// The icon of a species or of a form: a picture of 40 × 30 pixels, the file `icons/<file>.png` of the pack.
+///
+/// With `game_file` the picture replaces that file of the icons of the game (a species of the game). Without it, the icon is for
+/// a species of the pack: Studio gives it a file of its own and tells the plugin in the table of the icons. Only the form 0 of a
+/// species of a pack has an icon for now.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackIcon {
+    pub species: Ref,
+    #[serde(default)]
+    pub form: u16,
+    /// The name of the picture: the file `icons/<file>.png`.
+    pub file: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_file: Option<u16>,
+    /// The name that Studio shows, for example `Venusaur (Mega)`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+}
+
+impl PackIcon {
+    /// The key of the icon for the choices of the user (see `Library::is_enabled`).
+    pub fn key(&self) -> String {
+        format!("icon:{}", self.file)
+    }
+}
+
 /// The description of a pack and its content.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pack {
@@ -150,6 +176,12 @@ pub struct Pack {
     /// The models of the species of the game that this pack replaces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replacements: Vec<ModelReplacement>,
+    /// The icons of the species and of the forms of the pack. The pictures are in `icon_files`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub icons: Vec<PackIcon>,
+    /// The pictures of the icons by name (PNG files of 40 × 30 pixels), read from the pack file.
+    #[serde(skip)]
+    pub icon_files: std::collections::BTreeMap<String, Vec<u8>>,
     /// The file that the pack was read from: the models are read from it when they are needed.
     #[serde(skip)]
     pub file: Option<PathBuf>,
@@ -254,6 +286,11 @@ impl Pack {
         if self.id.is_empty() || self.id.chars().any(|c| !(c.is_ascii_alphanumeric() || c == '-' || c == '_')) {
             return Err("The id of the pack must have letters, digits, '-' or '_'.".into());
         }
+        for icon in &self.icons {
+            if icon.file.is_empty() || icon.file.chars().count() > 60 || icon.file.chars().any(|c| c == '/' || c == '\\' || c.is_control()) {
+                return Err(format!("The icon file '{}' has a wrong name.", icon.file));
+            }
+        }
         let mut names = std::collections::HashSet::new();
         for species in &self.species {
             if species.name.is_empty() || species.name.chars().count() > MAX_NAME {
@@ -346,6 +383,10 @@ impl Pack {
                 zip.write_all(bytes).map_err(|e| e.to_string())?;
             }
         }
+        for (name, bytes) in &self.icon_files {
+            zip.start_file(format!("icons/{name}.png"), options).map_err(|e| e.to_string())?;
+            zip.write_all(bytes).map_err(|e| e.to_string())?;
+        }
         zip.finish().map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -359,7 +400,15 @@ impl Pack {
         let mut zip = zip::ZipArchive::new(reader).map_err(|e| format!("This is not a pack: {e}"))?;
         let mut text = String::new();
         zip.by_name(MANIFEST).map_err(|_| format!("This pack has no {MANIFEST}."))?.read_to_string(&mut text).map_err(|e| e.to_string())?;
-        Pack::from_json(&text)
+        let mut pack = Pack::from_json(&text)?;
+        // The pictures of the icons are small: they stay in memory.
+        let names: Vec<String> = zip.file_names().filter(|n| n.starts_with("icons/") && n.ends_with(".png")).map(str::to_string).collect();
+        for name in names {
+            let mut bytes = Vec::new();
+            zip.by_name(&name).map_err(|e| e.to_string())?.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            pack.icon_files.insert(name["icons/".len()..name.len() - ".png".len()].to_string(), bytes);
+        }
+        Ok(pack)
     }
 
     /// Writes a pack without models in a file.

@@ -36,6 +36,79 @@ mod test {
         Pack { id: id.into(), name: id.into(), version: "1".into(), species, ..Pack::default() }
     }
 
+    /// The icons of the packs go on the SD card with the table for the plugin, through a zip file, and leave with the pack.
+    #[test]
+    fn the_icons_of_the_packs_are_written_and_removed() {
+        let mut picture = image::RgbaImage::new(40, 30);
+        for pixel in picture.pixels_mut().take(50) {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        let mut png = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let png = png.into_inner();
+        let mut a = pack("alpha", &["Alpha", "Beta"]);
+        a.icons = vec![pack::PackIcon { species: Ref::key("Beta"), form: 0, file: "beta".into(), game_file: None, label: String::new() }];
+        a.icon_files.insert("beta".into(), png.clone());
+        let mut g = Pack { id: "game".into(), name: "game".into(), version: "1".into(), ..Pack::default() };
+        g.icons = vec![pack::PackIcon { species: Ref::Game(1), form: 0, file: "one".into(), game_file: Some(1), label: String::new() }];
+        g.icon_files.insert("one".into(), png);
+        let folder = std::env::temp_dir().join(format!("sango_pack_icons_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let (fa, fg) = (folder.join("a.sangopack"), folder.join("g.sangopack"));
+        a.save(&fa).unwrap();
+        g.save(&fg).unwrap();
+        // The pictures come back from the file.
+        assert_eq!(Pack::open(&fa).unwrap().icon_files.len(), 1);
+        std::fs::create_dir_all(folder.join("sd")).unwrap();
+        let sd = SdCard::open(folder.join("sd").to_str().unwrap()).unwrap();
+        let mut library = Library::default();
+        library.install(Pack::open(&fa).unwrap()).unwrap();
+        library.install(Pack::open(&fg).unwrap()).unwrap();
+        assert_eq!(library.write_icons(&sd).unwrap(), 2);
+        let beta = library::FIRST_PACK_ICON + 1;
+        assert!(sd.read(&format!("species/icon/{beta}.bin")).is_some());
+        assert!(sd.read("species/icon/1.bin").is_some());
+        let map = sd.read(library::ICON_MAP_PATH).unwrap();
+        assert_eq!(&map[..4], b"SICM");
+        assert_eq!(u32::from_le_bytes(map[4..8].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes([map[8], map[9]]), table::FIRST_SPECIES + 1);
+        assert_eq!(u16::from_le_bytes([map[12], map[13]]), beta);
+        // A thing that the user turns off is not written, and comes back when it is turned on.
+        library.set_enabled("alpha", "icon:beta", false);
+        assert_eq!(library.write_icons(&sd).unwrap(), 1);
+        assert!(!library.is_enabled("alpha", "icon:beta"));
+        library.set_enabled("alpha", "icon:beta", true);
+        assert_eq!(library.write_icons(&sd).unwrap(), 2);
+        // Removing a pack removes its files at the next write.
+        library.remove("game").unwrap();
+        assert_eq!(library.write_icons(&sd).unwrap(), 1);
+        assert!(sd.read("species/icon/1.bin").is_none());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A pack that is cut in two keeps the numbers: the new pack takes the species over when both are installed together.
+    #[test]
+    fn species_move_to_a_new_pack_and_keep_their_numbers() {
+        let mut library = Library::default();
+        library.install(pack("whole", &["Alpha", "Beta", "Gamma"])).unwrap();
+        let numbers: Vec<u16> = ["Alpha", "Beta", "Gamma"].iter().map(|n| library.number_of(n).unwrap()).collect();
+        // The new pack alone is refused while the old one still has the species.
+        let mut refused = library.clone();
+        let error = refused.install(pack("part", &["Gamma"])).unwrap_err();
+        assert!(error.contains("already installed by the pack 'whole'"), "{error}");
+        // The two new packs together: the order of the list does not matter.
+        let results = library.install_many(vec![pack("part", &["Gamma"]), pack("whole", &["Alpha", "Beta"])]);
+        // And a species that goes from one installed pack to another one, in the wrong order.
+        let mut crossed = library.clone();
+        let results_crossed = crossed.install_many(vec![pack("part", &["Gamma", "Beta"]), pack("whole", &["Alpha"])]);
+        assert!(results_crossed.iter().all(|(_, r)| r.is_ok()), "{results_crossed:?}");
+        assert_eq!(crossed.registry.species.iter().find(|s| s.name == "Beta").unwrap().pack, "part");
+        assert!(results.iter().all(|(_, r)| r.is_ok()), "{results:?}");
+        assert_eq!(["Alpha", "Beta", "Gamma"].iter().map(|n| library.number_of(n).unwrap()).collect::<Vec<_>>(), numbers);
+        assert_eq!(library.registry.species.iter().find(|s| s.name == "Gamma").unwrap().pack, "part");
+        assert_eq!(library.registry.species.len(), 3);
+    }
+
     #[test]
     fn a_pack_goes_through_a_zip_file_and_is_checked() {
         let original = pack("test", &["Alpha", "Beta"]);

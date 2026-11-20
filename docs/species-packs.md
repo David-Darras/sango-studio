@@ -182,3 +182,18 @@ the game too), their moves and evolutions (from the pack, until the user changes
 `sango/pokemodel` of the SD card). The Leveling rate page, the Ability page (the species that have an ability) and the evolution
 choices use the same list. A change that the user makes to a species of a pack is saved like any other: `species/data/<number>_<form>.bin`.
 The text tab, the CSV files and the icons of the species of the packs are not done.
+
+## Icons in a pack
+
+A pack can hold the icons of the boxes and the lists: the pictures `icons/<name>.png` (PNG, 40 × 30 pixels) and, in the manifest, a list
+`icons` of `{ "species", "form", "file", "game_file" }`.
+
+- Without `game_file`: the icon of the form 0 of a species of the pack (`species` is its name). Studio gives it the file
+  5000 plus the place of the species in the registry.
+- With `game_file`: the picture replaces that file of the icons of the game (`species` is its number). The pack `home-icons` holds
+  the Pokémon HOME style pictures of the species of the game and of their Mega Evolutions.
+
+When Studio installs, removes or restores a pack (page Packs), it writes `species/icon/<file>.bin` and the table `species/icon_map.bin`
+(`Library::write_icons`). A file that a removed pack wrote is erased. The plugin reads the table for the species 724 and more.
+Only the form 0 of the species of a pack has an icon for now; the icons of the other forms stay in the pack and are not used yet.
+The tool `add_icons <pack> <folder> [--game]` puts the pictures of a folder in a pack file.

@@ -92,6 +92,31 @@ pub struct InstalledPack {
     pub version: String,
     /// False for a pack that was removed: its places stay reserved.
     pub active: bool,
+    /// The things of the pack that the user turned off, by key (for example `icon:0003-Mega`, see `PackIcon::key`).
+    /// Studio does not write them on the SD card.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disabled: Vec<String>,
+}
+
+/// The first file number for the icons of the species of the packs. The archive of the icons of the game has fewer files.
+pub const FIRST_PACK_ICON: u16 = 5000;
+
+/// The path on the SD card of the table that gives the plugin the icon file of each species of a pack.
+///
+/// Little-endian: the signature `SICM`, a `u32` count, then for each entry three `u16`: the species number, the form and the file.
+pub const ICON_MAP_PATH: &str = "species/icon_map.bin";
+
+/// The number of the first species of a pack.
+const FIRST_PACK_SPECIES: u16 = FIRST_SPECIES;
+
+/// An icon file of the game: a picture of 40 × 30 pixels as a CLIM compressed with LZ11.
+pub fn icon_file_bytes(png: &[u8]) -> Result<Vec<u8>, String> {
+    let image = image::load_from_memory(png).map_err(|e| format!("icon: {e}"))?.to_rgba8();
+    if image.width() != 40 || image.height() != 30 {
+        return Err(format!("An icon must have 40 × 30 pixels, this one has {} × {}.", image.width(), image.height()));
+    }
+    let clim = sango_core::Clim::from_rgba(40, 30, image.as_raw())?;
+    Ok(sango_core::lz::compress_lz11(&clim.to_bytes()))
 }
 
 /// The place of a species: its number is `FIRST_SPECIES` and its position in the list.
@@ -181,9 +206,25 @@ impl Library {
         }
         let mut registry = self.registry.clone();
         for species in &pack.species {
-            match registry.species.iter().find(|s| s.name == species.name) {
-                Some(found) if found.pack == pack.id => {}
-                Some(found) => return Err(format!("The species '{}' is already installed by the pack '{}'.", species.name, found.pack)),
+            match registry.species.iter().position(|s| s.name == species.name) {
+                Some(place) if registry.species[place].pack == pack.id => {}
+                Some(place) => {
+                    // A species that a pack gave up (the pack was cut in two): the pack that installed it first no longer has it,
+                    // so the new pack takes it over with the same number and the same model slot.
+                    let old = registry.species[place].pack.clone();
+                    if self.packs.iter().any(|p| p.id == old && p.species.iter().any(|s| s.name == species.name)) {
+                        return Err(format!(
+                            "The species '{}' is already installed by the pack '{old}'. If it moved to '{}', install the new version of '{old}' first, or both together.",
+                            species.name, pack.id
+                        ));
+                    }
+                    registry.species[place].pack = pack.id.clone();
+                    if let ModelRef::File { file } = &species.model {
+                        if let Some(model) = registry.models.iter_mut().find(|m| m.pack == old && &m.name == file) {
+                            model.pack = pack.id.clone();
+                        }
+                    }
+                }
                 None => registry.species.push(RegisteredSpecies { name: species.name.clone(), pack: pack.id.clone() }),
             }
         }
@@ -208,7 +249,7 @@ impl Library {
                 found.name = pack.name.clone();
                 found.version = pack.version.clone();
             }
-            None => registry.packs.push(InstalledPack { id: pack.id.clone(), name: pack.name.clone(), version: pack.version.clone(), active: true }),
+            None => registry.packs.push(InstalledPack { id: pack.id.clone(), name: pack.name.clone(), version: pack.version.clone(), active: true, disabled: Vec::new() }),
         }
         self.packs.retain(|p| p.id != pack.id);
         self.packs.push(pack);
@@ -221,7 +262,9 @@ impl Library {
     /// result for each pack, in the order in which the packs were tried.
     pub fn install_many(&mut self, packs: Vec<Pack>) -> Vec<(String, Result<(), String>)> {
         let mut results = Vec::new();
-        let mut waiting = packs;
+        // The packs that are installed already come first: a new version that gave species up lets the other packs take them over.
+        let (mut waiting, others): (Vec<Pack>, Vec<Pack>) = packs.into_iter().partition(|p| self.registry.packs.iter().any(|i| i.id == p.id));
+        waiting.extend(others);
         while !waiting.is_empty() {
             let before = waiting.len();
             let mut later = Vec::new();
@@ -229,7 +272,7 @@ impl Library {
             for pack in waiting {
                 match self.install(pack.clone()) {
                     Ok(()) => results.push((pack.id.clone(), Ok(()))),
-                    Err(error) if error.contains("needs the species") => {
+                    Err(error) if error.contains("needs the species") || error.contains("is already installed by the pack") => {
                         last_error = error;
                         later.push(pack);
                     }
@@ -685,10 +728,97 @@ impl Library {
         Ok(written)
     }
 
-    /// Writes everything: the registry, the packs and the table (see [`Library::save`]) and the models (see
-    /// [`Library::write_models`]).
+    /// True when the user did not turn the thing off (the key is for example `PackIcon::key`).
+    pub fn is_enabled(&self, pack: &str, key: &str) -> bool {
+        self.registry.packs.iter().find(|p| p.id == pack).map_or(true, |p| !p.disabled.iter().any(|k| k == key))
+    }
+
+    /// Turns a thing of a pack on or off. Call `write_icons` (or `apply`) to write the change on the SD card.
+    pub fn set_enabled(&mut self, pack: &str, key: &str, enabled: bool) {
+        if let Some(installed) = self.registry.packs.iter_mut().find(|p| p.id == pack) {
+            installed.disabled.retain(|k| k != key);
+            if !enabled {
+                installed.disabled.push(key.to_string());
+            }
+        }
+    }
+
+    /// Writes the icons of the active packs on the SD card: `species/icon/<file>.bin` and the table `species/icon_map.bin`.
+    ///
+    /// An icon with a `game_file` replaces that file of the game. The icon of a species of a pack gets the file
+    /// `FIRST_PACK_ICON` plus the place of the species in the registry. A later pack wins over an earlier one. The files that an
+    /// earlier call wrote and that no pack asks for now are removed (the list is in `species/icon_state.json`, on the computer).
+    /// Returns the number of files that the packs ask for.
+    pub fn write_icons(&self, sd: &SdCard) -> Result<usize, String> {
+        use std::collections::BTreeMap;
+        let mut files: BTreeMap<u16, Vec<u8>> = BTreeMap::new();
+        let mut map: Vec<(u16, u16, u16)> = Vec::new();
+        for pack in &self.packs {
+            if !self.is_active(&pack.id) {
+                continue;
+            }
+            let disabled = self.registry.packs.iter().find(|p| p.id == pack.id).map(|p| p.disabled.clone()).unwrap_or_default();
+            for icon in &pack.icons {
+                if disabled.contains(&icon.key()) {
+                    continue;
+                }
+                let Some(png) = pack.icon_files.get(&icon.file) else { continue };
+                let (file, entry) = match (&icon.species, icon.game_file) {
+                    (Ref::Game(_), Some(file)) => (file, None),
+                    (Ref::Key(name), None) if icon.form == 0 => {
+                        let Some(place) = self.registry.species.iter().position(|s| &s.name == name) else { continue };
+                        (FIRST_PACK_ICON + place as u16, Some((FIRST_PACK_SPECIES + place as u16, 0u16)))
+                    }
+                    _ => continue,
+                };
+                let bytes = icon_file_bytes(png)?;
+                files.insert(file, bytes);
+                if let Some((species, form)) = entry {
+                    map.retain(|&(s, f, _)| (s, f) != (species, form));
+                    map.push((species, form, file));
+                }
+            }
+        }
+        let state_path = "species/icon_state.json";
+        let previous: Vec<u16> = sd.read(state_path).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        for old in previous {
+            if !files.contains_key(&old) {
+                let path = format!("species/icon/{old}.bin");
+                if sd.remove(&path)? {
+                    sd.mark_changed(&path)?;
+                }
+            }
+        }
+        for (file, bytes) in &files {
+            let path = format!("species/icon/{file}.bin");
+            if sd.read(&path).as_deref() != Some(bytes.as_slice()) {
+                sd.write(&path, bytes)?;
+                sd.mark_changed(&path)?;
+            }
+        }
+        map.sort_unstable();
+        let mut table = b"SICM".to_vec();
+        table.extend_from_slice(&(map.len() as u32).to_le_bytes());
+        for (species, form, file) in &map {
+            for value in [species, form, file] {
+                table.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        if sd.read(ICON_MAP_PATH).as_deref() != Some(table.as_slice()) {
+            sd.write(ICON_MAP_PATH, &table)?;
+            sd.mark_changed(ICON_MAP_PATH)?;
+        }
+        let list: Vec<u16> = files.keys().copied().collect();
+        sd.write(state_path, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
+        Ok(files.len())
+    }
+
+    /// Writes everything: the registry, the packs and the table (see [`Library::save`]), the models (see
+    /// [`Library::write_models`]) and the icons (see [`Library::write_icons`]).
     pub fn apply(&mut self, sd: &SdCard, dump: &Dump) -> Result<usize, String> {
         self.save(sd)?;
-        self.write_models(&sd.models_folder(), dump)
+        let models = self.write_models(&sd.models_folder(), dump)?;
+        self.write_icons(sd)?;
+        Ok(models)
     }
 }

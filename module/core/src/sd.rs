@@ -12,12 +12,13 @@ const RELOAD_PATH_SIZE: usize = 64;
 const RELOAD_MAX_PATHS: usize = 256;
 
 /// The paths in the folder of the studio that the plugin reads: the other files stay on the computer. A folder ends with `/`.
-const PUBLISHED: [&str; 25] = [
+const PUBLISHED: [&str; 26] = [
     "reload.bin",
     "species/table.bin",
     "species/data/",
     "species/pokedex_data.bin",
     "species/icon/",
+    "species/icon_map.bin",
     "species/cry/",
     "species/level_up_moves/",
     "species/egg_moves/",
@@ -164,6 +165,12 @@ impl SdCard {
     /// from there. They are only on the SD card.
     pub fn models_folder(&self) -> PathBuf {
         self.root.join("species").join("model")
+    }
+
+    /// The folder of the music files of the plugin, `sango/bgm`, next to the folder of the studio on the SD card. A file with the name of a
+    /// music file of the game plays in place of it.
+    pub fn bgm_folder(&self) -> PathBuf {
+        self.root.parent().unwrap_or(&self.root).join("sango").join("bgm")
     }
 
     /// What [`SdCard::erase_everything`] would remove.

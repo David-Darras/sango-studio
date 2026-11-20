@@ -256,6 +256,26 @@ fn read_motions(archive: &dyn Files, file: usize) -> Option<MotionPack> {
     MotionPack::parse(parts.first()?).ok()
 }
 
+/// The files of a model of a pack, as the page Packs reads them (the 8 files of a model, see `sango_pack::Pack::read_model`).
+struct PackFiles<'a>(&'a [Vec<u8>]);
+
+impl Files for PackFiles<'_> {
+    fn get(&self, id: usize) -> Option<Cow<'_, [u8]>> {
+        self.0.get(id).map(|bytes| Cow::Borrowed(bytes.as_slice()))
+    }
+}
+
+/// Reads a model of a pack from its 8 files: the model and its pictures.
+pub fn read_pack_model(files: &[Vec<u8>]) -> Result<(Model, Vec<Texture>), String> {
+    read_model(&PackFiles(files), 0, false)
+}
+
+/// Reads the model of a species of the game (the archive 8) for a slot of its list: the model and its pictures.
+pub fn read_game_model(archive: &Garc, species: usize, slot: u8) -> Result<(Model, Vec<Texture>), String> {
+    let variant = variants(archive, species).into_iter().find(|v| v.slot == slot).ok_or_else(|| format!("The species {species} has no model in the slot {slot}."))?;
+    read_model(archive, variant.file, false)
+}
+
 /// Reads the model of a file and its pictures.
 fn read_model(archive: &dyn Files, first: usize, shiny: bool) -> Result<(Model, Vec<Texture>), String> {
     let model = parse_model(parts(archive, first)?.first().ok_or("The file of the model has no part.")?)?;
