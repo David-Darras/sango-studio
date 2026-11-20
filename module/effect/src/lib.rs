@@ -5,6 +5,7 @@
 //! (`effect/<number>.bin`, compressed as in the archive) and the plugin reads it instead of the file of the game. See `effect_file.rs`.
 
 mod effect_file;
+mod preview;
 
 use effect_file::{ColorCurve, Effect, FieldKind, NumberCurve};
 use sango_core::{Dump, Garc, SdCard};
@@ -31,13 +32,40 @@ pub struct EffectPage {
     /// The pictures of the open effect, as textures.
     textures: Vec<Option<egui::TextureHandle>>,
     retired: sango_ui::retired::Retired,
+    /// The preview of the open effect.
+    view: PreviewState,
 }
 
 impl Default for EffectPage {
     fn default() -> Self {
-        EffectPage { garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default() }
+        EffectPage { garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default() }
     }
 }
+
+/// The state of the preview: the frame, the point of view, and the picture.
+struct PreviewState {
+    frame: f32,
+    playing: bool,
+    repeat: bool,
+    camera: preview::Camera,
+    last_tick: Option<std::time::Instant>,
+    texture: Option<egui::TextureHandle>,
+    /// What the picture shows: the file, the frame, the point of view and the bytes of the effect (a change of one of them draws it again).
+    shown: Option<(usize, f32, preview::Camera, Vec<u8>)>,
+    pictures: Vec<Option<preview::Picture>>,
+    extent: f32,
+}
+
+impl Default for PreviewState {
+    fn default() -> Self {
+        PreviewState { frame: 0.0, playing: true, repeat: true, camera: preview::Camera::default(), last_tick: None, texture: None, shown: None, pictures: Vec::new(), extent: 10.0 }
+    }
+}
+
+/// The side of the picture of the preview, in pixels.
+const PREVIEW_SIDE: usize = 380;
+/// The frames each second.
+const FRAMES_PER_SECOND: f32 = 30.0;
 
 fn path(file: usize) -> String {
     format!("{FOLDER}/{file}.bin")
@@ -177,6 +205,74 @@ impl EffectPage {
             }
             Err(message) => self.status = Some((false, message)),
         }
+    }
+
+    /// The preview of the open effect: the particles at a frame, with the buttons of the time.
+    fn preview_card(&mut self, ui: &mut egui::Ui) {
+        let Some(effect) = &self.effect else { return };
+        let (file, view) = (self.file, &mut self.view);
+        let length = preview::length(effect);
+        widget::card(ui, |ui| {
+            ui.label(widget::title("Preview"));
+            ui.label(widget::hint("The particles appear where and when the layers say, with their size, colour, transparency and picture. They do not move yet: the speeds and the forces are not read."));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if widget::button(ui, if view.playing { "Pause" } else { "Play" }) {
+                    view.playing = !view.playing;
+                    view.last_tick = None;
+                }
+                if widget::button(ui, "Restart") {
+                    view.frame = 0.0;
+                }
+                ui.checkbox(&mut view.repeat, "Repeat");
+                ui.add(egui::Slider::new(&mut view.frame, 0.0..=length).text("frame").integer());
+            });
+            // The time goes on.
+            let now = std::time::Instant::now();
+            if view.playing {
+                let seconds = view.last_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32().min(0.25));
+                view.frame += seconds * FRAMES_PER_SECOND;
+                if view.frame > length {
+                    view.frame = if view.repeat { 0.0 } else { length };
+                    view.playing = view.repeat;
+                }
+                ui.ctx().request_repaint();
+            }
+            view.last_tick = Some(now);
+            let (rect, response) = ui.allocate_exact_size(egui::vec2(PREVIEW_SIDE as f32, PREVIEW_SIDE as f32), egui::Sense::click_and_drag());
+            if response.dragged() {
+                let delta = response.drag_delta();
+                view.camera.yaw -= delta.x * 0.01;
+                view.camera.pitch = (view.camera.pitch + delta.y * 0.01).clamp(-1.4, 1.4);
+            }
+            if response.hovered() {
+                let scroll = ui.input(|i| i.smooth_scroll_delta.y);
+                ui.input_mut(|i| {
+                    i.smooth_scroll_delta = egui::Vec2::ZERO;
+                    i.raw_scroll_delta = egui::Vec2::ZERO;
+                });
+                if scroll != 0.0 {
+                    view.camera.zoom = (view.camera.zoom * (1.0 + scroll * 0.002)).clamp(0.3, 6.0);
+                }
+            }
+            // Draw again when the file, the frame, the point of view or the effect changed.
+            let bytes = effect.bytes();
+            let same = matches!(&view.shown, Some((f, frame, camera, saved)) if *f == file && *frame == view.frame && *camera == view.camera && saved.as_slice() == bytes);
+            if !same || view.texture.is_none() {
+                if !matches!(&view.shown, Some((f, _, _, saved)) if *f == file && saved.as_slice() == bytes) {
+                    view.pictures = preview::pictures(effect);
+                    view.extent = preview::extent(effect);
+                }
+                let pixels = preview::render(effect, &view.pictures, view.frame, view.camera, view.extent, PREVIEW_SIDE);
+                view.texture = Some(sango_ui::textures::load(ui.ctx(), "effect_preview", egui::ColorImage::from_rgba_unmultiplied([PREVIEW_SIDE, PREVIEW_SIDE], &pixels), egui::TextureOptions::LINEAR));
+                view.shown = Some((file, view.frame, view.camera, bytes.to_vec()));
+            }
+            if let Some(texture) = &view.texture {
+                let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                ui.painter().image(texture.id(), rect, full, egui::Color32::WHITE);
+            }
+            ui.label(widget::hint("Drag to turn the view, scroll to zoom."));
+        });
     }
 
     fn tool_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
@@ -625,6 +721,8 @@ impl Module for EffectPage {
         self.tool_bar(ui, session);
         ui.add_space(8.0);
         egui::ScrollArea::vertical().id_salt("effect_page").auto_shrink([false, false]).show(ui, |ui| {
+            self.preview_card(ui);
+            ui.add_space(8.0);
             self.layers(ui);
         });
     }
