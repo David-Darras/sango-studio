@@ -4,6 +4,10 @@
 //! it gives numbers to the species, writes the table that the plugin reads, keeps a copy of the pack, and writes the models
 //! of all the packs where the plugin reads them. Writing the models takes some seconds, so the work runs in a thread.
 
+mod content;
+mod model_view;
+
+use content::PackContent;
 use sango_core::{Dump, SdCard};
 use sango_pack::library::{MAX_FORMS, MAX_MODELS, MAX_SPECIES};
 use sango_pack::{Library, Pack};
@@ -37,6 +41,8 @@ pub struct Packs {
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
     job: Option<Job>,
+    /// The view of what a pack holds.
+    content: PackContent,
 }
 
 /// Does what the user asked, and writes everything on the SD card: the registry, the table, the packs and the models.
@@ -194,6 +200,7 @@ impl Packs {
     fn list_card(&mut self, ui: &mut egui::Ui, session: &Session) {
         let busy = self.job.is_some();
         let mut asked = None;
+        let mut show = None;
         widget::card(ui, |ui| {
             ui.label(widget::title("Installed packs"));
             if self.library.registry.packs.is_empty() {
@@ -224,6 +231,9 @@ impl Packs {
                         }
                     }
                 }
+                if installed.active && pack.map_or(false, |p| !p.icons.is_empty() || !p.model_names().is_empty()) && widget::button(ui, "Content…") {
+                    show = Some(installed.id.clone());
+                }
                 ui.add_enabled_ui(!busy, |ui| {
                     if installed.active {
                         if widget::confirm_button(ui, "Remove", "Click again to remove") {
@@ -236,6 +246,10 @@ impl Packs {
                 ui.separator();
             }
         });
+        if let Some(id) = show {
+            self.content.close();
+            self.content.open = Some(id);
+        }
         if let Some(action) = asked {
             self.start(session, action);
         }
@@ -272,6 +286,10 @@ impl Module for Packs {
             self.install_card(ui, session);
             ui.add_space(8.0);
             self.list_card(ui, session);
+            if self.content.open.is_some() {
+                ui.add_space(8.0);
+                self.content.ui(ui, &mut self.library, sd, session.dump.as_ref());
+            }
         });
     }
 }
