@@ -46,6 +46,17 @@ const TARGET_SIZE_EXTRA: u32 = 8;
 const TARGET_LIFE: u32 = 11;
 
 const COLOR_INITIALIZER: u32 = 0x0400_0000;
+/// The rules of the movement. The meaning of these is read from the values of the files of the game: an initializer of 28 bytes
+/// with a speed and a direction (the target is 12), an updater that keeps a part of the speed at each frame, an initial turn
+/// and a speed of turn.
+const TARGET_MOVEMENT: u32 = 12;
+const TARGET_TURN: u32 = 2;
+const VELOCITY_INITIALIZER: u32 = 0x8000_0000;
+const DAMPING_UPDATER: u32 = 0x8000_0000;
+const TURN_INITIALIZER: u32 = 0x0010_0000;
+const TURN_UPDATER: u32 = 0x0080_0002;
+/// The place of the position of an emitter, in the object of the emitter.
+const EMITTER_POSITION: usize = 0x48;
 const LIFE_INITIALIZER: u32 = 0x0100_0000;
 const FIXED_VECTOR: u32 = 0x0080_0001;
 const KEYED_VECTOR: u32 = 0x0010_0000;
@@ -183,6 +194,23 @@ pub struct NumberCurve {
     pub end: f32,
     pub in_time: f32,
     pub out_time: f32,
+}
+
+/// How the particles of a layer move and turn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Motion {
+    /// The speed at the start, in units for each frame, and its direction (the start of the particle is the emitter).
+    pub speed: f32,
+    pub direction: [f32; 3],
+    /// The part of the speed that the particle keeps at each frame (1 keeps all of it).
+    pub keep: f32,
+    /// The angle of the picture at the start (radians), and true when it is a random angle between 0 and this one.
+    pub turn_start: f32,
+    pub turn_random: bool,
+    /// The turn of the picture at each frame (radians).
+    pub turn_speed: f32,
+    /// The place of the emitter.
+    pub position: [f32; 3],
 }
 
 /// A picture of the effect (the texture of the particles): where it is and how it is stored.
@@ -415,6 +443,33 @@ impl Effect {
     /// The updater of a target (the colour, the transparency, the size).
     fn updater(&self, layer: usize, target: u32) -> Option<usize> {
         self.rules(layer).1.into_iter().find(|&at| at + 84 <= self.data.len() && self.u32_at(at + OBJECT_TARGET) == target)
+    }
+
+    /// How the particles of a layer move. Each part is `None` or the neutral value when the layer has no such rule.
+    pub fn motion(&self, layer: usize) -> Motion {
+        let (initializers, updaters) = self.rules(layer);
+        let mut motion = Motion { speed: 0.0, direction: [0.0, 0.0, 0.0], keep: 1.0, turn_start: 0.0, turn_random: false, turn_speed: 0.0, position: self.vec3_at(self.emitters[layer] + EMITTER_POSITION) };
+        for at in initializers {
+            let (kind, target) = (self.u32_at(at + OBJECT_TYPE), self.u32_at(at + OBJECT_TARGET));
+            if target == TARGET_MOVEMENT && kind == VELOCITY_INITIALIZER && at + 28 <= self.data.len() {
+                motion.speed = self.f32_at(at + 12);
+                motion.direction = self.vec3_at(at + 16);
+            }
+            if target == TARGET_TURN && kind == TURN_INITIALIZER && at + 36 <= self.data.len() {
+                motion.turn_start = self.f32_at(at + 20);
+                motion.turn_random = self.f32_at(at + 32) != 0.0;
+            }
+        }
+        for at in updaters {
+            let (kind, target) = (self.u32_at(at + OBJECT_TYPE), self.u32_at(at + OBJECT_TARGET));
+            if target == TARGET_MOVEMENT && kind == DAMPING_UPDATER && at + 20 <= self.data.len() {
+                motion.keep = self.f32_at(at + 16);
+            }
+            if target == TARGET_TURN && kind == TURN_UPDATER && at + 28 <= self.data.len() {
+                motion.turn_speed = self.f32_at(at + 24);
+            }
+        }
+        motion
     }
 
     /// The colour of the particles of a layer, as it changes with their life.
@@ -661,3 +716,5 @@ mod test {
         assert_eq!(Effect::parse(effect.bytes()).unwrap().emission(0), emission);
     }
 }
+
+
