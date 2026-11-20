@@ -18,6 +18,7 @@ sango-move.workspace = true
 sango-ability.workspace = true
 sango-type.workspace = true
 sango-packs.workspace = true
+sango-music.workspace = true
 sango-overworld.workspace = true
 sango-trainer.workspace = true
 sango-choreography.workspace = true

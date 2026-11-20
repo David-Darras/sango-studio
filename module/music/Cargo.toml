@@ -1,0 +1,14 @@
+[package]
+name = "sango-music"
+version.workspace = true
+edition.workspace = true
+description = "The Music page of Sango Studio: the musics, the jingles and the sounds of the game."
+
+[dependencies]
+sango-core.workspace = true
+sango-cry.workspace = true
+sango-ui.workspace = true
+puremp3 = "0.1"
+mp3lame-encoder = "0.3"
+rfd.workspace = true
+rodio = { version = "0.20", default-features = false }
