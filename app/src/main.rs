@@ -48,6 +48,7 @@ impl App {
 
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
+            Box::new(sango_music::MusicPage::default()),
             Box::new(sango_code::Code::default()),
         ];
         // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).

@@ -27,6 +27,7 @@ sango-pack = { path = "module/pack" }
 sango-packs = { path = "module/packs" }
 sango-modelport = { path = "module/modelport" }
 sango-cry = { path = "module/cry" }
+sango-music = { path = "module/music" }
 sango-overworld = { path = "module/overworld" }
 sango-trainer = { path = "module/trainer" }
 sango-choreography = { path = "module/choreography" }
