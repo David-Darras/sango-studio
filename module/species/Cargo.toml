@@ -13,4 +13,6 @@ rodio = { version = "0.20", default-features = false }
 rfd.workspace = true
 sango-ui.workspace = true
 zerocopy.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
