@@ -9,6 +9,14 @@ const MAGIC: &[u8; 4] = b"CGFX";
 /// The signatures of an emitter and of a set of particles, at the byte 4 of the object.
 const EMITTER_SIGNATURE: &[u8; 4] = b"PEMT";
 const SET_SIGNATURE: &[u8; 4] = b"CNOD";
+/// The signature of a material, at the byte 4 of the object.
+const MATERIAL_SIGNATURE: &[u8; 4] = b"MTOB";
+// The places in a material (the blend function, the first texture coordinates and the first texture mapper).
+const MATERIAL_BLEND: usize = 0x148;
+const MATERIAL_COORDINATES: usize = 0x16C;
+const MATERIAL_MAPPERS: usize = 0x274;
+/// The place of the shape builder in a set.
+const SET_BUILDER: usize = 0x44;
 /// The least bytes of an emitter and of a set.
 const EMITTER_SIZE: usize = 0xE0;
 const SET_SIZE: usize = 0x60;
@@ -46,15 +54,6 @@ const TARGET_SIZE_EXTRA: u32 = 8;
 const TARGET_LIFE: u32 = 11;
 
 const COLOR_INITIALIZER: u32 = 0x0400_0000;
-/// The rules of the movement. The meaning of these is read from the values of the files of the game: an initializer of 28 bytes
-/// with a speed and a direction (the target is 12), an updater that keeps a part of the speed at each frame, an initial turn
-/// and a speed of turn.
-const TARGET_MOVEMENT: u32 = 12;
-const TARGET_TURN: u32 = 2;
-const VELOCITY_INITIALIZER: u32 = 0x8000_0000;
-const DAMPING_UPDATER: u32 = 0x8000_0000;
-const TURN_INITIALIZER: u32 = 0x0010_0000;
-const TURN_UPDATER: u32 = 0x0080_0002;
 /// The place of the position of an emitter, in the object of the emitter.
 const EMITTER_POSITION: usize = 0x48;
 const LIFE_INITIALIZER: u32 = 0x0100_0000;
@@ -196,21 +195,133 @@ pub struct NumberCurve {
     pub out_time: f32,
 }
 
-/// How the particles of a layer move and turn.
+/// A rule that gives their first value to the streams of a new particle. The target is the stream: 0 the place, 1 the size, 2 the turn,
+/// 3 the colour, 4 the transparency, 11 the life, 12 the speed.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Motion {
-    /// The speed at the start, in units for each frame, and its direction (the start of the particle is the emitter).
-    pub speed: f32,
-    pub direction: [f32; 3],
-    /// The part of the speed that the particle keeps at each frame (1 keeps all of it).
-    pub keep: f32,
-    /// The angle of the picture at the start (radians), and true when it is a random angle between 0 and this one.
-    pub turn_start: f32,
-    pub turn_random: bool,
-    /// The turn of the picture at each frame (radians).
-    pub turn_speed: f32,
-    /// The place of the emitter.
-    pub position: [f32; 3],
+pub enum Initializer {
+    /// Adds a speed in a direction.
+    Directional { power: f32, direction: [f32; 3] },
+    /// Adds a speed in a direction that changes by a random angle (a cone).
+    RandomDirectional { power: f32, direction: [f32; 3], angle: f32 },
+    /// Adds a speed away from the centre of the emitter.
+    Origin { power: f32 },
+    /// Adds a speed in a random direction.
+    Random { power: f32 },
+    /// Adds a speed away from the vertical axis of the emitter.
+    YAxis { power: f32 },
+    Vector3 { value: [f32; 3] },
+    /// A number and a part of it that is changed at random.
+    Float { base: f32, random: f32 },
+    /// A whole number between a shortest and a longest value.
+    FloatRange { max: f32, min: f32 },
+    FloatImmediate { value: f32 },
+    Vector2 { value: [f32; 2] },
+    /// Three numbers that all change by the same random part.
+    Vector3Random1 { base: [f32; 3], random: f32 },
+    /// Three numbers that each change by their own random part.
+    Vector3Random3 { base: [f32; 3], random: [f32; 3] },
+    /// Multiplies the speed by a random number around 1.
+    SpeedRandom { random: f32 },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct InitRule {
+    pub target: i32,
+    pub rule: Initializer,
+}
+
+/// A rule that changes the streams of a particle at each frame.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Updater {
+    /// Multiplies the stream by a number at each frame (the air resistance when the stream is the speed).
+    Acceleration { factor: f32 },
+    /// Moves the particle by its speed.
+    General,
+    /// Adds a speed in a direction at each frame.
+    Gravity { power: f32, direction: [f32; 3] },
+    /// Turns the stream around an axis at each frame.
+    Spin { power: f32, axis: [f32; 3] },
+    /// Adds a random number to the stream at each frame.
+    Random { power: [f32; 3], interval: i32 },
+    /// Pulls the stream toward a place.
+    Magnet { power: f32, position: [f32; 3], flags: u32 },
+    Collision { power: f32, position: f32, flags: u32 },
+    /// Adds a value to the stream at each frame (the turn of the picture). The value can follow a curve of the life.
+    Add { value: [f32; 3], animation: Option<Animation> },
+    AddRandom { value: [f32; 3] },
+    Set { value: [f32; 3], animation: Option<Animation> },
+    SetNumber { value: f32, animation: Option<Animation> },
+    /// A number that follows 4 keys during the life (the transparency), in 65535 parts.
+    NumberKeys { in_time: u32, out_time: u32, values: [i32; 5] },
+    /// 3 numbers that follow 4 keys during the life (the colour, the size).
+    VectorKeys { in_time: u32, out_time: u32, values: [[f32; 3]; 5] },
+    SetVector2 { value: [f32; 2], animation: Option<Animation> },
+    /// The picture is cut in a grid and the particle shows one cell, the number of which can follow a curve (the pictures of a flame or a bolt).
+    TexturePattern { divisions: [u32; 2], index: i32, animation: Option<Animation> },
+    /// A rule that the preview does not know, with its type.
+    Other(u32),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdRule {
+    pub target: i32,
+    pub rule: Updater,
+}
+
+/// How the frame of an animation comes from the life of a particle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum AnimationKind {
+    /// The frame is the number of frames since the birth.
+    Frames,
+    /// The animation is stretched over the life of the particle.
+    Fitting,
+    /// The animation repeats every `duration` frames, from a random start when `random_offset` is true.
+    Loop { duration: u32, random_offset: bool },
+    /// Each particle shows one random frame.
+    Random,
+}
+
+/// A curve that a rule follows: the values of its numbers frame after frame.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Animation {
+    /// The number of frames, and the numbers of each frame.
+    pub length: usize,
+    pub stride: usize,
+    /// For each number of the value, true when the curve gives it (else the value of the rule stays).
+    pub enabled: Vec<bool>,
+    pub data: Vec<f32>,
+    pub kind: AnimationKind,
+    /// The number of frames of the animation that the life covers.
+    pub duration: f32,
+}
+
+/// How the game draws a particle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Builder {
+    /// A picture that faces the screen.
+    Billboard,
+    /// A picture that faces the screen, in the space of the world.
+    WorldBillboard,
+    /// A picture that stays upright and turns around the vertical axis to face the viewer.
+    UpBillboard,
+    /// A flat picture in the plane of the emitter.
+    Plane,
+}
+
+/// The material of a layer: how its particles are mixed with the picture behind them, the picture, and the coordinates of the picture.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Material {
+    /// True when the colour of the particle is added to what is behind it (else the transparency of the picture lets the back show).
+    pub additive: bool,
+    pub scale: [f32; 2],
+    pub rotate: f32,
+    pub translate: [f32; 2],
+    /// The way that the matrix of the coordinates is made: 0 and 1 are the same, 2 turns around the middle of the picture.
+    pub mode: u32,
+    /// What happens outside of the picture, on each axis: 0 the edge goes on, 1 nothing, 2 the picture repeats, 3 it repeats turned over.
+    pub wrap: [u32; 2],
+    /// The picture, as a place in `Effect::pictures()`.
+    pub picture: Option<usize>,
 }
 
 /// A picture of the effect (the texture of the particles): where it is and how it is stored.
@@ -226,6 +337,8 @@ pub struct Picture {
     /// The place of the bytes of the picture in the file, and their number.
     at: usize,
     size: usize,
+    /// The place of the object of the picture in the file (the materials point at it).
+    object: usize,
 }
 
 // The places in a texture object.
@@ -243,6 +356,8 @@ pub struct Effect {
     data: Vec<u8>,
     emitters: Vec<usize>,
     sets: Vec<usize>,
+    /// The materials: their places in the file.
+    materials: Vec<usize>,
     pictures: Vec<Picture>,
 }
 
@@ -259,17 +374,18 @@ impl Effect {
         if bytes.len() < 0x20 || &bytes[..4] != MAGIC {
             return Err("This is not an effect file.".to_string());
         }
-        let (mut emitters, mut sets) = (Vec::new(), Vec::new());
+        let (mut emitters, mut sets, mut materials) = (Vec::new(), Vec::new(), Vec::new());
         let mut at = 0;
         while at + EMITTER_SIZE.max(SET_SIZE) <= bytes.len() {
             match &bytes[at + 4..at + 8] {
                 s if s == EMITTER_SIGNATURE => emitters.push(at),
                 s if s == SET_SIGNATURE => sets.push(at),
+                s if s == MATERIAL_SIGNATURE => materials.push(at),
                 _ => {}
             }
             at += 4;
         }
-        let mut effect = Effect { data: bytes.to_vec(), emitters, sets, pictures: Vec::new() };
+        let mut effect = Effect { data: bytes.to_vec(), emitters, sets, materials, pictures: Vec::new() };
         effect.pictures = effect.find_pictures();
         Ok(effect)
     }
@@ -284,7 +400,7 @@ impl Effect {
                 let (size, levels) = (self.u32_at(at + TEXTURE_SIZE) as usize, self.u32_at(at + TEXTURE_LEVELS) as usize);
                 if let Some(start) = rel_at(&self.data, at + TEXTURE_DATA) {
                     if format <= 13 && width >= 8 && height >= 8 && width % 8 == 0 && height % 8 == 0 && levels >= 1 && start + size <= self.data.len() && size >= sango_core::model::texture_size(format, width, height) {
-                        found.push(Picture { name: self.text_at(at + NAME), format, width, height, levels, at: start, size });
+                        found.push(Picture { name: self.text_at(at + NAME), format, width, height, levels, at: start, size, object: at });
                     }
                 }
             }
@@ -445,31 +561,173 @@ impl Effect {
         self.rules(layer).1.into_iter().find(|&at| at + 84 <= self.data.len() && self.u32_at(at + OBJECT_TARGET) == target)
     }
 
-    /// How the particles of a layer move. Each part is `None` or the neutral value when the layer has no such rule.
-    pub fn motion(&self, layer: usize) -> Motion {
-        let (initializers, updaters) = self.rules(layer);
-        let mut motion = Motion { speed: 0.0, direction: [0.0, 0.0, 0.0], keep: 1.0, turn_start: 0.0, turn_random: false, turn_speed: 0.0, position: self.vec3_at(self.emitters[layer] + EMITTER_POSITION) };
-        for at in initializers {
-            let (kind, target) = (self.u32_at(at + OBJECT_TYPE), self.u32_at(at + OBJECT_TARGET));
-            if target == TARGET_MOVEMENT && kind == VELOCITY_INITIALIZER && at + 28 <= self.data.len() {
-                motion.speed = self.f32_at(at + 12);
-                motion.direction = self.vec3_at(at + 16);
-            }
-            if target == TARGET_TURN && kind == TURN_INITIALIZER && at + 36 <= self.data.len() {
-                motion.turn_start = self.f32_at(at + 20);
-                motion.turn_random = self.f32_at(at + 32) != 0.0;
-            }
+    /// How the game draws the particles of a layer.
+    pub fn builder(&self, layer: usize) -> Builder {
+        let Some(set) = self.set_of(layer) else { return Builder::Billboard };
+        match rel_at(&self.data, set + SET_BUILDER).map(|at| self.u32_at(at)) {
+            Some(0x4000_0000) => Builder::WorldBillboard,
+            Some(0x2000_0000) => Builder::UpBillboard,
+            Some(0x1000_0000) => Builder::Plane,
+            _ => Builder::Billboard,
         }
-        for at in updaters {
-            let (kind, target) = (self.u32_at(at + OBJECT_TYPE), self.u32_at(at + OBJECT_TARGET));
-            if target == TARGET_MOVEMENT && kind == DAMPING_UPDATER && at + 20 <= self.data.len() {
-                motion.keep = self.f32_at(at + 16);
-            }
-            if target == TARGET_TURN && kind == TURN_UPDATER && at + 28 <= self.data.len() {
-                motion.turn_speed = self.f32_at(at + 24);
-            }
+    }
+
+    /// The material of a layer: the material that has the name of its set plus `Material`, else the one that starts with the name of its set.
+    pub fn material(&self, layer: usize) -> Option<Material> {
+        let set = self.set_name(layer);
+        let wanted = format!("{set}Material");
+        let at = self.materials.iter().copied().find(|&m| self.text_at(m + NAME) == wanted).or_else(|| self.materials.iter().copied().find(|&m| !set.is_empty() && self.text_at(m + NAME).starts_with(&set)))?;
+        let function = self.u32_at(at + MATERIAL_BLEND);
+        let (source, destination) = ((function >> 16) & 15, (function >> 20) & 15);
+        let coordinates = at + MATERIAL_COORDINATES;
+        let mapper = rel_at(&self.data, at + MATERIAL_MAPPERS);
+        let texture = mapper.and_then(|mapper| rel_at(&self.data, mapper + 8));
+        let texture_setting = mapper.map(|mapper| self.u32_at(mapper + 36));
+        Some(Material {
+            // The destination factor is "one" for a light that is added.
+            additive: destination == 1 && source != 0,
+            scale: [self.number_at(coordinates + 16), self.number_at(coordinates + 20)],
+            rotate: self.number_at(coordinates + 24),
+            translate: [self.number_at(coordinates + 28), self.number_at(coordinates + 32)],
+            // The setting of the texture unit: the way of the axis S is in the bits 12 to 15, the one of T in the bits 8 to 11.
+            mode: self.u32_at(coordinates + 12),
+            wrap: texture_setting.map_or([2, 2], |w| [(w >> 12) & 15, (w >> 8) & 15]),
+            picture: texture.and_then(|object| self.pictures.iter().position(|p| p.object == object)),
+        })
+    }
+
+    /// The animation of a rule (the object that its first data points at), when it has one.
+    fn animation_at(&self, rule: usize) -> Option<Animation> {
+        let object = rel_at(&self.data, rule + 12)?;
+        let length = self.u32_at(object + 8) as usize;
+        let stride = self.u32_at(object + 16) as usize;
+        let enabled_count = self.u32_at(object + 20) as usize;
+        let enabled_at = rel_at(&self.data, object + 24)?;
+        let data_count = self.u32_at(object + 28) as usize;
+        let data_at = rel_at(&self.data, object + 32)?;
+        if length == 0 || stride == 0 || enabled_count > 4 || data_count > 4096 || data_at + 4 * data_count > self.data.len() || enabled_at + enabled_count > self.data.len() {
+            return None;
         }
-        motion
+        let (kind, duration) = match rel_at(&self.data, object + 4) {
+            Some(option) => {
+                let duration = self.number_at(option + 4);
+                let kind = match self.u32_at(option) {
+                    0x8000_0000 => AnimationKind::Fitting,
+                    0x4000_0000 => AnimationKind::Loop { duration: self.u32_at(option + 8), random_offset: self.data.get(option + 12).is_some_and(|&b| b != 0) },
+                    0x2000_0000 => AnimationKind::Random,
+                    _ => AnimationKind::Frames,
+                };
+                (kind, duration)
+            }
+            None => (AnimationKind::Frames, 0.0),
+        };
+        Some(Animation { length, stride, enabled: self.data[enabled_at..enabled_at + enabled_count].iter().map(|&b| b != 0).collect(), data: (0..data_count).map(|k| self.f32_at(data_at + 4 * k)).collect(), kind, duration })
+    }
+
+    /// The constant values of the streams of a layer (the parameters of its collection): the stream and its numbers.
+    pub fn parameters(&self, layer: usize) -> Vec<(i32, Vec<f32>)> {
+        let Some(set) = self.set_of(layer) else { return Vec::new() };
+        let Some(collection) = rel_at(&self.data, set + COLLECTION) else { return Vec::new() };
+        let count = self.u32_at(collection + 4) as usize;
+        let Some(table) = rel_at(&self.data, collection + 8) else { return Vec::new() };
+        if count > 32 {
+            return Vec::new();
+        }
+        (0..count)
+            .filter_map(|k| {
+                let attribute = rel_at(&self.data, table + 4 * k)?;
+                // A parameter has the type 0x40000000: the dimension, then the numbers.
+                if self.u32_at(attribute) != 0x4000_0000 {
+                    return None;
+                }
+                let (dimension, numbers) = (self.u32_at(attribute + 8) as usize, self.u32_at(attribute + 12) as usize);
+                let at = rel_at(&self.data, attribute + 16)?;
+                (dimension <= 4 && numbers <= 16 && at + 4 * numbers <= self.data.len()).then(|| (self.u32_at(attribute + 4) as i32, (0..numbers).map(|j| self.f32_at(at + 4 * j)).collect()))
+            })
+            .collect()
+    }
+
+    /// The place of the emitter of a layer, in the space of its particles.
+    pub fn emitter_position(&self, layer: usize) -> [f32; 3] {
+        self.vec3_at(self.emitters[layer] + EMITTER_POSITION)
+    }
+
+    /// A number of a rule, or 0 when the file stops before it.
+    fn number_at(&self, at: usize) -> f32 {
+        if at + 4 <= self.data.len() {
+            self.f32_at(at)
+        } else {
+            0.0
+        }
+    }
+
+    fn vector_at(&self, at: usize) -> [f32; 3] {
+        [self.number_at(at), self.number_at(at + 4), self.number_at(at + 8)]
+    }
+
+    /// The initializers of a layer, in the order of the file: the rules that give their first value to the streams of a new particle
+    /// (the speed, the size, the turn, the colour, the transparency, the life). The types and the fields are the ones of the particle
+    /// system of the game.
+    pub fn initializers(&self, layer: usize) -> Vec<InitRule> {
+        self.rules(layer)
+            .0
+            .into_iter()
+            .filter_map(|at| {
+                let target = self.u32_at(at + OBJECT_TARGET) as i32;
+                let (v, f) = (|k: usize| self.vector_at(at + 12 + 4 * k), |k: usize| self.number_at(at + 12 + 4 * k));
+                let rule = match self.u32_at(at + OBJECT_TYPE) {
+                    0x8000_0000 => Initializer::Directional { power: f(0), direction: v(1) },
+                    0x4000_0000 => Initializer::RandomDirectional { power: f(0), direction: v(1), angle: f(4) },
+                    0x2000_0000 => Initializer::Origin { power: f(0) },
+                    0x1000_0000 => Initializer::Random { power: f(0) },
+                    0x0800_0000 => Initializer::YAxis { power: f(0) },
+                    0x0400_0000 => Initializer::Vector3 { value: v(0) },
+                    0x0200_0000 => Initializer::Float { base: f(0), random: f(1) },
+                    0x0100_0000 => Initializer::FloatRange { max: f(0), min: f(1) },
+                    0x0080_0000 => Initializer::FloatImmediate { value: f(0) },
+                    0x0040_0000 => Initializer::Vector2 { value: [f(0), f(1)] },
+                    0x0020_0000 => Initializer::Vector3Random1 { base: v(0), random: f(3) },
+                    0x0010_0000 => Initializer::Vector3Random3 { base: v(0), random: v(3) },
+                    0x0008_0000 => Initializer::SpeedRandom { random: f(0) },
+                    _ => return None,
+                };
+                Some(InitRule { target, rule })
+            })
+            .collect()
+    }
+
+    /// The updaters of a layer, in the order of the file: the rules that change the streams of a particle at each frame.
+    pub fn updaters(&self, layer: usize) -> Vec<UpdRule> {
+        self.rules(layer)
+            .1
+            .into_iter()
+            .filter_map(|at| {
+                let target = self.u32_at(at + OBJECT_TARGET) as i32;
+                let kind = self.u32_at(at + OBJECT_TYPE);
+                // The data of an updater starts after the reference to its animation (at 12).
+                let (v, f) = (|k: usize| self.vector_at(at + 16 + 4 * k), |k: usize| self.number_at(at + 16 + 4 * k));
+                let word = |k: usize| if at + 20 + 4 * k <= self.data.len() { self.u32_at(at + 16 + 4 * k) } else { 0 };
+                let rule = match kind {
+                    0x8000_0000 => Updater::Acceleration { factor: f(0) },
+                    0x4000_0000 => Updater::General,
+                    0x2000_0000 => Updater::Gravity { power: f(0), direction: v(1) },
+                    0x1000_0000 => Updater::Spin { power: f(0), axis: v(1) },
+                    0x0800_0000 => Updater::Random { power: v(0), interval: word(3) as i32 },
+                    0x0002_0000 => Updater::Magnet { power: f(0), position: v(1), flags: word(4) },
+                    0x0001_0000 => Updater::Collision { power: f(0), position: f(1), flags: word(2) },
+                    0x0080_0002 => Updater::Add { value: v(0), animation: self.animation_at(at) },
+                    0x0080_0004 => Updater::AddRandom { value: v(0) },
+                    0x0080_0001 => Updater::Set { value: v(0), animation: self.animation_at(at) },
+                    0x0040_0001 => Updater::SetNumber { value: f(0), animation: self.animation_at(at) },
+                    0x0100_0000 => Updater::SetVector2 { value: [f(0), f(1)], animation: self.animation_at(at) },
+                    0x0020_0000 => Updater::NumberKeys { in_time: word(0), out_time: word(1), values: [word(2) as i32, word(3) as i32, word(4) as i32, word(5) as i32, word(6) as i32] },
+                    0x0010_0000 => Updater::VectorKeys { in_time: word(0), out_time: word(1), values: [v(2), v(5), v(8), v(11), v(14)] },
+                    0x0004_0000 => Updater::TexturePattern { divisions: [word(0).max(1), word(1).max(1)], index: word(2) as i32, animation: self.animation_at(at) },
+                    other => Updater::Other(other),
+                };
+                Some(UpdRule { target, rule })
+            })
+            .collect()
     }
 
     /// The colour of the particles of a layer, as it changes with their life.
@@ -716,5 +974,3 @@ mod test {
         assert_eq!(Effect::parse(effect.bytes()).unwrap().emission(0), emission);
     }
 }
-
-

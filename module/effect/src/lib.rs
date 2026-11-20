@@ -52,7 +52,7 @@ struct PreviewState {
     texture: Option<egui::TextureHandle>,
     /// What the picture shows: the file, the frame, the point of view and the bytes of the effect (a change of one of them draws it again).
     shown: Option<(usize, f32, preview::Camera, Vec<u8>)>,
-    pictures: Vec<Option<preview::Picture>>,
+    pictures: Vec<preview::Look>,
     extent: f32,
 }
 
@@ -260,7 +260,7 @@ impl EffectPage {
             let same = matches!(&view.shown, Some((f, frame, camera, saved)) if *f == file && *frame == view.frame && *camera == view.camera && saved.as_slice() == bytes);
             if !same || view.texture.is_none() {
                 if !matches!(&view.shown, Some((f, _, _, saved)) if *f == file && saved.as_slice() == bytes) {
-                    view.pictures = preview::pictures(effect);
+                    view.pictures = preview::looks(effect);
                     view.extent = preview::extent(effect);
                 }
                 let pixels = preview::render(effect, &view.pictures, view.frame, view.camera, view.extent, PREVIEW_SIDE);
