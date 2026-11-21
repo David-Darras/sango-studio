@@ -1,7 +1,7 @@
 //! The content of a pack: the things that the user can turn on and off, one by one.
 //!
-//! For now the things are the icons. Each row shows the icon that the game has now (before) and the icon of the pack (after), with
-//! a check box. A thing that is turned off is not written on the SD card: the game keeps what it had. The choice is kept in the
+//! For now the things are the icons of the species and of the items. Each row shows the icon that the game has now (before) and
+//! the icon of the pack (after), with a check box. A thing that is turned off is not written on the SD card: the game keeps what it had. The choice is kept in the
 //! registry (`InstalledPack::disabled`), so it stays when the pack is installed again.
 
 use crate::model_view::ModelPair;
@@ -12,11 +12,15 @@ use sango_ui::theme::color;
 use sango_ui::{egui, retired::Retired, textures, widget};
 use std::collections::HashMap;
 
-/// The size of an icon, in pixels.
+/// The size of a species icon, in pixels.
 const WIDTH: usize = 40;
 const HEIGHT: usize = 30;
-/// The number of the archive of the icons of the game.
+/// The number of the archive of the species icons of the game.
 const ICON_ARCHIVE: usize = 91;
+/// The size of an item icon, in pixels.
+const ITEM_SIDE: usize = sango_core::item_icons::SIZE;
+/// The drawn pictures have bigger pixels.
+const ZOOM: f32 = 1.6;
 
 /// One row of the list of icons.
 struct Row {
@@ -24,6 +28,26 @@ struct Row {
     label: String,
     file: String,
     game_file: Option<u16>,
+    /// True for an item icon, false for a species icon.
+    item: bool,
+}
+
+impl Row {
+    fn size(&self) -> (usize, usize) {
+        if self.item {
+            (ITEM_SIDE, ITEM_SIDE)
+        } else {
+            (WIDTH, HEIGHT)
+        }
+    }
+
+    fn archive(&self) -> usize {
+        if self.item {
+            sango_core::item_icons::ARCHIVE
+        } else {
+            ICON_ARCHIVE
+        }
+    }
 }
 
 #[derive(Default)]
@@ -31,8 +55,8 @@ pub struct PackContent {
     /// The id of the pack that is shown.
     pub open: Option<String>,
     search: String,
-    /// The archive of the icons of the game, for the "before" pictures.
-    garc: Option<Garc>,
+    /// The archives of the icons of the game, for the "before" pictures, by number.
+    garcs: HashMap<usize, Garc>,
     garc_root: Option<std::path::PathBuf>,
     textures: HashMap<String, Option<egui::TextureHandle>>,
     retired: Retired,
@@ -40,10 +64,6 @@ pub struct PackContent {
     /// True when a check box changed and the SD card was not written yet.
     changed: bool,
     status: Option<(bool, String)>,
-}
-
-fn picture(rgba: &[u8]) -> egui::ColorImage {
-    egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], rgba)
 }
 
 impl PackContent {
@@ -64,30 +84,38 @@ impl PackContent {
         self.status = None;
     }
 
-    fn game_icon(&mut self, dump: Option<&Dump>, file: u16) -> Option<Vec<u8>> {
+    /// The picture of a file of an archive of icons of the game.
+    fn game_icon(&mut self, dump: Option<&Dump>, archive: usize, file: u16, (width, height): (usize, usize)) -> Option<Vec<u8>> {
         let dump = dump?;
-        if self.garc.is_none() || self.garc_root.as_deref() != Some(dump.root()) {
-            self.garc = Garc::open(&dump.archive(ICON_ARCHIVE)).ok();
+        if self.garc_root.as_deref() != Some(dump.root()) {
+            self.garcs.clear();
             self.garc_root = Some(dump.root().to_path_buf());
         }
-        let bytes = self.garc.as_ref()?.first_file(file as usize)?;
-        sango_core::clim::decode_sized(bytes, WIDTH, HEIGHT).ok()
+        if !self.garcs.contains_key(&archive) {
+            self.garcs.insert(archive, Garc::open(&dump.archive(archive)).ok()?);
+        }
+        let bytes = self.garcs.get(&archive)?.first_file(file as usize)?;
+        sango_core::clim::decode_sized(bytes, width, height).ok()
     }
 
     /// The texture of a picture, made the first time it is asked.
-    fn texture(&mut self, ctx: &egui::Context, key: String, make: impl FnOnce(&mut Self) -> Option<Vec<u8>>) -> Option<egui::TextureHandle> {
+    fn texture(&mut self, ctx: &egui::Context, key: String, size: (usize, usize), make: impl FnOnce(&mut Self) -> Option<Vec<u8>>) -> Option<egui::TextureHandle> {
         if !self.textures.contains_key(&key) {
-            let texture = make(self).map(|rgba| textures::load(ctx, format!("pack_icon_{key}"), picture(&rgba), egui::TextureOptions::NEAREST));
+            let texture = make(self).map(|rgba| {
+                let picture = egui::ColorImage::from_rgba_unmultiplied([size.0, size.1], &rgba);
+                textures::load(ctx, format!("pack_icon_{key}"), picture, egui::TextureOptions::NEAREST)
+            });
             self.textures.insert(key.clone(), texture);
         }
         self.textures.get(&key).cloned().flatten()
     }
 
-    fn show_picture(ui: &mut egui::Ui, texture: Option<&egui::TextureHandle>) {
-        let (rect, _) = ui.allocate_exact_size(egui::vec2(WIDTH as f32 * 1.6 + 8.0, HEIGHT as f32 * 1.6 + 8.0), egui::Sense::hover());
+    /// Draws a picture in a box of the size of a species icon, so that all the rows have the same size.
+    fn show_picture(ui: &mut egui::Ui, texture: Option<&egui::TextureHandle>, (width, height): (usize, usize)) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(WIDTH as f32 * ZOOM + 8.0, HEIGHT as f32 * ZOOM + 8.0), egui::Sense::hover());
         ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::SURFACE_STRONG);
         if let Some(texture) = texture {
-            let image = egui::Rect::from_center_size(rect.center(), egui::vec2(WIDTH as f32 * 1.6, HEIGHT as f32 * 1.6));
+            let image = egui::Rect::from_center_size(rect.center(), egui::vec2(width as f32 * ZOOM, height as f32 * ZOOM));
             let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             ui.painter().image(texture.id(), image, full, egui::Color32::WHITE);
         } else {
@@ -103,7 +131,9 @@ impl PackContent {
             self.close();
             return;
         };
-        let rows: Vec<Row> = pack.icons.iter().map(|i| Row { key: i.key(), label: if i.label.is_empty() { i.file.clone() } else { i.label.clone() }, file: i.file.clone(), game_file: i.game_file }).collect();
+        let label = |label: &str, file: &str| if label.is_empty() { file.to_string() } else { label.to_string() };
+        let mut rows: Vec<Row> = pack.icons.iter().map(|i| Row { key: i.key(), label: label(&i.label, &i.file), file: i.file.clone(), game_file: i.game_file, item: false }).collect();
+        rows.extend(pack.item_icons.iter().map(|i| Row { key: i.key(), label: label(&i.label, &format!("Item icon {}", i.game_file)), file: i.file.clone(), game_file: Some(i.game_file), item: true }));
         let name = pack.name.clone();
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -134,7 +164,7 @@ impl PackContent {
                 }
             });
             ui.add_space(4.0);
-            let row_height = HEIGHT as f32 * 1.6 + 16.0;
+            let row_height = HEIGHT as f32 * ZOOM + 16.0;
             egui::ScrollArea::vertical().id_salt("pack_content").max_height(460.0).auto_shrink([false, true]).show_rows(ui, row_height, shown.len(), |ui, range| {
                 for row in &shown[range] {
                     ui.horizontal(|ui| {
@@ -143,25 +173,28 @@ impl PackContent {
                             toggles.push((row.key.clone(), on));
                         }
                         let ctx = ui.ctx().clone();
+                        let size = row.size();
+                        let kind = if row.item { "item" } else { "species" };
                         let before = match row.game_file {
-                            Some(file) => self.texture(&ctx, format!("game:{file}"), |me| me.game_icon(dump, file)),
+                            Some(file) => self.texture(&ctx, format!("game:{kind}:{file}"), size, |me| me.game_icon(dump, row.archive(), file, size)),
                             None => None,
                         };
                         let after = {
                             let pack = library.packs.iter().find(|p| p.id == id);
-                            let png = pack.and_then(|p| p.icon_files.get(&row.file)).cloned();
-                            self.texture(&ctx, format!("pack:{id}:{}", row.file), |_| {
+                            let files = pack.map(|p| if row.item { &p.item_icon_files } else { &p.icon_files });
+                            let png = files.and_then(|f| f.get(&row.file)).cloned();
+                            self.texture(&ctx, format!("pack:{id}:{kind}:{}", row.file), size, |_| {
                                 let image = image::load_from_memory(&png?).ok()?.to_rgba8();
-                                (image.width() as usize == WIDTH && image.height() as usize == HEIGHT).then(|| image.into_raw())
+                                (image.width() as usize == size.0 && image.height() as usize == size.1).then(|| image.into_raw())
                             })
                         };
                         ui.vertical(|ui| {
                             ui.label(widget::hint("Before"));
-                            Self::show_picture(ui, before.as_ref());
+                            Self::show_picture(ui, before.as_ref(), size);
                         });
                         ui.vertical(|ui| {
                             ui.label(widget::hint("After"));
-                            Self::show_picture(ui, after.as_ref());
+                            Self::show_picture(ui, after.as_ref(), size);
                         });
                         ui.label(egui::RichText::new(&row.label).strong());
                         if row.game_file.is_none() {
@@ -179,9 +212,9 @@ impl PackContent {
                 ui.add_enabled_ui(self.changed, |ui| {
                     if widget::button_styled(ui, egui::RichText::new("Apply to the SD card").color(color::WHITE), Some(color::ACCENT)) {
                         self.status = Some(match library.save(sd).and_then(|_| library.write_icons(sd)) {
-                            Ok(count) => {
+                            Ok(_) => {
                                 self.changed = false;
-                                (true, format!("{count} icon files are on the SD card. Restart the game."))
+                                (true, "The icons that are turned on are on the SD card. Restart the game.".to_string())
                             }
                             Err(message) => (false, message),
                         });
@@ -273,6 +306,10 @@ mod test {
         };
         pack.icons = vec![PackIcon { species: Ref::key("Zap"), form: 0, file: "zap".into(), game_file: None, label: "Zap".into() }];
         pack.icon_files.insert("zap".into(), png.into_inner());
+        let mut item_png = std::io::Cursor::new(Vec::new());
+        image::RgbaImage::from_pixel(30, 30, image::Rgba([255, 0, 0, 255])).write_to(&mut item_png, image::ImageFormat::Png).unwrap();
+        pack.item_icons = vec![sango_pack::pack::PackItemIcon { game_file: 4, file: "4".into(), label: "Potion".into() }];
+        pack.item_icon_files.insert("4".into(), item_png.into_inner());
         let folder = std::env::temp_dir().join(format!("sango_pack_content_{}", std::process::id()));
         std::fs::create_dir_all(&folder).unwrap();
         let file = folder.join("icons.sangopack");
@@ -289,7 +326,11 @@ mod test {
         let _ = ctx.run(input, |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| view.ui(ui, &mut library, &sd, None));
         });
-        assert!(view.textures.get("pack:icons:zap").map_or(false, |t| t.is_some()), "the picture of the pack is drawn");
+        assert!(view.textures.get("pack:icons:species:zap").map_or(false, |t| t.is_some()), "the picture of the pack is drawn");
+        assert!(view.textures.get("pack:icons:item:4").map_or(false, |t| t.is_some()), "the item icon of the pack is drawn");
+        assert_eq!(library.write_item_icons(&sd).unwrap(), 1);
+        library.set_enabled("icons", "item_icon:4", false);
+        assert_eq!(library.write_item_icons(&sd).unwrap(), 0);
         // Turning an icon off and applying leaves it off the SD card.
         assert_eq!(library.write_icons(&sd).unwrap(), 1);
         library.set_enabled("icons", "icon:zap", false);

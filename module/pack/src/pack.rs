@@ -29,6 +29,9 @@ pub const MAX_NAME: usize = 23;
 /// The file of the pack that holds everything.
 pub const MANIFEST: &str = "manifest.json";
 
+/// The folder of the pack that holds the pictures of the item icons (see [`PackItemIcon`]).
+pub const ITEM_ICON_FOLDER: &str = "item_icons/";
+
 /// A species: a species of the game (its number), or a species of a pack (its name).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -150,6 +153,25 @@ impl PackIcon {
     }
 }
 
+/// The icon of an item: a picture of 30 × 30 pixels, the file `item_icons/<file>.png` of the pack. It replaces the file
+/// `game_file` of the item icons of the game (the archive 92): all the items that use this file show the new picture.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackItemIcon {
+    pub game_file: u16,
+    /// The name of the picture: the file `item_icons/<file>.png`.
+    pub file: String,
+    /// The name that Studio shows, for example `Leftovers (SV)`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+}
+
+impl PackItemIcon {
+    /// The key of the icon for the choices of the user (see `Library::is_enabled`).
+    pub fn key(&self) -> String {
+        format!("item_icon:{}", self.file)
+    }
+}
+
 /// The description of a pack and its content.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pack {
@@ -182,6 +204,12 @@ pub struct Pack {
     /// The pictures of the icons by name (PNG files of 40 × 30 pixels), read from the pack file.
     #[serde(skip)]
     pub icon_files: std::collections::BTreeMap<String, Vec<u8>>,
+    /// The icons of the items of the game that the pack replaces. The pictures are in `item_icon_files`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_icons: Vec<PackItemIcon>,
+    /// The pictures of the item icons by name (PNG files of 30 × 30 pixels), read from the pack file.
+    #[serde(skip)]
+    pub item_icon_files: std::collections::BTreeMap<String, Vec<u8>>,
     /// The file that the pack was read from: the models are read from it when they are needed.
     #[serde(skip)]
     pub file: Option<PathBuf>,
@@ -291,6 +319,15 @@ impl Pack {
                 return Err(format!("The icon file '{}' has a wrong name.", icon.file));
             }
         }
+        let mut item_files = std::collections::HashSet::new();
+        for icon in &self.item_icons {
+            if icon.file.is_empty() || icon.file.chars().count() > 60 || icon.file.chars().any(|c| c == '/' || c == '\\' || c.is_control()) {
+                return Err(format!("The item icon file '{}' has a wrong name.", icon.file));
+            }
+            if !item_files.insert(icon.game_file) {
+                return Err(format!("The item icon file {} of the game is two times in the pack.", icon.game_file));
+            }
+        }
         let mut names = std::collections::HashSet::new();
         for species in &self.species {
             if species.name.is_empty() || species.name.chars().count() > MAX_NAME {
@@ -387,6 +424,10 @@ impl Pack {
             zip.start_file(format!("icons/{name}.png"), options).map_err(|e| e.to_string())?;
             zip.write_all(bytes).map_err(|e| e.to_string())?;
         }
+        for (name, bytes) in &self.item_icon_files {
+            zip.start_file(format!("{ITEM_ICON_FOLDER}{name}.png"), options).map_err(|e| e.to_string())?;
+            zip.write_all(bytes).map_err(|e| e.to_string())?;
+        }
         zip.finish().map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -407,6 +448,12 @@ impl Pack {
             let mut bytes = Vec::new();
             zip.by_name(&name).map_err(|e| e.to_string())?.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
             pack.icon_files.insert(name["icons/".len()..name.len() - ".png".len()].to_string(), bytes);
+        }
+        let names: Vec<String> = zip.file_names().filter(|n| n.starts_with(ITEM_ICON_FOLDER) && n.ends_with(".png")).map(str::to_string).collect();
+        for name in names {
+            let mut bytes = Vec::new();
+            zip.by_name(&name).map_err(|e| e.to_string())?.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+            pack.item_icon_files.insert(name[ITEM_ICON_FOLDER.len()..name.len() - ".png".len()].to_string(), bytes);
         }
         Ok(pack)
     }

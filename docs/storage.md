@@ -19,6 +19,8 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `leveling_rate/<rate>.bin` | The experience tables (archive 194). | yes |
 | `game_text/<language>/<file>.bin` | The texts that you changed (archives 71 to 78): `ja`, `ja_kanji`, `en`, `fr`, `it`, `de`, `es`, `ko`. | yes |
 | `ability/`, `move/data/`, `move/custom/`, `item/data/`, `item/custom/`, `type/` | The new and the changed abilities, moves, items and types. | yes |
+| `item/icon/<file>.bin` | The item icons that you changed or that a pack replaces (archive 92): the files of the archive, compressed, and the list `index.bin`. | yes |
+| `item/icon_state.json` | The item icon files that the packs wrote: Studio erases them when no pack asks for them. | no |
 | `choreography/` | The choreographies of the moves (the steps of the camera, the effects, the sounds and the poses): the files `<n>.bin` of the archive of the move choreographies, compressed, and the list `index.bin`. | yes |
 | `effect/` | The particle effects of the battles: the files `<n>.bin` of the archive of the effects, compressed, and the list `index.bin`. | yes |
 | `script/field/`, `script/ai/`, `script/amie/` | The scripts that the user changed: the files `<n>.bin` of the archive of the field scripts, of the AI of the trainers and of Pokémon-Amie, compressed, and the list `index.bin` of each folder. | yes |
@@ -26,6 +28,7 @@ Each folder is named for what it holds. The files that replace a file of the gam
 | `species/model/` | The 3D models of the packs: the list `0.raw`, `index.bin` and the files `<n>.pc` (8 for each model). Made again from the packs. | yes, and only there |
 | `formula/` | The formulas of the statistics and the shiny chance: `formulas.txt` (the text of the formulas that the user changed, for the studio) and `formulas.bin` (the programs, for the plugin). | yes |
 | `nature/` | The effect of each nature on the five statistics, in percent, and the new natures: `natures.csv`. | yes |
+| `font/` | The fonts that the user replaced: the file `<n>.bin` of the archive 167 (the bytes of a `.bcfnt` file, not compressed), and the list `index.bin`. | yes |
 | `overworld/model/` | The packs of the models of the characters that the user changed or swapped: the file `<pack>.bin` of the archive 21 (not compressed), and the list `index.bin`. | yes |
 | `code/`, `move/code/` | The code of the Code page. | no |
 | `overworld/land`, `overworld/area`, `overworld/matrix`, `overworld/zone`, `overworld/model` | The blocks, the tilesets, the matrices, the zones (the events, and the wild Pokémon of the Encounter page) and the models of the characters that the Overworld page writes. | yes, on the SD card only |
