@@ -44,6 +44,7 @@ impl App {
             Box::new(sango_encounter::EncounterPage::default()),
             Box::new(sango_formula::Formula::default()),
             Box::new(sango_nature::Nature::default()),
+            Box::new(sango_font::FontPage::default()),
             Box::new(sango_character::Character::default()),
 
             Box::new(sango_overworld::Overworld::default()),
@@ -314,7 +315,7 @@ fn run() -> eframe::Result<()> {
     eframe::run_native(sango_core::NAME, options, Box::new(|cc| Ok(Box::new(App::new(cc)))))
 }
 
-/// The graphics of the window. DirectX 12 is the default. The variable SANGO_BACKEND (`dx12`, `vulkan` or `gl`) chooses another interface of
+/// The graphics of the window. Vulkan is the default. The variable SANGO_BACKEND (`dx12`, `vulkan` or `gl`) chooses another interface of
 /// the graphics card: when the card is reset by the system the window stops with "Parent device is lost".
 fn wgpu_options() -> eframe::egui_wgpu::WgpuConfiguration {
     let mut options = eframe::egui_wgpu::WgpuConfiguration::default();

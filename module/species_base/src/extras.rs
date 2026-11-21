@@ -51,14 +51,21 @@ pub fn invalidate() {
     }
 }
 
-/// Gives the table to a test: the species and the forms that the packs would add.
-#[cfg(test)]
-pub fn set_for_test(table: Table) {
+/// Only one test at a time uses its own table: the tests run at the same time and the table is shared.
+static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Gives the table to a test: the species and the forms that the packs would add. Only the tests use it, also the tests of
+/// the Species page. The test keeps the result until its end: another test that gives a table waits until then.
+#[doc(hidden)]
+#[must_use = "keep the lock until the end of the test"]
+pub fn set_for_test(table: Table) -> std::sync::MutexGuard<'static, ()> {
+    let lock = TEST_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     if let Ok(mut state) = STATE.write() {
         state.bytes = table.to_bytes().unwrap_or_default();
         state.table = table;
         state.checked = Some(Instant::now() + Duration::from_secs(3600));
     }
+    lock
 }
 
 fn with<R>(use_table: impl FnOnce(&Table) -> R) -> R {
@@ -146,7 +153,7 @@ mod test {
 
     #[test]
     fn the_species_and_the_forms_of_the_packs_are_found_like_the_ones_of_the_game() {
-        set_for_test(table());
+        let _table = set_for_test(table());
         assert_eq!((species_name(1), species_name(724), species_name(725), species_name(900)), ("Bulbasaur".to_string(), "Rowlet".to_string(), "-".to_string(), "-".to_string()));
         assert!(is_species(721) && is_species(724) && !is_species(722) && !is_species(725));
         let ids = species_ids();

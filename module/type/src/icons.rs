@@ -7,7 +7,7 @@
 
 use sango_core::text::LANGUAGES;
 use sango_core::{Clim, SdCard};
-use sango_species::battle_icons;
+use sango_species_base::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::egui;
 use std::collections::{HashMap, HashSet};

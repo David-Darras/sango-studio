@@ -1,0 +1,11 @@
+[package]
+name = "sango-species-base"
+version.workspace = true
+edition.workspace = true
+description = "The names, the data, the icons and the menus of the species that the pages share."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+sango-pack.workspace = true
+zerocopy.workspace = true

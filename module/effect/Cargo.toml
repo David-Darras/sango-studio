@@ -7,7 +7,7 @@ description = "The effect editor of Sango Studio: the layers of a particle effec
 [dependencies]
 sango-core.workspace = true
 sango-choreography.workspace = true
-sango-species.workspace = true
+sango-species-base.workspace = true
 sango-ui.workspace = true
 rfd.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

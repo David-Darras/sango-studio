@@ -16,6 +16,7 @@ sango-ui = { path = "module/ui" }
 sango-home = { path = "module/home" }
 sango-archive = { path = "module/archive" }
 sango-species = { path = "module/species" }
+sango-species-base = { path = "module/species_base" }
 sango-leveling-rate = { path = "module/leveling_rate" }
 sango-item = { path = "module/item" }
 sango-move = { path = "module/move" }
@@ -37,9 +38,18 @@ sango-encounter = { path = "module/encounter" }
 sango-formula = { path = "module/formula" }
 sango-character = { path = "module/character" }
 sango-nature = { path = "module/nature" }
+sango-font = { path = "module/font" }
 
+# The code of the studio compiles fast with few optimizations. The libraries (egui, wgpu, image, the decoders) change
+# rarely: they are optimized fully once, so the 3D views and the decoding stay fast. The debug information keeps only
+# the lines, which is enough for the backtrace of crash.log and makes the target folder much smaller.
 [profile.dev]
-opt-level = 2
+opt-level = 1
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
 
 [profile.release]
 lto = "thin"

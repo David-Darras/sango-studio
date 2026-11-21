@@ -586,7 +586,7 @@ fn find(list: &[(i16, &'static str)], value: i16) -> &'static str {
 
 /// The name of a type from its number.
 pub fn type_name(value: i16) -> &'static str {
-    usize::try_from(value).ok().and_then(|n| sango_species::TYPE_NAMES.get(n).copied()).unwrap_or("?")
+    usize::try_from(value).ok().and_then(|n| sango_species_base::TYPE_NAMES.get(n).copied()).unwrap_or("?")
 }
 
 /// The name of a target.

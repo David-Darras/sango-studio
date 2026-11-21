@@ -12,7 +12,7 @@ mod navi_view;
 
 use data::{Encounter, RateKind, Slot, Zones, METHODS};
 use sango_overworld::names::MAP_NAMES;
-use sango_species::{form_choices, SpeciesIcons, SPECIES};
+use sango_species_base::{form_choices, SpeciesIcons, SPECIES};
 use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};

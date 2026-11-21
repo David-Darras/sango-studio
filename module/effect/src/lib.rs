@@ -283,7 +283,7 @@ impl EffectPage {
                 ui.label(widget::hint("Effect"));
                 let mut file = self.file;
                 let names: Vec<&str> = self.names.iter().map(String::as_str).collect();
-                sango_species::searchable_picker(ui, "effect_file", &mut file, &names, 320.0);
+                sango_species_base::searchable_picker(ui, "effect_file", &mut file, &names, 320.0);
                 if file != self.file && file >= 1 && file <= names.len() {
                     self.file = file;
                     self.load(session.sd.as_ref());

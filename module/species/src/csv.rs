@@ -87,10 +87,7 @@ fn current(garc: &Garc, sd: Option<&SdCard>, species: usize, form: usize) -> Opt
     on_card.or_else(|| garc.first_file(file_index(garc, species, form)).and_then(|b| SpeciesData::from_bytes(b).ok()))
 }
 
-/// The number of forms of a species (at least one).
-pub(crate) fn form_count(garc: &Garc, species: usize) -> usize {
-    garc.first_file(species).and_then(|b| SpeciesData::from_bytes(b).ok()).map_or(1, |d| (d.total_form_count as usize).max(1))
-}
+pub(crate) use sango_species_base::form_count;
 
 /// Writes one row per species and form, from the current data (the SD card first,
 /// then the romfs). A missing Pokédex data gives the shape 0.

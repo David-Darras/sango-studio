@@ -15,7 +15,7 @@ pub mod types;
 
 use chart::{Chart, GAME_TYPES, MAX_CUSTOM};
 use sango_core::{Dump, SdCard};
-use sango_species::battle_icons;
+use sango_species_base::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;

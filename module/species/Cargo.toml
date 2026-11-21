@@ -6,6 +6,7 @@ description = "The species editor of Sango Studio."
 
 [dependencies]
 sango-core.workspace = true
+sango-species-base.workspace = true
 sango-pack.workspace = true
 sango-modelport.workspace = true
 sango-cry.workspace = true

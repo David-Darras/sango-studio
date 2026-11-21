@@ -14,7 +14,7 @@ mod tools;
 
 use data::{Def, Group, Kind, MoveData, COUNT, DEFS, UNUSED};
 use sango_core::{Bundle, Dump, Garc};
-use sango_species::battle_icons;
+use sango_species_base::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
@@ -520,7 +520,7 @@ impl Move {
             egui::Grid::new("move_basics").num_columns(2).spacing([16.0, 8.0]).show(ui, |ui| {
                 self.line(ui, data, "type", |ui, value, _| {
                     let mut kind = (*value).clamp(0, 31) as u8;
-                    sango_species::type_menu(ui, "move_type", &mut kind, None);
+                    sango_species_base::type_menu(ui, "move_type", &mut kind, None);
                     *value = kind as i32;
                 });
                 self.choice_line(ui, data, "category");
@@ -723,7 +723,7 @@ impl Module for Move {
             self.load(session);
         }
         let session: &Session = session;
-        sango_species::battle_icons::refresh_custom_types(session.sd.as_ref());
+        sango_species_base::battle_icons::refresh_custom_types(session.sd.as_ref());
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);

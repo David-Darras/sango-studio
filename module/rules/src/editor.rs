@@ -3,7 +3,7 @@
 
 use crate::{moments, rule_sentence, ActionKind, Argument, Condition, ConditionKind, Context, Rule, Action};
 use crate::{moment_label, target_label, DAMAGE_KINDS, MAX_ACTIONS, MAX_CONDITIONS, MAX_RULES, STATS, STATUSES, TARGETS, TERRAINS, WEATHERS};
-use sango_species::battle_icons;
+use sango_species_base::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
 
@@ -21,7 +21,7 @@ fn pick(ui: &mut egui::Ui, salt: impl std::hash::Hash, value: &mut i16, list: &[
 
 /// The types that a menu lists: the types of the game, then the new types of the user.
 fn type_list() -> Vec<(i16, String)> {
-    let mut list: Vec<(i16, String)> = sango_species::TYPE_NAMES.iter().enumerate().map(|(i, name)| (i as i16, name.to_string())).collect();
+    let mut list: Vec<(i16, String)> = sango_species_base::TYPE_NAMES.iter().enumerate().map(|(i, name)| (i as i16, name.to_string())).collect();
     for id in battle_icons::custom_type_ids() {
         list.push((id as i16, battle_icons::custom_type_name(id).unwrap_or_default()));
     }

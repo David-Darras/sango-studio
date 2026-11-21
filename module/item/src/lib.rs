@@ -124,7 +124,7 @@ impl Item {
         self.texts.open(dump);
         self.icons.open(dump);
         self.icons_ready = false;
-        sango_species::battle_icons::load(dump);
+        sango_species_base::battle_icons::load(dump);
         self.list_names = None;
         self.loaded = None;
         let items = (0..=COUNT).map(|n| self.garc.as_ref().and_then(|g| g.first_file(n)).and_then(|b| ItemData::from_bytes(b).ok())).collect();
@@ -791,8 +791,8 @@ fn focus_combo(ui: &egui::Ui, response: &egui::Response, value: &mut i32, last: 
 
 /// A picker of the type of Natural Gift: the icons of the 18 types, and "None" for the other values.
 fn type_picker(ui: &mut egui::Ui, id: &str, value: &mut u8) {
-    use sango_species::battle_icons;
-    let names = sango_species::TYPE_NAMES;
+    use sango_species_base::battle_icons;
+    let names = sango_species_base::TYPE_NAMES;
     let has_icons = battle_icons::type_texture(ui.ctx(), 0).is_some();
     let text = match (*value < 18, has_icons) {
         (true, true) => String::new(),

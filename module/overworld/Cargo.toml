@@ -8,7 +8,7 @@ description = "The overworld editor of Sango Studio: the blocks, the tiles, the 
 eframe.workspace = true
 sango-core.workspace = true
 sango-ui.workspace = true
-sango-species.workspace = true
+sango-species-base.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
 glam = "0.29"
 png = "0.17"

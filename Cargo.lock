@@ -2717,7 +2717,7 @@ dependencies = [
  "rfd",
  "sango-core",
  "sango-rules",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2745,7 +2745,7 @@ name = "sango-choreography"
 version = "0.1.0"
 dependencies = [
  "sango-core",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2764,6 +2764,7 @@ name = "sango-core"
 version = "0.1.0"
 dependencies = [
  "image",
+ "memmap2",
 ]
 
 [[package]]
@@ -2782,7 +2783,7 @@ dependencies = [
  "rfd",
  "sango-choreography",
  "sango-core",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2794,7 +2795,18 @@ dependencies = [
  "rfd",
  "sango-core",
  "sango-overworld",
- "sango-species",
+ "sango-species-base",
+ "sango-ui",
+]
+
+[[package]]
+name = "sango-font"
+version = "0.1.0"
+dependencies = [
+ "ab_glyph",
+ "image",
+ "rfd",
+ "sango-core",
  "sango-ui",
 ]
 
@@ -2823,7 +2835,7 @@ dependencies = [
  "rfd",
  "sango-core",
  "sango-rules",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2854,7 +2866,7 @@ dependencies = [
  "rfd",
  "sango-core",
  "sango-rules",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2889,7 +2901,7 @@ dependencies = [
  "png 0.17.16",
  "rfd",
  "sango-core",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2921,7 +2933,7 @@ name = "sango-rules"
 version = "0.1.0"
 dependencies = [
  "sango-core",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
@@ -2944,9 +2956,20 @@ dependencies = [
  "sango-cry",
  "sango-modelport",
  "sango-pack",
+ "sango-species-base",
  "sango-ui",
  "serde",
  "serde_json",
+ "zerocopy",
+]
+
+[[package]]
+name = "sango-species-base"
+version = "0.1.0"
+dependencies = [
+ "sango-core",
+ "sango-pack",
+ "sango-ui",
  "zerocopy",
 ]
 
@@ -2964,6 +2987,7 @@ dependencies = [
  "sango-core",
  "sango-effect",
  "sango-encounter",
+ "sango-font",
  "sango-formula",
  "sango-home",
  "sango-item",
@@ -3000,7 +3024,7 @@ dependencies = [
  "image",
  "rfd",
  "sango-core",
- "sango-species",
+ "sango-species-base",
  "sango-ui",
 ]
 
