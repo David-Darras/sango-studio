@@ -18,7 +18,10 @@ use std::collections::HashMap;
 const KINDS: [(usize, &str, &str); 3] = [(29, "field", "Field scripts"), (7, "ai", "Trainer battle AI"), (89, "amie", "Pokémon-Amie")];
 
 /// The tabs of the page.
-const TABS: [&str; 5] = ["Assembly", "Pawn (read only)", "Scripts", "Natives used", "Native functions"];
+const TABS: [&str; 6] = ["Assembly", "Pawn (read only)", "Scripts", "Natives used", "Native functions", "Create a script"];
+
+/// The place of the tab that makes scripts from blocks.
+const CREATE_TAB: usize = 5;
 
 /// A script file that the user can open.
 struct Item {
@@ -48,11 +51,13 @@ pub struct ScriptPage {
     pawn: Vec<String>,
     pawn_from: String,
     pawn_error: Option<String>,
+    /// The tab "Create a script".
+    creator: crate::create::Creator,
 }
 
 impl Default for ScriptPage {
     fn default() -> Self {
-        ScriptPage { root: None, error: None, garcs: Vec::new(), items: Vec::new(), chosen: 0, tab: 0, text: String::new(), baseline: String::new(), built: None, status: None, search: String::new(), names: HashMap::new(), pawn: Vec::new(), pawn_from: String::new(), pawn_error: None }
+        ScriptPage { root: None, error: None, garcs: Vec::new(), items: Vec::new(), chosen: 0, tab: 0, text: String::new(), baseline: String::new(), built: None, status: None, search: String::new(), names: HashMap::new(), pawn: Vec::new(), pawn_from: String::new(), pawn_error: None, creator: Default::default() }
     }
 }
 
@@ -404,7 +409,7 @@ impl ScriptPage {
 
 impl Module for ScriptPage {
     fn unsaved(&self) -> bool {
-        self.dirty()
+        self.dirty() || self.creator.unsaved()
     }
 
     fn title(&self) -> &str {
@@ -435,8 +440,10 @@ impl Module for ScriptPage {
         if self.text.is_empty() && self.status.is_none() {
             self.load(session.sd.as_ref());
         }
-        self.tool_bar(ui, session);
-        ui.add_space(8.0);
+        if self.tab != CREATE_TAB {
+            self.tool_bar(ui, session);
+            ui.add_space(8.0);
+        }
         ui.horizontal(|ui| {
             for (place, name) in TABS.iter().enumerate() {
                 if widget::tab_button(ui, name, self.tab == place, false).clicked() {
@@ -445,6 +452,10 @@ impl Module for ScriptPage {
             }
         });
         ui.add_space(6.0);
+        if self.tab == CREATE_TAB {
+            self.creator.ui(ui, session.sd.as_ref());
+            return;
+        }
         match self.tab {
             0 => self.assembly_tab(ui),
             1 => self.pawn_tab(ui),

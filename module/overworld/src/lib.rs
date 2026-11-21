@@ -72,6 +72,7 @@ impl Module for Overworld {
             return;
         };
         let root = dump.root().to_path_buf();
+        scripts::refresh_created(sd);
         // The text files of the maps (the scripts, the events) stay in the folder `sango` of the SD card, next to the folder of the studio.
         let sango = sd.root().parent().map(|sdmc| sdmc.join("sango")).unwrap_or_else(|| PathBuf::from("sango"));
         let (maps, own) = (sd.overworld_folder(), sd.local().join("overworld"));

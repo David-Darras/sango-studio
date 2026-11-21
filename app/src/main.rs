@@ -49,7 +49,6 @@ impl App {
             Box::new(sango_choreography::Choreography::default()),
             Box::new(sango_effect::EffectPage::default()),
             Box::new(sango_script::ScriptPage::default()),
-            Box::new(sango_event::Events::default()),
             Box::new(sango_encounter::EncounterPage::default()),
             Box::new(sango_formula::Formula::default()),
             Box::new(sango_nature::Nature::default()),

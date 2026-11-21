@@ -30,6 +30,7 @@ static STATE: RwLock<State> = RwLock::new(State { table: Table { species: Vec::n
 /// Reads `species/table.bin` of the SD card when it changed. It looks at the file once each second and a half at most.
 /// Returns true when the species or the forms changed.
 pub fn refresh(sd: Option<&SdCard>) -> bool {
+    crate::refresh_icons(sd);
     if STATE.read().ok().and_then(|state| state.checked).is_some_and(|at| at.elapsed() < KEEP) {
         return false;
     }

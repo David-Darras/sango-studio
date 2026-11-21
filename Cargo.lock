@@ -2810,17 +2810,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sango-event"
-version = "0.1.0"
-dependencies = [
- "sango-core",
- "sango-species-base",
- "sango-ui",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "sango-font"
 version = "0.1.0"
 dependencies = [
@@ -2974,7 +2963,10 @@ name = "sango-script"
 version = "0.1.0"
 dependencies = [
  "sango-core",
+ "sango-species-base",
  "sango-ui",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -3020,7 +3012,6 @@ dependencies = [
  "sango-core",
  "sango-effect",
  "sango-encounter",
- "sango-event",
  "sango-font",
  "sango-formula",
  "sango-home",

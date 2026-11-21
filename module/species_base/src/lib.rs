@@ -181,27 +181,90 @@ pub fn name_from(list: &[&str], number: usize, first: usize) -> String {
     number.checked_sub(first).and_then(|i| list.get(i)).map_or("-".to_string(), |s| s.to_string())
 }
 
-/// The texture of the icon of a species: decoded at the first display, then kept.
+/// Where the icons of the species are read: the table of the packs and the folder of the icon files of the SD card.
+struct IconSource {
+    /// The folder `species/icon` on the computer.
+    folder: Option<std::path::PathBuf>,
+    /// The icon file of the species of the packs (form 0), from `species/icon_map.bin`.
+    files: std::collections::BTreeMap<usize, u16>,
+    /// The bytes of the table and the time of the folder: when they change, the textures are made again.
+    stamp: (Vec<u8>, Option<std::time::SystemTime>),
+    checked: Option<std::time::Instant>,
+    /// Grows each time that the table or the folder changed.
+    generation: u32,
+}
+
+static ICON_SOURCE: std::sync::Mutex<Option<IconSource>> = std::sync::Mutex::new(None);
+
+/// The file of the icon that the game shows for a species that it does not know: the black Poké Ball.
+const UNKNOWN_ICON_FILE: usize = 0;
+
+/// Reads the table of the icons of the packs (`species/icon_map.bin`) when it changed, and finds the folder of the icon files of the SD
+/// card. It looks once each second and a half at most. The textures of the icons are made again when something changed.
+pub fn refresh_icons(sd: Option<&sango_core::SdCard>) {
+    let Ok(mut guard) = ICON_SOURCE.lock() else { return };
+    let source = guard.get_or_insert_with(|| IconSource { folder: None, files: Default::default(), stamp: (Vec::new(), None), checked: None, generation: 0 });
+    if source.checked.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(1500)) {
+        return;
+    }
+    source.checked = Some(std::time::Instant::now());
+    let folder = sd.and_then(|sd| sd.path("species/icon").ok());
+    let bytes = sd.and_then(|sd| sd.read(sango_pack::library::ICON_MAP_PATH)).unwrap_or_default();
+    let time = folder.as_ref().and_then(|f| std::fs::metadata(f).ok()).and_then(|m| m.modified().ok());
+    if source.stamp == (bytes.clone(), time) && source.folder == folder {
+        return;
+    }
+    source.files.clear();
+    if bytes.len() >= 8 && &bytes[..4] == b"SICM" {
+        let count = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
+        for entry in bytes[8..].chunks_exact(6).take(count) {
+            let (species, form, file) = (u16::from_le_bytes([entry[0], entry[1]]), u16::from_le_bytes([entry[2], entry[3]]), u16::from_le_bytes([entry[4], entry[5]]));
+            if form == 0 {
+                source.files.insert(species as usize, file);
+            }
+        }
+    }
+    source.stamp = (bytes, time);
+    source.folder = folder;
+    source.generation += 1;
+}
+
+/// The icon file of a species and the bytes of the file: the SD card first (the icons of the packs and the icons that the user changed),
+/// then the archive of the game. A species without an icon gets the black Poké Ball, as in the game.
+fn icon_bytes(garc: Option<&Garc>, species: usize) -> Option<Vec<u8>> {
+    let (folder, mapped) = match ICON_SOURCE.lock() {
+        Ok(guard) => guard.as_ref().map_or((None, None), |s| (s.folder.clone(), s.files.get(&species).copied())),
+        Err(_) => (None, None),
+    };
+    let file = mapped.map(usize::from).or_else(|| icons::ICON_FILES.get(species).map(|&f| f as usize)).filter(|_| species != 0).unwrap_or(UNKNOWN_ICON_FILE);
+    let on_card = folder.and_then(|f| std::fs::read(f.join(format!("{file}.bin"))).ok());
+    let bytes = on_card.or_else(|| garc?.first_file(file).map(|b| b.to_vec()))?;
+    Some(if sango_core::lz::is_compressed(&bytes) { sango_core::lz::decompress(&bytes).ok()? } else { bytes })
+}
+
+/// The texture of the icon of a species: decoded at the first display, then kept. It is made again when the icons of the SD card changed
+/// (see [`refresh_icons`]).
 pub fn icon_texture<'a>(
     textures: &'a mut HashMap<usize, Option<egui::TextureHandle>>,
     garc: Option<&Garc>,
     ctx: &egui::Context,
     species: usize,
 ) -> Option<&'a egui::TextureHandle> {
+    let generation = ICON_SOURCE.lock().ok().and_then(|g| g.as_ref().map(|s| s.generation)).unwrap_or(0);
+    // The key `usize::MAX - generation` marks the generation that the textures of this list belong to.
+    let marker = usize::MAX - generation as usize;
+    if !textures.contains_key(&marker) {
+        textures.clear();
+        textures.insert(marker, None);
+    }
     textures
         .entry(species)
         .or_insert_with(|| {
-            let file = *icons::ICON_FILES.get(species)? as usize;
-            let bytes = garc?.first_file(file)?;
-            let bytes = if sango_core::lz::is_compressed(bytes) {
-                sango_core::lz::decompress(bytes).ok()?
-            } else {
-                bytes.to_vec()
-            };
+            let bytes = icon_bytes(garc, species)?;
             let image = Clim::parse(&bytes).ok()?;
             let rgba = image.to_rgba().ok()?;
             let pixels = egui::ColorImage::from_rgba_unmultiplied([image.width(), image.height()], &rgba);
-            Some(sango_ui::textures::load(ctx, format!("species_icon_{species}"), pixels, egui::TextureOptions::NEAREST))
+            Some(sango_ui::textures::load(ctx, format!("species_icon_{species}_{generation}"), pixels, egui::TextureOptions::NEAREST))
         })
         .as_ref()
 }

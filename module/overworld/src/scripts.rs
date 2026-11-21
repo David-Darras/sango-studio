@@ -149,6 +149,43 @@ pub fn write(sd_dir: &str, scripts: &DataScripts) -> Result<(), String> {
 /// the game uses (found once, in the background).
 static DATA_LABELS: Mutex<Vec<(u16, String)>> = Mutex::new(Vec::new());
 static GAME_LABELS: Mutex<Vec<(u16, String)>> = Mutex::new(Vec::new());
+/// The scripts made on the tab "Create a script" of the Script page: the script `32100 + n` for the script `n`.
+static CREATED_LABELS: Mutex<Vec<(u16, String)>> = Mutex::new(Vec::new());
+static CREATED_CHECKED: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// The text of the first "Say" block of a script (in the file of the tab "Create a script"), at any depth.
+fn first_text(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(text) = map.get("Say").and_then(|say| say.get("text")).and_then(|t| t.as_str()).filter(|t| !t.trim().is_empty()) {
+                return Some(text.trim().chars().take(32).collect());
+            }
+            map.values().find_map(first_text)
+        }
+        serde_json::Value::Array(list) => list.iter().find_map(first_text),
+        _ => None,
+    }
+}
+
+/// Reads the names of the scripts that the user made (`event_source/<n>.json`), at most once each second and a half.
+pub fn refresh_created(sd: &sango_core::SdCard) {
+    let Ok(mut checked) = CREATED_CHECKED.lock() else { return };
+    if checked.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(1500)) {
+        return;
+    }
+    *checked = Some(std::time::Instant::now());
+    let mut labels = Vec::new();
+    for number in 0..256usize {
+        let Some(bytes) = sd.read(&format!("event_source/{number}.json")) else { continue };
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else { continue };
+        let name = value.get("name").and_then(|n| n.as_str()).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string);
+        let what = name.or_else(|| first_text(&value).map(|t| format!("\"{t}\""))).unwrap_or_default();
+        labels.push((32100 + number as u16, format!("script {} made in Sango Studio{}{what}", number + 1, if what.is_empty() { "" } else { ": " })));
+    }
+    if let Ok(mut slot) = CREATED_LABELS.lock() {
+        *slot = labels;
+    }
+}
 
 pub fn set_data_labels(scripts: &DataScripts) {
     if let Ok(mut labels) = DATA_LABELS.lock() {
@@ -196,6 +233,9 @@ pub fn find_game_scripts(arc_dir: &str) {
 pub fn choices() -> Vec<(u16, String)> {
     let mut out = vec![(65535u16, "none (the game ignores the event)".to_string())];
     if let Ok(labels) = DATA_LABELS.lock() {
+        out.extend(labels.iter().cloned());
+    }
+    if let Ok(labels) = CREATED_LABELS.lock() {
         out.extend(labels.iter().cloned());
     }
     if let Ok(labels) = GAME_LABELS.lock() {
