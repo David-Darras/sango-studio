@@ -217,7 +217,7 @@ impl Packs {
                         widget::badge(ui, "Removed", color::AMBER);
                     }
                     if let Some(pack) = pack {
-                        ui.label(widget::hint(&format!("{} species, {} forms, {} models", pack.species.len(), pack.forms.len(), pack.model_names().len())));
+                        ui.label(widget::hint(&format!("{} species, {} forms, {} models, {} species icons, {} item icons", pack.species.len(), pack.forms.len(), pack.model_names().len(), pack.icons.len(), pack.item_icons.len())));
                     }
                 });
                 if let Some(pack) = pack {
@@ -231,7 +231,7 @@ impl Packs {
                         }
                     }
                 }
-                if installed.active && pack.map_or(false, |p| !p.icons.is_empty() || !p.model_names().is_empty()) && widget::button(ui, "Content…") {
+                if installed.active && pack.map_or(false, |p| !p.icons.is_empty() || !p.item_icons.is_empty() || !p.model_names().is_empty()) && widget::button(ui, "Content…") {
                     show = Some(installed.id.clone());
                 }
                 ui.add_enabled_ui(!busy, |ui| {

@@ -197,3 +197,18 @@ When Studio installs, removes or restores a pack (page Packs), it writes `specie
 (`Library::write_icons`). A file that a removed pack wrote is erased. The plugin reads the table for the species 724 and more.
 Only the form 0 of the species of a pack has an icon for now; the icons of the other forms stay in the pack and are not used yet.
 The tool `add_icons <pack> <folder> [--game]` puts the pictures of a folder in a pack file.
+
+## Item icons in a pack
+
+A pack can also replace the item icons of the game: the pictures `item_icons/<name>.png` (PNG, 30 × 30 pixels) and, in the manifest, a
+list `item_icons` of `{ "game_file", "file", "label" }`. `game_file` is the file of the archive 92 that the picture replaces: all the
+items that use this file show the new picture. The pack `item-icons` holds the pictures of Pokémon Scarlet and Violet and of Pokémon
+Legends: Z-A.
+
+When Studio writes the icons (`Library::write_icons`, which calls `Library::write_item_icons`), it writes `item/icon/<file>.bin`,
+where the Item page also writes the pictures that the user changes. A pack wins over a picture of the Item page for the same file. A
+file that a removed pack, or a picture that the user turned off, wrote is erased (the list is in `item/icon_state.json`). The page
+Packs shows the item icons in the Content view, with the picture of the game beside each one.
+
+The tool `add_item_icons <pack> <folder> [credit]` puts the pictures `<file>.png` of a folder, and the names of `labels.tsv`, in a pack
+file.

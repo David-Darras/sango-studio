@@ -1,0 +1,12 @@
+[package]
+name = "sango-font"
+version.workspace = true
+edition.workspace = true
+description = "The Font page of Sango Studio: the fonts of the game, their glyphs, and replacing a font."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+ab_glyph = "0.2"

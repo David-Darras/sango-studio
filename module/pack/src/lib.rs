@@ -8,8 +8,10 @@
 //! - [`library`]: the installed packs, the registry of numbers, and the files written on the SD card.
 //! - [`table`]: the binary file of the plugin.
 //! - [`inc`]: reads the data files that the plugin had before the packs, and makes the first packs from them.
+//! - [`item_icon_pack`]: puts the item icons of a folder in a pack.
 
 pub mod inc;
+pub mod item_icon_pack;
 pub mod library;
 pub mod pack;
 pub mod table;
@@ -84,6 +86,48 @@ mod test {
         assert_eq!(library.write_icons(&sd).unwrap(), 1);
         assert!(sd.read("species/icon/1.bin").is_none());
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The item icons of a pack replace files of the game in `item/icon`, with the list that the plugin reads, and leave with
+    /// the pack. A file that the user changed in the Item page and that no pack replaces stays.
+    #[test]
+    fn the_item_icons_of_the_packs_are_written_and_removed() {
+        let picture = image::RgbaImage::from_pixel(30, 30, image::Rgba([0, 132, 255, 255]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        picture.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let mut p = Pack { id: "items".into(), name: "items".into(), version: "1".into(), ..Pack::default() };
+        p.item_icons = vec![pack::PackItemIcon { game_file: 4, file: "4".into(), label: "Potion".into() }];
+        p.item_icon_files.insert("4".into(), png.into_inner());
+        let folder = std::env::temp_dir().join(format!("sango_pack_item_icons_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("sd")).unwrap();
+        let file = folder.join("items.sangopack");
+        p.save(&file).unwrap();
+        assert_eq!(Pack::open(&file).unwrap().item_icon_files.len(), 1, "the pictures come back from the file");
+        let sd = SdCard::open(folder.join("sd").to_str().unwrap()).unwrap();
+        sd.write("item/icon/9.bin", b"own picture").unwrap();
+        let mut library = Library::default();
+        library.install(Pack::open(&file).unwrap()).unwrap();
+        library.write_icons(&sd).unwrap();
+        let written = sd.read("item/icon/4.bin").unwrap();
+        let clim = sango_core::Clim::parse(&sango_core::lz::decompress(&written).unwrap()).unwrap();
+        assert_eq!(&clim.to_rgba().unwrap()[..4], &[0, 132, 255, 255], "the picture is in the file (colours of 5 bits)");
+        let index = file_lists_numbers(&sd.read("item/icon/index.bin").unwrap());
+        assert_eq!(index, vec![4, 9], "the list of the plugin has both files");
+        library.set_enabled("items", "item_icon:4", false);
+        assert_eq!(library.write_item_icons(&sd).unwrap(), 0);
+        assert!(sd.read("item/icon/4.bin").is_none(), "a picture turned off leaves the SD card");
+        library.set_enabled("items", "item_icon:4", true);
+        assert_eq!(library.write_item_icons(&sd).unwrap(), 1);
+        library.remove("items").unwrap();
+        assert_eq!(library.write_item_icons(&sd).unwrap(), 0);
+        assert!(sd.read("item/icon/4.bin").is_none());
+        assert!(sd.read("item/icon/9.bin").is_some(), "the picture of the Item page stays");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    fn file_lists_numbers(index: &[u8]) -> Vec<u32> {
+        sango_core::file_lists::parse_index(index).unwrap().into_iter().map(|(number, _)| number).collect()
     }
 
     /// A pack that is cut in two keeps the numbers: the new pack takes the species over when both are installed together.

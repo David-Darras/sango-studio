@@ -119,6 +119,17 @@ pub fn icon_file_bytes(png: &[u8]) -> Result<Vec<u8>, String> {
     Ok(sango_core::lz::compress_lz11(&clim.to_bytes()))
 }
 
+/// An item icon file of the game: a picture of 30 × 30 pixels as a CLIM compressed with LZ11 (as the Item page writes it).
+pub fn item_icon_file_bytes(png: &[u8]) -> Result<Vec<u8>, String> {
+    let image = image::load_from_memory(png).map_err(|e| format!("item icon: {e}"))?.to_rgba8();
+    let side = sango_core::item_icons::SIZE as u32;
+    if image.width() != side || image.height() != side {
+        return Err(format!("An item icon must have {side} × {side} pixels, this one has {} × {}.", image.width(), image.height()));
+    }
+    let clim = sango_core::Clim::from_rgba(side as usize, side as usize, image.as_raw())?;
+    Ok(sango_core::lz::compress_lz11(&clim.to_bytes()))
+}
+
 /// The place of a species: its number is `FIRST_SPECIES` and its position in the list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RegisteredSpecies {
@@ -810,6 +821,54 @@ impl Library {
         }
         let list: Vec<u16> = files.keys().copied().collect();
         sd.write(state_path, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
+        self.write_item_icons(sd)?;
+        Ok(files.len())
+    }
+
+    /// Writes the item icons of the active packs on the SD card: `item/icon/<file>.bin`, where the Item page also writes the
+    /// pictures that the user changes. `write_icons` calls it.
+    ///
+    /// A later pack wins over an earlier one, and a pack wins over a picture of the Item page for the same file. The files that
+    /// an earlier call wrote and that no pack asks for now are removed: the game shows its own picture again (the list is in
+    /// `item/icon_state.json`, on the computer). Returns the number of files that the packs ask for.
+    pub fn write_item_icons(&self, sd: &SdCard) -> Result<usize, String> {
+        use std::collections::BTreeMap;
+        let mut files: BTreeMap<u16, Vec<u8>> = BTreeMap::new();
+        for pack in &self.packs {
+            if !self.is_active(&pack.id) {
+                continue;
+            }
+            for icon in &pack.item_icons {
+                if !self.is_enabled(&pack.id, &icon.key()) {
+                    continue;
+                }
+                let Some(png) = pack.item_icon_files.get(&icon.file) else { continue };
+                files.insert(icon.game_file, item_icon_file_bytes(png)?);
+            }
+        }
+        let state_path = "item/icon_state.json";
+        let previous: Vec<u16> = sd.read(state_path).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        for old in previous {
+            if !files.contains_key(&old) {
+                let path = format!("item/icon/{old}.bin");
+                if sd.remove(&path)? {
+                    sd.mark_changed(&path)?;
+                }
+            }
+        }
+        for (file, bytes) in &files {
+            let path = format!("item/icon/{file}.bin");
+            if sd.read(&path).as_deref() != Some(bytes.as_slice()) {
+                sd.write(&path, bytes)?;
+                sd.mark_changed(&path)?;
+            }
+        }
+        let list: Vec<u16> = files.keys().copied().collect();
+        if list.is_empty() {
+            sd.remove(state_path)?;
+        } else {
+            sd.write(state_path, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
+        }
         Ok(files.len())
     }
 
