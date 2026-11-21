@@ -7,8 +7,8 @@ use crate::skeleton::Joint;
 use std::collections::HashMap;
 
 /// The curve kinds that the game knows: a constant, the value of the pose of rest, data, a spline.
-const FC_STATIC_0: u32 = 0;
-const FC_STATIC_BASEPOSE: u32 = 1;
+const CURVE_CONSTANT_ZERO: u32 = 0;
+const CURVE_CONSTANT_BASE_POSE: u32 = 1;
 
 /// The joints under the origin in depth-first order: the name and the place of the parent.
 pub fn skeleton_order(joints: &[Joint]) -> Vec<(String, Option<usize>)> {
@@ -126,8 +126,8 @@ pub fn base_pose(joints: &[Joint], order: &[(String, Option<usize>)]) -> Vec<u8>
 /// A motion of one frame that keeps the pose of rest of every joint.
 pub fn still_motion(order: &[(String, Option<usize>)]) -> Vec<u8> {
     // The two curves of the locator, then three curves (translation, rotation, scale) for each joint: all at the base pose.
-    let mut kinds = vec![FC_STATIC_0, FC_STATIC_0];
-    kinds.extend(std::iter::repeat(FC_STATIC_BASEPOSE).take(3 * order.len()));
+    let mut kinds = vec![CURVE_CONSTANT_ZERO, CURVE_CONSTANT_ZERO];
+    kinds.extend(std::iter::repeat(CURVE_CONSTANT_BASE_POSE).take(3 * order.len()));
     let frames: u16 = 1;
     let mut out = Vec::new();
     out.extend_from_slice(&(kinds.len() as u16).to_le_bytes());

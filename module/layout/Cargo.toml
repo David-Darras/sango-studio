@@ -1,0 +1,11 @@
+[package]
+name = "sango-layout"
+version.workspace = true
+edition.workspace = true
+description = "The Layout page of Sango Studio: the menus of the game, their panes and their images."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }

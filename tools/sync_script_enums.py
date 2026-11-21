@@ -5,7 +5,7 @@
 It reads `tools/script_values.txt` (the lists, with a description of each value) and `tools/script_enum_map.txt` (which enum holds each list).
 For an enum that the plugin already has, the names of the plugin are kept and the values that the plugin does not know are added to the
 header. For the other lists, it writes a new header in `lib/include/<folder>/<name>.h`. It also writes `tools/script_value_names.txt`, the
-name of the enumerator of each value, that `gen_script_natives.py` puts in the API.
+name of the enumerator of each value.
 
 The names are made from the description of the value: `Walk, 32 frames` gives `kWalk32Frames`. A header that already exists and is not
 listed as `existing` is never overwritten.

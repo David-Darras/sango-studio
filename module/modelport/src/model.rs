@@ -666,11 +666,11 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
                 Some(1) => {
                     let mut s = tp.string(tp.c32(tcontent + off));
                     if (0xE0..=0xE8).contains(&off) {
-                        // lutPaths[3..5] name the set of the lookup tables.
+                        // the paths of the lookup tables 3 to 5 name the set of the tables.
                         s = luts.renamed.get(&(cand.place, s.clone())).cloned().unwrap_or(s);
                         used_luts.insert(s.clone());
                     } else if (0xF8..=0x100).contains(&off) {
-                        // lutNames[3..5]: the table read for R, G and B stays the one of the template.
+                        // names 3 to 5 of the lookup tables: the table read for R, G and B stays the one of the template.
                     } else if s.ends_with(&format!("@{}", cand.model_name)) {
                         s = format!("{}@{}", spec.name, model_name);
                     }

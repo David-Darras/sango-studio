@@ -39,6 +39,9 @@ sango-formula = { path = "module/formula" }
 sango-character = { path = "module/character" }
 sango-nature = { path = "module/nature" }
 sango-font = { path = "module/font" }
+sango-event = { path = "module/event" }
+sango-layout = { path = "module/layout" }
+sango-battle = { path = "module/battle" }
 
 # The code of the studio compiles fast with few optimizations. The libraries (egui, wgpu, image, the decoders) change
 # rarely: they are optimized fully once, so the 3D views and the decoding stay fast. The debug information keeps only

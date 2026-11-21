@@ -1,0 +1,11 @@
+[package]
+name = "sango-battle"
+version.workspace = true
+edition.workspace = true
+description = "The Battle page of Sango Studio: the backgrounds and the plates of the battles, their 3D models and their pictures."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }

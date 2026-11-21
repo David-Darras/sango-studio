@@ -28,5 +28,8 @@ sango-encounter.workspace = true
 sango-formula.workspace = true
 sango-nature.workspace = true
 sango-font.workspace = true
+sango-layout.workspace = true
+sango-battle.workspace = true
+sango-event.workspace = true
 sango-character.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

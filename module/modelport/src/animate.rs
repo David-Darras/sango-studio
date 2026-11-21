@@ -80,9 +80,9 @@ pub fn motion_index(battle: bool, name: &str) -> Option<usize> {
 }
 
 /// The curve kinds that the game knows.
-const FC_STATIC_0: u32 = 0;
-const FC_STATIC_BASEPOSE: u32 = 1;
-const FC_STATIC_DATA: u32 = 5;
+const CURVE_CONSTANT_ZERO: u32 = 0;
+const CURVE_CONSTANT_BASE_POSE: u32 = 1;
+const CURVE_CONSTANT_VALUE: u32 = 5;
 /// A smooth curve between key frames, with a slope at each key (the slope is in units for each second).
 const FC_SPLINE_SLOPES: u32 = 7;
 /// A curve that moves less than this (a position in units of the model, an angle in radians) is held still.
@@ -322,16 +322,16 @@ enum Data {
 
 /// The bytes of a motion of `frames` frames. A bone without curves keeps its pose of rest.
 pub fn write_motion(order: &[(String, Option<usize>)], frames: usize, bones: &HashMap<String, BoneCurves>) -> Vec<u8> {
-    let mut curves: Vec<(u32, Data)> = vec![(FC_STATIC_0, Data::None), (FC_STATIC_0, Data::None)];
+    let mut curves: Vec<(u32, Data)> = vec![(CURVE_CONSTANT_ZERO, Data::None), (CURVE_CONSTANT_ZERO, Data::None)];
     for (name, _) in order {
         let Some(bone) = bones.get(name) else {
-            curves.extend((0..3).map(|_| (FC_STATIC_BASEPOSE, Data::None)));
+            curves.extend((0..3).map(|_| (CURVE_CONSTANT_BASE_POSE, Data::None)));
             continue;
         };
         // The translation, then the rotation, then the scale (always 1).
         for component in 0..3 {
             if component == 2 {
-                curves.extend((0..3).map(|_| (FC_STATIC_DATA, Data::Value(1.0))));
+                curves.extend((0..3).map(|_| (CURVE_CONSTANT_VALUE, Data::Value(1.0))));
                 continue;
             }
             let mut values = vec![[0.0f64; 3]; frames + 1];
@@ -351,7 +351,7 @@ pub fn write_motion(order: &[(String, Option<usize>)], frames: usize, bones: &Ha
                 let column: Vec<f64> = values.iter().map(|v| v[k]).collect();
                 let (low, high) = column.iter().fold((f64::MAX, f64::MIN), |(l, h), &v| (l.min(v), h.max(v)));
                 if high - low < STATIC_EPS[component] {
-                    curves.push((FC_STATIC_DATA, Data::Value((high + low) / 2.0)));
+                    curves.push((CURVE_CONSTANT_VALUE, Data::Value((high + low) / 2.0)));
                 } else {
                     let (keys, values) = reduce_keys(&column);
                     curves.push((FC_SPLINE_SLOPES, Data::Spline(keys, values)));

@@ -2730,6 +2730,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-battle"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-core",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-character"
 version = "0.1.0"
 dependencies = [
@@ -2800,6 +2810,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-event"
+version = "0.1.0"
+dependencies = [
+ "sango-core",
+ "sango-species-base",
+ "sango-ui",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sango-font"
 version = "0.1.0"
 dependencies = [
@@ -2836,6 +2857,16 @@ dependencies = [
  "sango-core",
  "sango-rules",
  "sango-species-base",
+ "sango-ui",
+]
+
+[[package]]
+name = "sango-layout"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-core",
  "sango-ui",
 ]
 
@@ -2903,6 +2934,7 @@ dependencies = [
  "sango-core",
  "sango-species-base",
  "sango-ui",
+ "serde_json",
 ]
 
 [[package]]
@@ -2981,16 +3013,19 @@ dependencies = [
  "image",
  "sango-ability",
  "sango-archive",
+ "sango-battle",
  "sango-character",
  "sango-choreography",
  "sango-code",
  "sango-core",
  "sango-effect",
  "sango-encounter",
+ "sango-event",
  "sango-font",
  "sango-formula",
  "sango-home",
  "sango-item",
+ "sango-layout",
  "sango-leveling-rate",
  "sango-move",
  "sango-music",
