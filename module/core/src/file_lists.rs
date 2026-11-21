@@ -1,7 +1,7 @@
 //! The lists of files that the plugin reads.
 //!
 //! The plugin replaces a file of the game by its number: a folder of the studio that holds such files (`species/icon`, `species/cry`,
-//! `species/level_up_moves`, `species/egg_moves`, `species/evolution`, `leveling_rate`, `game_text/<language>`) has the files named by
+//! `species/level_up_moves`, `species/egg_moves`, `species/evolution`, `leveling_rate`, `game_text/<language>`, `layout/<archive>`) has the files named by
 //! their number (`98.bin`) and a list `index.bin` (the number of files, then the number and the size of each, sorted by number). The
 //! studio writes the list again each time that it writes or removes a file of such a folder (see [`SdCard::write`]).
 
@@ -31,6 +31,7 @@ pub fn folders() -> Vec<(String, usize)> {
         ("overworld/model".to_string(), 21),
         ("font".to_string(), 167),
         ("item/icon".to_string(), 92),
+        ("battle/background".to_string(), 136),
     ];
     found.extend(LANGUAGES.iter().map(|language| (format!("game_text/{}", language.folder), language.archive)));
     found
@@ -41,6 +42,10 @@ pub fn folder_of(relative: &str) -> Option<String> {
     let (folder, file) = relative.rsplit_once('/')?;
     if file == "index.bin" {
         return None;
+    }
+    // The layouts of the menus: one folder for each archive, named by its number (`layout/61`).
+    if let Some(number) = folder.strip_prefix("layout/") {
+        return (!number.is_empty() && number.bytes().all(|b| b.is_ascii_digit())).then(|| folder.to_string());
     }
     folders().into_iter().map(|(name, _)| name).find(|name| name == folder)
 }
@@ -102,6 +107,9 @@ mod test {
         assert_eq!(folder_of("game_text/en/98.bin").as_deref(), Some("game_text/en"));
         assert_eq!(folder_of("species/cry/3776.bin").as_deref(), Some("species/cry"));
         assert_eq!(folder_of("leveling_rate/3.bin").as_deref(), Some("leveling_rate"));
+        assert_eq!(folder_of("layout/61/0.bin").as_deref(), Some("layout/61"));
+        assert_eq!(folder_of("layout/61/index.bin"), None);
+        assert_eq!(folder_of("layout/other/0.bin"), None);
         assert_eq!(folder_of("species/data/25_0.bin"), None);
         assert_eq!(folder_of("species/icon/index.bin"), None);
     }

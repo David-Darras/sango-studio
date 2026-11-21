@@ -973,6 +973,39 @@ pub fn parse_textures(data: &[u8]) -> Result<Vec<Texture>, String> {
     Ok(out)
 }
 
+/// The place, the format and the size of a picture of a model file, by its name.
+fn find_texture(data: &[u8], name: &str) -> Result<(usize, u32, usize, usize), String> {
+    let file = File::new(data)?;
+    let table = file.content + file.u32(file.content + 36)? as usize;
+    let count = file.u32(file.content + 40)? as usize;
+    for i in 0..count {
+        let description = file.content + file.u32(table + 4 * i)? as usize;
+        if file.name(file.u32(description + 28)?) != name {
+            continue;
+        }
+        let words = file.words(file.u32(description)? as usize, file.u32(description + 4)? as usize)?;
+        let registers = registers(&words);
+        let (Some(&(dimension, _)), Some(&(address, _)), Some(&(kind, _))) = (registers.get(&0x82), registers.get(&0x85), registers.get(&0x8e)) else {
+            return Err(format!("The picture {name} has no description."));
+        };
+        return Ok((file.raw + address as usize, kind & 0xf, (dimension >> 16) as usize, (dimension & 0xffff) as usize));
+    }
+    Err(format!("The model file has no picture named {name}."))
+}
+
+/// Gives the bytes of a model file where a picture has new pixels. The picture keeps its size and its format, so the file keeps its size and
+/// every other byte: `rgba` has `width` × `height` pixels, the first row at the top. The error tells the size that the picture has.
+pub fn replace_texture(data: &[u8], name: &str, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let (start, format, width, height) = find_texture(data, name)?;
+    if rgba.len() != width * height * 4 {
+        return Err(format!("The picture {name} has {width} × {height} pixels: the new picture must have the same size."));
+    }
+    let bytes = encode_texture(format, width, height, rgba).ok_or_else(|| format!("The format {format} of the picture {name} cannot be written."))?;
+    let mut out = data.to_vec();
+    out.get_mut(start..start + bytes.len()).ok_or("The picture is outside of the file.")?.copy_from_slice(&bytes);
+    Ok(out)
+}
+
 /// Decodes a block of 4 × 4 pixels of ETC1, row after row.
 fn etc1_block(block: u64) -> [[u8; 3]; 16] {
     let mut out = [[0u8; 3]; 16];
