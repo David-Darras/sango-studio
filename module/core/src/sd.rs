@@ -45,7 +45,7 @@ const PUBLISHED: [&str; 28] = [
 
 /// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs) and the maps of
 /// the Overworld page (the editor of the maps writes them there).
-const CARD_ONLY: [&str; 2] = ["species/model/", "overworld/"];
+const CARD_ONLY: [&str; 3] = ["species/model/", "overworld/", "music/"];
 
 /// The folder of the maps in the folder of the studio of the SD card.
 pub const OVERWORLD_FOLDER: &str = "overworld";
@@ -169,10 +169,10 @@ impl SdCard {
         self.root.join("species").join("model")
     }
 
-    /// The folder of the music files of the plugin, `sango/bgm`, next to the folder of the studio on the SD card. A file with the name of a
-    /// music file of the game plays in place of it.
+    /// The folder of the music files of the plugin, `music`, in the folder of the studio of the SD card. A file with the name of a music
+    /// file of the game plays in place of it. The sound archive is in it too (see [`SdCard::sound_archive`]).
     pub fn bgm_folder(&self) -> PathBuf {
-        self.root.parent().unwrap_or(&self.root).join("sango").join("bgm")
+        self.root.join("music")
     }
 
     /// What [`SdCard::erase_everything`] would remove.
@@ -190,6 +190,11 @@ impl SdCard {
             card: (all.0 - models.0 - maps.0, all.1 - models.1 - maps.1),
             models,
         }
+    }
+
+    /// The copy of the sound archive that the studio writes for the sound effects: `music/sango_sound.bcsar`.
+    pub fn sound_archive(&self) -> PathBuf {
+        self.bgm_folder().join("sango_sound.bcsar")
     }
 
     /// Starts from zero: removes all the files of the studio on the computer and on the SD card, and the 3D models that the studio wrote on the
@@ -236,6 +241,7 @@ impl SdCard {
     /// keeps only the files that the plugin reads (all of them, as the computer has them).
     fn move_files_to_the_computer(&self) -> Result<(), String> {
         self.move_the_old_models()?;
+        self.move_the_old_music()?;
         self.move_the_old_maps()?;
         let mut found = Vec::new();
         Self::collect(&self.root, "", &mut found);
@@ -284,6 +290,22 @@ impl SdCard {
                 std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
             }
             std::fs::rename(&old, &new).map_err(|e| format!("{} to {}: {e}", old.display(), new.display()))?;
+        }
+        Ok(())
+    }
+
+    /// The music files and the sound archive that the older versions wrote in `sango/bgm` and `sango/sound` (next to the folder of the
+    /// studio) come into the folder `music` of the studio.
+    fn move_the_old_music(&self) -> Result<(), String> {
+        let Some(sango) = self.root.parent().map(|sdmc| sdmc.join("sango")) else { return Ok(()) };
+        let new = self.bgm_folder();
+        let (bgm, archive) = (sango.join("bgm"), sango.join("sound").join("sango_sound.bcsar"));
+        if bgm.is_dir() && !new.exists() {
+            std::fs::rename(&bgm, &new).map_err(|e| format!("{} to {}: {e}", bgm.display(), new.display()))?;
+        }
+        if archive.is_file() && !self.sound_archive().exists() {
+            std::fs::create_dir_all(&new).map_err(|e| format!("{}: {e}", new.display()))?;
+            std::fs::rename(&archive, self.sound_archive()).map_err(|e| format!("{}: {e}", archive.display()))?;
         }
         Ok(())
     }

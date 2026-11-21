@@ -28,7 +28,15 @@ impl App {
         if let Some(state) = cc.wgpu_render_state.clone() {
             cc.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(sango_overworld::RENDER_STATE_KEY), state));
         }
-        let modules: Vec<Box<dyn Module>> = vec![
+        let modules = Self::pages();
+        // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
+        let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).unwrap_or(0);
+        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false }
+    }
+
+    /// All the pages, new and empty. The first one is Home.
+    fn pages() -> Vec<Box<dyn Module>> {
+        vec![
             Box::new(sango_home::Home::default()),
             Box::new(sango_archive::Archive::default()),
             Box::new(sango_species::Species::default()),
@@ -46,15 +54,26 @@ impl App {
             Box::new(sango_nature::Nature::default()),
             Box::new(sango_font::FontPage::default()),
             Box::new(sango_character::Character::default()),
-
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_music::MusicPage::default()),
             Box::new(sango_code::Code::default()),
-        ];
-        // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
-        let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).unwrap_or(0);
-        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false }
+        ]
+    }
+
+    /// After "Start from zero": the pages keep a copy of the files in memory, so they are made again (Home stays, it shows the result).
+    fn forget_erased_files(&mut self) {
+        static SEEN: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let count = sango_core::erase_count();
+        if SEEN.swap(count, std::sync::atomic::Ordering::Relaxed) == count {
+            return;
+        }
+        let mut fresh = Self::pages().into_iter();
+        let _ = fresh.next();
+        for (old, new) in self.modules.iter_mut().skip(1).zip(fresh) {
+            *old = new;
+        }
+        self.warmed = 0;
     }
 
     fn side_bar(&mut self, ctx: &egui::Context) {
@@ -236,6 +255,7 @@ impl App {
             ctx.request_repaint();
         }
 
+        self.forget_erased_files();
         self.session.focus_page = !self.side_bar_focus;
         widget::set_page_focus(ctx, self.session.focus_page);
         self.side_bar(ctx);

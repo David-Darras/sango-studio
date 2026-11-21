@@ -66,7 +66,7 @@ pub struct Effects {
 
 /// The copy of the archive on the SD card.
 fn card_path(sd: &SdCard) -> PathBuf {
-    sd.bgm_folder().parent().map(Path::to_path_buf).unwrap_or_default().join("sound").join("sango_sound.bcsar")
+    sd.sound_archive()
 }
 
 fn as_music(sound: &Sound) -> Music {
