@@ -5,7 +5,7 @@ use crate::data::{Encounter, METHODS};
 use crate::dexnav::{map_types, Kind, Navi, TypePlace, TYPE_COUNT};
 use crate::navi_parts::PARTS;
 use sango_core::Dump;
-use sango_species::SpeciesIcons;
+use sango_species_base::SpeciesIcons;
 use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Session};

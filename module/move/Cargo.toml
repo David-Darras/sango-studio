@@ -6,7 +6,7 @@ description = "The move editor of Sango Studio."
 
 [dependencies]
 sango-core.workspace = true
-sango-species.workspace = true
+sango-species-base.workspace = true
 rfd.workspace = true
 sango-ui.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

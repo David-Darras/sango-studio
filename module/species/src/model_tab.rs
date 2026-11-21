@@ -911,7 +911,7 @@ mod test {
         library.install(sango_pack::Pack::open(&file).unwrap()).unwrap();
         library.apply(&sd, &dump).unwrap();
         let table = sango_pack::Table::from_bytes(&sd.read("species/table.bin").unwrap()).unwrap();
-        crate::extras::set_for_test(table);
+        let _table = crate::extras::set_for_test(table);
 
         let mut tab = ModelTab::default();
         tab.set_sd_folder(Some(sd.models_folder()), false);

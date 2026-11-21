@@ -803,7 +803,7 @@ impl Viewer {
                     3 => {
                         // (The list of the names starts at the item number 1.)
                         let mut options: Vec<(u16, String)> = vec![(0, "(no item)".to_string())];
-                        options.extend(sango_species::ITEM_NAMES.iter().enumerate().map(|(i, n)| (i as u16 + 1, n.to_string())));
+                        options.extend(sango_species_base::ITEM_NAMES.iter().enumerate().map(|(i, n)| (i as u16 + 1, n.to_string())));
                         changed |= choice(ui, "Item", &mut step.parameter_1, &options);
                         changed |= number(ui, "How many (0 is one)", &mut step.parameter_2);
                     }

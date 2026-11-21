@@ -514,18 +514,57 @@ pub fn update_navigation(ui: &mut egui::Ui) {
     }
 }
 
-/// A glow around a rectangle to highlight the currently active widget.
+/// How long the glow pulses after it comes on a widget, in seconds. After that it stays still, and the window stops drawing
+/// when nothing changes.
+const GLOW_PULSE_SECONDS: f64 = 1.6;
+
+/// The strength of the glow when it stays still (from 0 to 1).
+const GLOW_STILL_STRENGTH: f32 = 0.8;
+
+/// The glows of the last frame: the place of the rectangle, the time when the glow came there, the pass of the last draw.
+#[derive(Clone, Default)]
+struct GlowTimes(Vec<([i32; 4], f64, u64)>);
+
+/// Returns the time since the glow is on this rectangle, in seconds. A glow that was not drawn in the last frame starts again.
+fn glow_age(ui: &egui::Ui, rect: egui::Rect) -> f64 {
+    let ctx = ui.ctx();
+    let (now, frame) = (ui.input(|i| i.time), ctx.cumulative_pass_nr());
+    let place = [rect.min.x.round() as i32, rect.min.y.round() as i32, rect.max.x.round() as i32, rect.max.y.round() as i32];
+    let id = egui::Id::new("sango_glow_times");
+    ctx.data_mut(|d| {
+        let times = d.get_temp_mut_or_default::<GlowTimes>(id);
+        times.0.retain(|&(_, _, last)| last + 1 >= frame);
+        match times.0.iter_mut().find(|(p, _, _)| *p == place) {
+            Some(entry) => {
+                entry.2 = frame;
+                now - entry.1
+            }
+            None => {
+                times.0.push((place, now, frame));
+                0.0
+            }
+        }
+    })
+}
+
+/// A glow around a rectangle to highlight the currently active widget. It pulses for a short time, then stays still.
 pub fn glow(ui: &egui::Ui, rect: egui::Rect, rounding: f32) {
-    let time = ui.input(|i| i.time) as f32;
-    let pulse = 0.5 + 0.5 * (time * 2.8).sin();
-    let strength = 0.2 + 0.8 * pulse;
+    let age = glow_age(ui, rect);
+    let strength = if age < GLOW_PULSE_SECONDS {
+        // The pulse gets smaller and ends on the still strength.
+        let fade = 1.0 - (age / GLOW_PULSE_SECONDS) as f32;
+        let wave = (age as f32 * 2.8 * std::f32::consts::PI).sin();
+        ui.ctx().request_repaint();
+        (GLOW_STILL_STRENGTH + 0.2 * fade * wave).clamp(0.0, 1.0)
+    } else {
+        GLOW_STILL_STRENGTH
+    };
     for layer in 0..4 {
         let grow = 1.0 + layer as f32 * 1.6;
         let alpha = (strength * (170.0 - 38.0 * layer as f32)) as u8;
         let colour = egui::Color32::from_rgba_unmultiplied(79, 70, 229, alpha);
         ui.painter().rect_stroke(rect.expand(grow), Rounding::same(rounding + grow), Stroke::new(1.6_f32, colour));
     }
-    ui.ctx().request_repaint();
 }
 
 /// Adds a step to a number and keeps it between the limits.

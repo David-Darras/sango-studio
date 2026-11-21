@@ -184,7 +184,7 @@ impl TypeTexts {
                             row(ui, id, language, true);
                             ui.label(widget::hint("Colour of the buttons in battle:"));
                             let mut colour = entry.colour;
-                            sango_species::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
+                            sango_species_base::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
                             entry.colour = colour;
                             if widget::button(ui, "Remove") {
                                 removed = Some(id);

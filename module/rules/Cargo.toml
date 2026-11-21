@@ -6,5 +6,5 @@ description = "The rules of the new abilities, moves and items of Sango Studio."
 
 [dependencies]
 sango-core.workspace = true
-sango-species.workspace = true
+sango-species-base.workspace = true
 sango-ui.workspace = true

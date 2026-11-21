@@ -4,7 +4,7 @@
 //! when it is clicked, the arrow keys, Enter, and it shows the chosen move at the middle when it opens.
 
 use sango_core::moves::Category;
-use sango_species::battle_icons;
+use sango_species_base::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
 
@@ -226,7 +226,7 @@ pub fn move_menu(ui: &mut egui::Ui, id_salt: &str, value: &mut usize, width: f32
                     ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
                 }
                 if battle_icons::paint_type(ui.painter(), data.kind, egui::pos2(row.left() + COLUMNS[2].0, y)).is_none() {
-                    ui.painter().text(egui::pos2(row.left() + COLUMNS[2].0, y), egui::Align2::LEFT_CENTER, battle_icons::custom_type_name(data.kind).or_else(|| sango_species::TYPE_NAMES.get(data.kind as usize).map(|n| n.to_string())).unwrap_or_else(|| "-".into()), egui::FontId::proportional(12.0), color::MUTED);
+                    ui.painter().text(egui::pos2(row.left() + COLUMNS[2].0, y), egui::Align2::LEFT_CENTER, battle_icons::custom_type_name(data.kind).or_else(|| sango_species_base::TYPE_NAMES.get(data.kind as usize).map(|n| n.to_string())).unwrap_or_else(|| "-".into()), egui::FontId::proportional(12.0), color::MUTED);
                 }
                 if let Some(texture) = battle_icons::category_texture(ui.ctx(), category_of(data.damage_kind)) {
                     battle_icons::paint(ui.painter(), &texture, egui::pos2(row.left() + COLUMNS[3].0, y));

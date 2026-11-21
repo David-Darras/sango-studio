@@ -127,10 +127,41 @@ impl Entry {
     }
 }
 
+/// An archive file that is bigger than this is mapped in memory, not read. The system then reads only the parts that the
+/// program uses: the archive of the Pokémon models is 1 GB.
+const MAP_FROM_SIZE: u64 = 4 * 1024 * 1024;
+
+/// The bytes of an archive: read in memory, or mapped from the file.
+enum Bytes {
+    Read(Vec<u8>),
+    /// The files of the dump do not change while the studio is open: the map stays correct.
+    Mapped(memmap2::Mmap),
+}
+
+impl std::ops::Deref for Bytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Bytes::Read(data) => data,
+            Bytes::Mapped(map) => map,
+        }
+    }
+}
+
+impl std::fmt::Debug for Bytes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Bytes::Read(data) => write!(f, "Read({} bytes)", data.len()),
+            Bytes::Mapped(map) => write!(f, "Mapped({} bytes)", map.len()),
+        }
+    }
+}
+
 /// An archive of the game, in memory.
 #[derive(Debug)]
 pub struct Garc {
-    data: Vec<u8>,
+    data: Bytes,
     version: u16,
     header_size: usize,
     block_count: u16,
@@ -149,6 +180,10 @@ impl Garc {
     ///
     /// The function checks the signatures, the version and the place of every file.
     pub fn parse(data: Vec<u8>) -> Result<Garc, String> {
+        Garc::parse_bytes(Bytes::Read(data))
+    }
+
+    fn parse_bytes(data: Bytes) -> Result<Garc, String> {
         if data.is_empty() {
             return Err("The archive file is empty.".into());
         }
@@ -216,10 +251,18 @@ impl Garc {
         Ok(Garc { data, version, header_size, block_count, archive_size, data_offset, largest_file_size, offset_table_size, range_table_size, entries })
     }
 
-    /// Reads an archive from a file.
+    /// Reads an archive from a file. A big file is mapped in memory (see `MAP_FROM_SIZE`).
     pub fn open(path: &Path) -> Result<Garc, String> {
-        let data = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-        Garc::parse(data).map_err(|e| format!("{}: {e}", path.display()))
+        let error = |e: std::io::Error| format!("{}: {e}", path.display());
+        let file = std::fs::File::open(path).map_err(error)?;
+        let size = file.metadata().map_err(error)?.len();
+        let data = if size > MAP_FROM_SIZE {
+            // SAFETY: the map is read only, and the files of the dump do not change while the studio is open.
+            Bytes::Mapped(unsafe { memmap2::Mmap::map(&file) }.map_err(error)?)
+        } else {
+            Bytes::Read(std::fs::read(path).map_err(error)?)
+        };
+        Garc::parse_bytes(data).map_err(|e| format!("{}: {e}", path.display()))
     }
 
     /// Returns the version of the format.

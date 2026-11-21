@@ -13,7 +13,7 @@ mod texts;
 mod tools;
 
 use sango_core::{Dump, SdCard};
-use sango_species::SpeciesAbilities;
+use sango_species_base::SpeciesAbilities;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
@@ -75,7 +75,7 @@ impl Ability {
     /// Reads the abilities of all the species again.
     fn read_usage(&mut self, session: &Session) {
         self.usage = (0..=rules::LAST_ID as usize).map(|_| [Vec::new(), Vec::new(), Vec::new()]).collect();
-        match sango_species::species_abilities(session) {
+        match sango_species_base::species_abilities(session) {
             Ok(all) => {
                 for SpeciesAbilities { species, form, abilities } in all {
                     for (slot, &ability) in abilities.iter().enumerate() {
@@ -312,10 +312,10 @@ impl Ability {
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
                         for (species, form) in list {
-                            let name = sango_species::species_name(species);
+                            let name = sango_species_base::species_name(species);
                             let label = if form == 0 { format!("#{species:03} {name}") } else { format!("#{species:03} {name} (form {form})") };
                             if widget::button(ui, label) {
-                                sango_species::open_species(ui.ctx(), species);
+                                sango_species_base::open_species(ui.ctx(), species);
                             }
                         }
                     });
