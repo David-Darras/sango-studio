@@ -71,7 +71,16 @@ const SHINY_TEXTURE_OFFSET: usize = 3;
 const BATTLE_MOTION_OFFSET: usize = 5;
 const AMIE_MOTION_OFFSET: usize = 6;
 
-use sango_modelport::animate::motion_name;
+use sango_modelport::animate::{motion_name, AMIE_MOTIONS, BATTLE_MOTIONS};
+
+/// The name of a motion without category prefix: the section in the dropdown gives the file.
+fn short_motion(battle: bool, index: usize) -> String {
+    let names: &[&str] = if battle { &BATTLE_MOTIONS } else { &AMIE_MOTIONS };
+    match names.get(index) {
+        Some(name) => (*name).to_string(),
+        None => format!("Control motion {index}"),
+    }
+}
 
 /// A model of a species: the normal one, the female one or a form.
 #[derive(Clone, Debug, PartialEq)]
@@ -404,12 +413,16 @@ impl ModelTab {
         if same {
             return;
         }
+        let only_shiny = self.loaded.as_ref().is_some_and(|l| l.species == species && l.form == form);
         self.forget_thumbnails();
         self.dirty = true;
-        self.loaded = None;
         self.error = None;
-        let Some(variant) = self.variants.iter().find(|v| v.slot == form).cloned() else { return };
+        let Some(variant) = self.variants.iter().find(|v| v.slot == form).cloned() else {
+            self.loaded = None;
+            return;
+        };
         let Some(archive) = self.files_of(variant.sd) else {
+            self.loaded = None;
             self.error = Some("The model files of the packs are not on the SD card: install the pack again in the page Packs.".into());
             return;
         };
@@ -418,21 +431,25 @@ impl ModelTab {
             Ok((model, textures)) => {
                 let by_name = textures.iter().map(|texture| (texture.name.clone(), texture.clone())).collect();
                 let (battle, amie) = (read_motions(archive, file + BATTLE_MOTION_OFFSET), read_motions(archive, file + AMIE_MOTION_OFFSET));
-                // The model starts in its idle motion (the first of the battle file, else the first of Pokémon-Amie),
-                // and the motion goes on without end.
-                self.slow = false;
-                self.playing = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
-                    let pack = pack.as_ref()?;
-                    let index = (0..pack.len()).find(|&i| pack.has(i))?;
-                    pack.motion(index).ok().map(|motion| Playing { battle: is_battle, index, motion })
-                });
-                self.running = self.playing.is_some();
-                self.frame = 0.0;
-                self.last_tick = None;
+                // When loading a new model or form, start in its idle motion.
+                if !only_shiny {
+                    self.slow = false;
+                    self.playing = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
+                        let pack = pack.as_ref()?;
+                        let index = (0..pack.len()).find(|&i| pack.has(i))?;
+                        pack.motion(index).ok().map(|motion| Playing { battle: is_battle, index, motion })
+                    });
+                    self.running = self.playing.is_some();
+                    self.frame = 0.0;
+                    self.last_tick = None;
+                    self.refocus();
+                }
                 self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name, battle, amie });
-                self.refocus();
             }
-            Err(message) => self.error = Some(message),
+            Err(message) => {
+                self.loaded = None;
+                self.error = Some(message);
+            }
         }
     }
 
@@ -477,6 +494,11 @@ impl ModelTab {
     /// The picture of the model: the mouse turns it, the wheel zooms.
     fn view(&mut self, ui: &mut egui::Ui) {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(VIEW_SIZE as f32, VIEW_SIZE as f32), egui::Sense::click_and_drag());
+        if response.double_clicked() {
+            let outline = self.camera.outline;
+            self.camera = Camera { outline, ..Camera::default() };
+            self.dirty = true;
+        }
         if response.dragged() {
             let delta = response.drag_delta();
             self.camera.yaw -= delta.x * 0.012;
@@ -543,8 +565,6 @@ impl ModelTab {
         if let Some(message) = &self.error {
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, message, egui::FontId::proportional(14.0), color::ROSE);
         }
-        ui.add_space(4.0);
-        ui.label(widget::hint("Drag to turn the model. Scroll to zoom."));
     }
 
     /// The form, the colours, the numbers, and the list of pictures.
@@ -557,33 +577,17 @@ impl ModelTab {
                 ui.checkbox(&mut self.female, "Female model").on_hover_text("Shows the female model of the normal form.");
             }
             ui.horizontal(|ui| {
-                if ui.selectable_label(!self.shiny, "Normal colours").clicked() {
-                    self.shiny = false;
+                if ui.checkbox(&mut self.shiny, "Shiny").changed() {
+                    self.dirty = true;
                 }
-                if ui.selectable_label(self.shiny, "Shiny colours").clicked() {
-                    self.shiny = true;
-                }
-                if widget::button(ui, "Reset the view") {
-                    self.camera = Camera::default();
+                if ui.checkbox(&mut self.camera.outline, "Outline").changed() {
                     self.dirty = true;
                 }
             });
-            if ui.checkbox(&mut self.camera.outline, "Outline").changed() {
-                self.dirty = true;
-            }
-            ui.horizontal(|ui| {
-                if widget::button(ui, "Export…") {
-                    self.export_model();
-                }
-            });
-            self.import_row(ui, species);
+            self.actions_row(ui, species);
             if let Some(loaded) = &self.loaded {
                 let triangles: usize = loaded.model.meshes.iter().map(|mesh| mesh.triangles.len()).sum();
                 ui.label(widget::hint(&format!("{} bones · {} meshes · {triangles} triangles · {} pictures", loaded.model.bones.len(), loaded.model.meshes.len(), loaded.textures.len())));
-                if let Some(variant) = available.iter().find(|v| v.slot == self.form) {
-                    let (file, place) = (variant.file, if variant.sd { "of the models of the packs" } else { "of the archive 8" });
-                    ui.label(widget::hint(&format!("Files {file} to {} {place}", file + 7)));
-                }
             }
         });
         ui.add_space(8.0);
@@ -636,40 +640,46 @@ impl ModelTab {
         }
     }
 
-    /// The buttons that replace the model by one from a file, and bring the model of the pack back.
-    fn import_row(&mut self, ui: &mut egui::Ui, species: usize) {
-        let target = self.import_target(species);
-        let (Some(sd_root), Some(dump_root)) = (self.sd_root.clone(), self.dump_root.clone()) else { return };
+    /// The Export, Import, and Reset buttons cote à cote, with scale factor.
+    fn actions_row(&mut self, ui: &mut egui::Ui, species: usize) {
+        let (Some(sd_root), Some(dump_root)) = (self.sd_root.clone(), self.dump_root.clone()) else {
+            ui.horizontal(|ui| {
+                if widget::button(ui, "Export") {
+                    self.export_model();
+                }
+            });
+            return;
+        };
         if self.job.is_some() {
             ui.label(widget::hint("Working: the model is converted and the files of the packs are written…"));
             return;
         }
-        let Some((target, model_name)) = target else { return };
+        let target = self.import_target(species);
         let mut request = None;
         ui.horizontal(|ui| {
-            if widget::button(ui, "Import model…") {
-                if let Some(file) = rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file() {
-                    let scale = f64::from(self.import_scale);
-                    request = Some(match &target {
-                        Target::Pack(species, form) => crate::model_import::Request::Import { file, species: species.clone(), form: *form, model_name, scale },
-                        Target::Game(species, slot) => crate::model_import::Request::ImportGame { file, species: *species, slot: *slot, model_name, scale },
+            if widget::button(ui, "Export") {
+                self.export_model();
+            }
+            if let Some((target, model_name)) = &target {
+                if widget::button(ui, "Import") {
+                    if let Some(file) = rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file() {
+                        let scale = f64::from(self.import_scale);
+                        request = Some(match target {
+                            Target::Pack(species, form) => crate::model_import::Request::Import { file, species: species.clone(), form: *form, model_name: model_name.clone(), scale },
+                            Target::Game(species, slot) => crate::model_import::Request::ImportGame { file, species: *species, slot: *slot, model_name: model_name.clone(), scale },
+                        });
+                    }
+                }
+                if widget::button(ui, "Reset") {
+                    request = Some(match target {
+                        Target::Pack(species, form) => crate::model_import::Request::Reset { species: species.clone(), form: *form },
+                        Target::Game(species, slot) => crate::model_import::Request::ResetGame { species: *species, slot: *slot },
                     });
                 }
+                ui.label(widget::hint("Scale"));
+                ui.add(egui::DragValue::new(&mut self.import_scale).speed(0.01).range(0.05..=20.0));
             }
-            let back = match &target {
-                Target::Pack(..) => "Back to the model of the pack",
-                Target::Game(..) => "Back to the model of the game",
-            };
-            if widget::button(ui, back) {
-                request = Some(match &target {
-                    Target::Pack(species, form) => crate::model_import::Request::Reset { species: species.clone(), form: *form },
-                    Target::Game(species, slot) => crate::model_import::Request::ResetGame { species: *species, slot: *slot },
-                });
-            }
-            ui.label(widget::hint("Scale"));
-            ui.add(egui::DragValue::new(&mut self.import_scale).speed(0.01).range(0.05..=20.0));
         });
-        ui.label(widget::hint("A model without animation stays in its rest pose (T-pose). Restart the game after a change."));
         if let Some(request) = request {
             let (sender, receiver) = std::sync::mpsc::channel();
             std::thread::spawn(move || {
@@ -709,14 +719,21 @@ impl ModelTab {
                 ui.label(widget::hint("This model has no motion in the archive."));
                 return;
             }
-            let selected = self.playing.as_ref().map_or("Rest pose".to_string(), |p| motion_name(p.battle, p.index));
+            let selected = self.playing.as_ref().map_or("Rest pose".to_string(), |p| short_motion(p.battle, p.index));
             egui::ComboBox::from_id_salt("model_motion").selected_text(selected).width(340.0).height(360.0).show_ui(ui, |ui| {
                 if ui.selectable_label(self.playing.is_none(), "Rest pose").clicked() {
                     chosen = Some(None);
                 }
+                let mut section = None;
                 for &(battle, index) in &entries {
+                    if section != Some(battle) {
+                        section = Some(battle);
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.label(egui::RichText::new(if battle { "Battle" } else { "Pokémon-Amie" }).strong().size(12.0).color(color::MUTED));
+                    }
                     let is_selected = self.playing.as_ref().is_some_and(|p| p.battle == battle && p.index == index);
-                    if ui.selectable_label(is_selected, motion_name(battle, index)).clicked() {
+                    if ui.selectable_label(is_selected, short_motion(battle, index)).clicked() {
                         chosen = Some(Some((battle, index)));
                     }
                 }

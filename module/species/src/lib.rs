@@ -495,7 +495,6 @@ impl Species {
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let mut reset_tab = false;
         let mut reset_more = false;
-        let mut undo = false;
         let mut save = false;
         let mut add_form = false;
         let before = (self.species, self.form);
@@ -751,18 +750,12 @@ impl Species {
                     reset_tab = widget::button(ui, "Reset tab");
                 })
                 .response
-                .on_hover_text("Puts the data of this tab for this form back to the romfs. Undo gives it back.");
+                .on_hover_text("Puts the data of this tab for this form back to the romfs.");
                 ui.add_enabled_ui(has_card, |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
                 .on_hover_text("Reset one form, one species or all the species, for the parts that you choose.");
-                let undo_label = self.undo_label().map(|label| format!("Undo: {label}"));
-                ui.add_enabled_ui(undo_label.is_some() && session.sd.is_some(), |ui| {
-                    undo = widget::button(ui, "Undo");
-                })
-                .response
-                .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -790,13 +783,10 @@ impl Species {
         }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [false; 5];
+            self.tools.parts = [false; 6];
             if let Some(part) = data_tools::tab_part(self.tab) {
                 self.tools.parts[data_tools::Part::ALL.iter().position(|p| *p == part).unwrap_or(0)] = true;
             }
-        }
-        if undo {
-            self.undo(session);
         }
         if save {
             self.save(session);
@@ -881,6 +871,7 @@ impl Species {
 }
 
 /// A rate from 0 to 255 as a percentage of the maximum.
+#[cfg(test)]
 fn percent(value: u8) -> String {
     let text = format!("{:.1}", value as f32 * 100.0 / 255.0);
     format!("{} %", text.strip_suffix(".0").unwrap_or(&text))
@@ -1125,20 +1116,6 @@ fn height_field(ui: &mut egui::Ui, id_salt: &str, cm_value: &mut u16) {
             ui.data_mut(|d| d.insert_temp(unit_id, unit));
         }
 
-        let total_inches = *cm_value as f32 / 2.54;
-        let mut feet = (total_inches / 12.0).floor() as i32;
-        let mut inches = (total_inches % 12.0).round() as i32;
-        if inches == 12 {
-            feet += 1;
-            inches = 0;
-        }
-
-        let hint = match unit {
-            HeightUnit::Meters => format!("({feet}'{inches:02}\")"),
-            HeightUnit::Centimeters => format!("{:.2} m ({feet}'{inches:02}\")", *cm_value as f32 / 100.0),
-            HeightUnit::Inches => format!("{:.2} m / {} cm", *cm_value as f32 / 100.0, *cm_value),
-        };
-        ui.label(widget::hint(&hint));
     });
 }
 
@@ -1195,13 +1172,6 @@ fn weight_field(ui: &mut egui::Ui, id_salt: &str, hg_value: &mut u16) {
             ui.data_mut(|d| d.insert_temp(unit_id, unit));
         }
 
-        let kg = *hg_value as f32 / 10.0;
-        let lbs = kg * 2.2046226;
-        let hint = match unit {
-            WeightUnit::Kg => format!("({lbs:.1} lbs)"),
-            WeightUnit::Lbs => format!("({kg:.1} kg)"),
-        };
-        ui.label(widget::hint(&hint));
     });
 }
 
@@ -1637,9 +1607,21 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::HatchTime, d.hatch_time as u32)),
                 }),
                 |ui| {
-                    number(ui, &mut d.hatch_time, 255.0);
-                    let steps = d.hatch_time as u32 * 256;
-                    ui.label(widget::hint(&format!("{} cycles ({} steps)", d.hatch_time, steps)));
+                    // The unit: cycles (the field of the game) or steps (256 steps per cycle).
+                    let unit_id = egui::Id::new("hatch_unit_steps");
+                    let mut steps_unit = ui.data(|data| data.get_temp::<bool>(unit_id).unwrap_or(false));
+                    if steps_unit {
+                        let mut steps = d.hatch_time as u32 * 256;
+                        number(ui, &mut steps, 65280.0);
+                        d.hatch_time = (steps / 256).min(255) as u8;
+                    } else {
+                        number(ui, &mut d.hatch_time, 255.0);
+                    }
+                    egui::ComboBox::from_id_salt("hatch_unit_menu").width(72.0).selected_text(if steps_unit { "steps" } else { "cycles" }).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut steps_unit, false, "cycles");
+                        ui.selectable_value(&mut steps_unit, true, "steps");
+                    });
+                    ui.data_mut(|data| data.insert_temp(unit_id, steps_unit));
                 },
             );
             line_with_note(
@@ -1676,7 +1658,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     number(ui, &mut d.catch_rate, 255.0);
-                    ui.label(widget::hint(&format!("{}", percent(d.catch_rate))));
                 },
             );
             line_with_note(
@@ -1719,8 +1700,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     if ui.selectable_label(!is_burrowed, "No").clicked() {
                         d.set_burrowed_entry(false);
                     }
-                    let bit_val = if is_burrowed { 1 } else { 0 };
-                    ui.label(widget::hint(&format!("· bit 12: {bit_val}")));
                 },
             );
         });

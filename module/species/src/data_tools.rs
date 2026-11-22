@@ -239,14 +239,14 @@ pub struct Tools {
     pub history: Vec<Backup>,
     pub reset_open: bool,
     pub scope: Scope,
-    pub parts: [bool; 5],
+    pub parts: [bool; 6],
     /// The parts of the CSV files: Data, Moves, Evolutions, Texts.
     pub csv_parts: [bool; 4],
 }
 
 impl Default for Tools {
     fn default() -> Self {
-        Tools { history: Vec::new(), reset_open: false, scope: Scope::Form, parts: [false; 5], csv_parts: [true; 4] }
+        Tools { history: Vec::new(), reset_open: false, scope: Scope::Form, parts: [false; 6], csv_parts: [true; 4] }
     }
 }
 
@@ -280,7 +280,7 @@ impl Species {
         if self.tools.history.len() > HISTORY {
             self.tools.history.remove(0);
         }
-        self.status = Some((true, format!("{done} {count} file(s) changed. Undo gives them back.")));
+        self.status = Some((true, format!("{done} {count} file(s) changed.")));
     }
 
     /// The parts that a reset window has ticked.
@@ -320,24 +320,9 @@ impl Species {
             Err(message) => {
                 // What was done before the error can be undone.
                 self.finish(backup, session, "Reset stopped.");
-                self.status = Some((false, format!("{message} The files that were already changed can be undone.")));
+                self.status = Some((false, format!("{message}")));
             }
         }
-    }
-
-    /// Gives back the files of the last operation.
-    pub fn undo(&mut self, session: &Session) {
-        let (Some(sd), Some(backup)) = (session.sd.as_ref(), self.tools.history.pop()) else { return };
-        self.status = Some(match backup.restore(sd) {
-            Ok(count) => (true, format!("Undone: {}. {count} file(s) put back.", backup.label)),
-            Err(message) => (false, message),
-        });
-        self.files_changed();
-    }
-
-    /// The text that the Undo button shows when the pointer is on it.
-    pub fn undo_label(&self) -> Option<&str> {
-        self.tools.history.last().map(|backup| backup.label.as_str())
     }
 
     /// The window of the reset: the scope and the parts.
@@ -364,14 +349,14 @@ impl Species {
             }
             ui.horizontal(|ui| {
                 if ui.small_button("All parts").clicked() {
-                    self.tools.parts = [true; 5];
+                    self.tools.parts = [true; 6];
                 }
                 if ui.small_button("No part").clicked() {
-                    self.tools.parts = [false; 5];
+                    self.tools.parts = [false; 6];
                 }
             });
             ui.add_space(8.0);
-            ui.label(widget::hint("The files of the SD card go back to the data of the romfs. The changes that are not saved are lost. Undo gives the files back."));
+            ui.label(widget::hint("The files of the SD card go back to the data of the romfs. The changes that are not saved are lost."));
             if self.tools.scope == Scope::All {
                 ui.label(egui::RichText::new("This reaches every species.").color(color::ROSE));
             }
@@ -419,7 +404,7 @@ impl Species {
                     }
                 });
             });
-            ui.label(widget::hint("Export writes one file for each ticked part in a folder that you choose: species.csv, learnsets.csv, evolutions.csv and texts.csv. Import reads the files with these names from a folder, checks all of them, and writes the changes on the SD card. Undo gives the files back."));
+            ui.label(widget::hint("Export writes one file for each ticked part in a folder that you choose: species.csv, learnsets.csv, evolutions.csv and texts.csv. Import reads the files with these names from a folder, checks all of them, and writes the changes on the SD card."));
         });
     }
 
@@ -489,7 +474,7 @@ impl Species {
         }
         if let Some(message) = failure {
             self.finish(backup, session, "Import stopped.");
-            self.status = Some((false, format!("{message} The files that were already written can be undone.")));
+            self.status = Some((false, format!("{message}")));
             return;
         }
         if report.is_empty() {
