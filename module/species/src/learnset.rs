@@ -59,6 +59,34 @@ pub enum SortColumn {
     Pp,
 }
 
+/// The column that orders the move picker dropdown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MoveSortColumn {
+    #[default]
+    Move,
+    Type,
+    Category,
+    Power,
+    Accuracy,
+    Pp,
+}
+
+/// The width of the move picker dropdown, in points.
+const MOVE_PICKER_WIDTH: f32 = 560.0;
+
+/// The height of a row in the move picker dropdown, in points.
+const MOVE_ROW_HEIGHT: f32 = 28.0;
+
+/// The columns of the move picker dropdown: x position, width, header label, sort column.
+const MOVE_PICKER_COLUMNS: [(f32, f32, &str, MoveSortColumn); 6] = [
+    (6.0, 180.0, "Move", MoveSortColumn::Move),
+    (190.0, 84.0, "Type", MoveSortColumn::Type),
+    (278.0, 96.0, "Category", MoveSortColumn::Category),
+    (378.0, 52.0, "Power", MoveSortColumn::Power),
+    (434.0, 64.0, "Accuracy", MoveSortColumn::Accuracy),
+    (502.0, 42.0, "PP", MoveSortColumn::Pp),
+];
+
 /// Compares two moves for table sorting.
 fn compare_moves(
     col: SortColumn,
@@ -497,14 +525,6 @@ impl Learnset {
         Ok(learnset_csv::apply(&rows, &library, sd)?.total())
     }
 
-    /// The choices of a list of moves, each with its type.
-    fn move_choices(&self) -> Vec<Choice> {
-        let mut choices: Vec<Choice> = (1..=MOVE.len()).map(|id| Choice { label: move_name(id as u16).to_string(), kind: self.moves.as_ref().and_then(|t| t.get(id)).map(|m| m.kind), value: id }).collect();
-        // The new moves of the user come after the moves of the game.
-        choices.extend(crate::custom_moves::all().into_iter().map(|(id, name, info)| Choice { label: name, kind: Some(info.kind), value: id as usize }));
-        choices
-    }
-
     /// The header of a table: the names of the columns. Clicking a column sorts by it.
     fn header(&mut self, ui: &mut egui::Ui, first: &str) {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(TABLE_WIDTH - 36.0, 24.0), egui::Sense::hover());
@@ -594,23 +614,323 @@ impl Learnset {
         number(6, info.pp.to_string());
     }
 
-    /// The name of a move in its column. With `choices`, a click opens the list and gives the chosen move.
-    fn move_cell(&self, ui: &mut egui::Ui, row: egui::Rect, id: u16, popup: Option<(egui::Id, &[Choice])>) -> Option<u16> {
+    /// The header of the move picker dropdown: a click sorts on that column.
+    fn move_picker_header(ui: &mut egui::Ui, sort_column: &mut MoveSortColumn, sort_descending: &mut bool) {
+        let (header_rect, _) = ui.allocate_exact_size(egui::vec2(MOVE_PICKER_WIDTH - 14.0, 20.0), egui::Sense::hover());
+        for (x, width, label, col) in MOVE_PICKER_COLUMNS {
+            let cell = egui::Rect::from_min_size(egui::pos2(header_rect.left() + x, header_rect.top()), egui::vec2(width, 20.0));
+            let response = ui.interact(cell, ui.make_persistent_id(("move_picker_header", label)), egui::Sense::click());
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                ui.painter().rect_filled(cell.shrink2(egui::vec2(1.0, 1.0)), egui::Rounding::same(4.0), color::SURFACE_STRONG.linear_multiply(0.5));
+            }
+            let active = *sort_column == col;
+            let is_numeric = matches!(col, MoveSortColumn::Power | MoveSortColumn::Accuracy | MoveSortColumn::Pp);
+            let (position, anchor) = if is_numeric {
+                (egui::pos2(cell.right() - 4.0, cell.center().y), egui::Align2::RIGHT_CENTER)
+            } else {
+                (egui::pos2(cell.left() + 4.0, cell.center().y), egui::Align2::LEFT_CENTER)
+            };
+            let ink = if active { color::ACCENT } else { color::MUTED };
+            let text_rect = ui.painter().text(position, anchor, label, egui::FontId::proportional(12.0), ink);
+            if active {
+                let centre_x = if is_numeric { text_rect.left() - 8.0 } else { text_rect.right() + 8.0 };
+                let centre_y = cell.center().y;
+                let (w, h) = (3.5, 2.5);
+                let points = if *sort_descending {
+                    vec![egui::pos2(centre_x - w, centre_y - h), egui::pos2(centre_x + w, centre_y - h), egui::pos2(centre_x, centre_y + h)]
+                } else {
+                    vec![egui::pos2(centre_x - w, centre_y + h), egui::pos2(centre_x + w, centre_y + h), egui::pos2(centre_x, centre_y - h)]
+                };
+                ui.painter().add(egui::Shape::convex_polygon(points, color::ACCENT, egui::Stroke::NONE));
+            }
+            if response.clicked() {
+                if active {
+                    *sort_descending = !*sort_descending;
+                } else {
+                    *sort_column = col;
+                    *sort_descending = is_numeric;
+                }
+            }
+        }
+    }
+
+    /// Paints one row in the move picker dropdown.
+    fn paint_move_picker_row(ui: &egui::Ui, rect: egui::Rect, id: u16, info: Option<sango_core::moves::Move>) {
+        let y = rect.center().y;
+        let left = rect.left();
+        ui.painter().text(egui::pos2(left + 8.0, y), egui::Align2::LEFT_CENTER, move_name(id), egui::FontId::proportional(13.5), color::TEXT);
+        if let Some(kind) = info.map(|m| m.kind) {
+            type_pill(ui.painter(), egui::pos2(left + 190.0, y), kind, 11.5);
+        }
+        if let Some(category) = info.map(|m| m.category) {
+            let cat_left = left + 278.0;
+            match crate::battle_icons::category_texture(ui.ctx(), category) {
+                Some(texture) => {
+                    crate::battle_icons::paint(ui.painter(), &texture, egui::pos2(cat_left, y));
+                }
+                None => {
+                    ui.painter().circle_filled(egui::pos2(cat_left + 6.0, y), 4.5, category_color(category));
+                    ui.painter().text(egui::pos2(cat_left + 16.0, y), egui::Align2::LEFT_CENTER, category.name(), egui::FontId::proportional(12.5), color::TEXT);
+                }
+            }
+        }
+        let power_str = info.map_or("—".to_string(), |m| m.power_text());
+        let ink = if power_str == "—" { color::MUTED } else { color::TEXT };
+        ui.painter().text(egui::pos2(left + 378.0 + 52.0 - 4.0, y), egui::Align2::RIGHT_CENTER, power_str, egui::FontId::proportional(13.0), ink);
+
+        let acc_str = info.map_or("—".to_string(), |m| m.accuracy_text());
+        let ink = if acc_str == "—" { color::MUTED } else { color::TEXT };
+        ui.painter().text(egui::pos2(left + 434.0 + 64.0 - 4.0, y), egui::Align2::RIGHT_CENTER, acc_str, egui::FontId::proportional(13.0), ink);
+
+        let pp_str = info.map_or("—".to_string(), |m| m.pp.to_string());
+        let ink = if pp_str == "—" { color::MUTED } else { color::TEXT };
+        ui.painter().text(egui::pos2(left + 502.0 + 42.0 - 4.0, y), egui::Align2::RIGHT_CENTER, pp_str, egui::FontId::proportional(13.0), ink);
+    }
+
+    /// Sorts the list of moves for the move picker dropdown.
+    fn sort_moves(&self, list: &mut [u16], col: MoveSortColumn, descending: bool) {
+        list.sort_by(|&a, &b| {
+            let a_info = self.move_info(a);
+            let b_info = self.move_info(b);
+            let ord = match col {
+                MoveSortColumn::Move => move_name(a).to_lowercase().cmp(&move_name(b).to_lowercase()),
+                MoveSortColumn::Type => {
+                    let a_type = a_info.map_or("-", |m| names::TYPE.get(m.kind as usize).copied().unwrap_or("-"));
+                    let b_type = b_info.map_or("-", |m| names::TYPE.get(m.kind as usize).copied().unwrap_or("-"));
+                    a_type.cmp(b_type).then_with(|| move_name(a).cmp(&move_name(b)))
+                }
+                MoveSortColumn::Category => {
+                    let cat_val = |c: Option<sango_core::moves::Move>| match c.map(|m| m.category) {
+                        Some(Category::Physical) => 0,
+                        Some(Category::Special) => 1,
+                        Some(Category::Status) => 2,
+                        None => 3,
+                    };
+                    cat_val(a_info).cmp(&cat_val(b_info)).then_with(|| move_name(a).cmp(&move_name(b)))
+                }
+                MoveSortColumn::Power => {
+                    let p = |m: Option<sango_core::moves::Move>| m.map_or(0, |x| if x.power <= 1 { 0 } else { x.power });
+                    p(a_info).cmp(&p(b_info)).then_with(|| move_name(a).cmp(&move_name(b)))
+                }
+                MoveSortColumn::Accuracy => {
+                    let acc = |m: Option<sango_core::moves::Move>| m.map_or(0, |x| if x.accuracy == 0 || x.accuracy > 100 { 0 } else { x.accuracy });
+                    acc(a_info).cmp(&acc(b_info)).then_with(|| move_name(a).cmp(&move_name(b)))
+                }
+                MoveSortColumn::Pp => {
+                    let pp = |m: Option<sango_core::moves::Move>| m.map_or(0, |x| x.pp);
+                    pp(a_info).cmp(&pp(b_info)).then_with(|| move_name(a).cmp(&move_name(b)))
+                }
+            };
+            if descending { ord.reverse().then_with(|| a.cmp(&b)) } else { ord.then_with(|| a.cmp(&b)) }
+        });
+    }
+
+    /// Every move of the game and custom packs.
+    fn all_moves(&self) -> Vec<u16> {
+        let mut moves: Vec<u16> = (1..=MOVE.len() as u16).collect();
+        moves.extend(crate::custom_moves::all().into_iter().map(|(id, _, _)| id));
+        moves
+    }
+
+    /// Moves matching search query by name, ID number or type.
+    fn matching_moves(&self, raw_query: &str) -> Vec<u16> {
+        let all = self.all_moves();
+        let query = raw_query.trim().to_lowercase();
+        if query.is_empty() {
+            return all;
+        }
+        let num_query: Option<usize> = query.trim_start_matches('#').parse().ok();
+
+        let mut starts_with = Vec::new();
+        let mut contains = Vec::new();
+
+        for id in all {
+            let name = move_name(id).to_lowercase();
+            let is_num = num_query == Some(id as usize);
+            let type_match = self
+                .move_info(id)
+                .and_then(|m| names::TYPE.get(m.kind as usize).copied())
+                .map_or(false, |t| t.to_lowercase().starts_with(&query));
+
+            if is_num || name.starts_with(&query) {
+                starts_with.push(id);
+            } else if name.contains(&query) || type_match {
+                contains.push(id);
+            }
+        }
+        starts_with.extend(contains);
+        starts_with
+    }
+
+    /// Opens a sortable, searchable dropdown for selecting a move under `anchor`.
+    pub(crate) fn choose_move(
+        &self,
+        ui: &mut egui::Ui,
+        id: egui::Id,
+        anchor: &egui::Response,
+        current: Option<u16>,
+    ) -> Option<u16> {
+        if anchor.clicked() {
+            ui.memory_mut(|m| m.toggle_popup(id));
+        }
+
+        let mut picked = None;
+        let search_id = id.with("search");
+        let focus_id = id.with("focused");
+        let sort_col_id = egui::Id::new("move_picker_sort_col");
+        let sort_desc_id = egui::Id::new("move_picker_sort_desc");
+
+        let mut search: String = ui.data_mut(|d| d.get_temp(search_id).unwrap_or_default());
+        let mut sort_column: MoveSortColumn = ui.data_mut(|d| d.get_temp(sort_col_id).unwrap_or(MoveSortColumn::Move));
+        let mut sort_descending: bool = ui.data_mut(|d| d.get_temp(sort_desc_id).unwrap_or(false));
+
+        let shown = egui::popup::popup_below_widget(
+            ui,
+            id,
+            anchor,
+            egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+            |ui| {
+                ui.set_width(MOVE_PICKER_WIDTH);
+                ui.set_max_width(MOVE_PICKER_WIDTH);
+                ui.spacing_mut().item_spacing.y = 4.0;
+
+                // Search box
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.label(widget::hint("🔍"));
+                    let search_input = ui.add(
+                        egui::TextEdit::singleline(&mut search)
+                            .hint_text("Search name, type or number...")
+                            .desired_width(220.0)
+                            .clip_text(true),
+                    );
+                    if !ui.data_mut(|d| d.get_temp::<bool>(focus_id).unwrap_or(false)) {
+                        search_input.request_focus();
+                        ui.data_mut(|d| d.insert_temp(focus_id, true));
+                    }
+                    if !search.is_empty() && ui.small_button("✕").clicked() {
+                        search.clear();
+                    }
+                });
+                ui.separator();
+
+                let mut matches = self.matching_moves(&search);
+
+                // Sortable header
+                let old_sort = (sort_column, sort_descending);
+                Self::move_picker_header(ui, &mut sort_column, &mut sort_descending);
+                if (sort_column, sort_descending) != old_sort {
+                    ui.data_mut(|d| {
+                        d.insert_temp(sort_col_id, sort_column);
+                        d.insert_temp(sort_desc_id, sort_descending);
+                    });
+                }
+                ui.separator();
+
+                self.sort_moves(&mut matches, sort_column, sort_descending);
+
+                if matches.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(widget::hint("No matching moves."));
+                    ui.add_space(4.0);
+                    return;
+                }
+
+                if ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    picked = Some(matches[0]);
+                }
+
+                let height = (matches.len() as f32 * MOVE_ROW_HEIGHT).min(340.0);
+                ui.allocate_ui(egui::vec2(MOVE_PICKER_WIDTH, height), |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt(id.with("list"))
+                        .auto_shrink([false, false])
+                        .show_rows(ui, MOVE_ROW_HEIGHT, matches.len(), |ui, range| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            for place in range {
+                                let move_id = matches[place];
+                                let (rect, response) = ui.allocate_exact_size(
+                                    egui::vec2(MOVE_PICKER_WIDTH - 14.0, MOVE_ROW_HEIGHT),
+                                    egui::Sense::click(),
+                                );
+                                if !ui.is_rect_visible(rect) {
+                                    continue;
+                                }
+                                if Some(move_id) == current {
+                                    ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::ACCENT_SOFT);
+                                } else if response.hovered() {
+                                    ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::SURFACE_STRONG);
+                                }
+                                if response.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                                }
+                                let info = self.move_info(move_id);
+                                Self::paint_move_picker_row(ui, rect, move_id, info);
+                                if response.clicked() {
+                                    picked = Some(move_id);
+                                }
+                            }
+                        });
+                });
+            },
+        );
+
+        if picked.is_some() {
+            ui.memory_mut(|m| m.close_popup());
+        }
+
+        if shown.is_some() && picked.is_none() {
+            ui.data_mut(|d| d.insert_temp(search_id, search));
+        } else {
+            ui.data_mut(|d| {
+                d.remove::<String>(search_id);
+                d.remove::<bool>(focus_id);
+            });
+        }
+
+        picked
+    }
+
+    /// The name of a move in its column. With `popup_id`, a click opens the sortable move dropdown and gives the chosen move.
+    fn move_cell(&self, ui: &mut egui::Ui, row: egui::Rect, id: u16, popup_id: Option<egui::Id>) -> Option<u16> {
         let cell = column(row, 1);
-        let response = ui.interact(cell, ui.make_persistent_id(("learnset_move_cell", cell.min.x as i32, cell.min.y as i32)), egui::Sense::click());
-        let editable = popup.is_some();
+        let interact_id = popup_id.map(|pid| pid.with("cell")).unwrap_or_else(|| ui.make_persistent_id(("learnset_move_cell", cell.min.x as i32, cell.min.y as i32)));
+        let response = ui.interact(cell, interact_id, egui::Sense::click());
+        let editable = popup_id.is_some();
         if editable && response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
             ui.painter().rect_stroke(cell.shrink2(egui::vec2(0.0, 6.0)), egui::Rounding::same(6.0), egui::Stroke::new(1.0_f32, color::BORDER));
         }
         ui.painter().text(egui::pos2(cell.left() + 8.0, cell.center().y), egui::Align2::LEFT_CENTER, move_name(id), egui::FontId::proportional(15.0), color::TEXT);
-        popup.and_then(|(popup_id, choices)| choose(ui, popup_id, &response, choices, Some(id as usize))).map(|value| value as u16)
+        if let Some(pid) = popup_id {
+            self.choose_move(ui, pid, &response, Some(id))
+        } else {
+            None
+        }
     }
 
     /// The level-up moves: one row for each, with its level and its move that the user can change.
     fn level_up_table(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let room = self.level_up.has_room();
+            let add = ui.add_enabled(room, egui::Button::new(egui::RichText::new("+ Add a move").color(color::WHITE)).fill(color::ACCENT));
+            let add_id = egui::Id::new("learnset_level_up_add");
+            if let Some(id) = self.choose_move(ui, add_id, &add, None) {
+                let level = self.level_up.moves.last().map_or(1, |m| m.level);
+                self.level_up.moves.push(LevelUpMove { id, level });
+                self.needs_sort = true;
+                self.level_up_order.clear();
+            }
+            if !self.level_up.moves.is_empty() && widget::confirm_button(ui, "Delete all moves", "Click again to confirm") {
+                self.level_up.moves.clear();
+                self.level_up_order.clear();
+                self.needs_sort = false;
+            }
+            ui.label(widget::hint(&format!("{} of {MAX_LEVEL_UP_MOVES} moves", self.level_up.moves.len())));
+        });
+        ui.add_space(8.0);
         self.header(ui, "Level");
-        let choices = if ui.memory(|m| m.any_popup_open()) { self.move_choices() } else { Vec::new() };
         let (sort_col, sort_desc) = self.sort[LEVEL_UP];
         let interacting = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
         if !interacting || self.level_up_order.len() != self.level_up.moves.len() {
@@ -634,8 +954,9 @@ impl Learnset {
             self.level_up_order = indices;
         }
 
+        let order = self.level_up_order.clone();
         let mut remove = None;
-        for &index in &self.level_up_order {
+        for &index in &order {
             let mut entry = self.level_up.moves[index];
             let row = Self::row(ui);
             let old_level = entry.level;
@@ -653,7 +974,7 @@ impl Learnset {
                 ui.put(level_rect, egui::DragValue::new(&mut level).range(1..=100).speed(0.15));
             });
             entry.level = level as u16;
-            if let Some(id) = self.move_cell(ui, row, entry.id, Some((egui::Id::new(("learnset_level_up_move", index)), &choices))) {
+            if let Some(id) = self.move_cell(ui, row, entry.id, Some(egui::Id::new(("learnset_level_up_move", index)))) {
                 entry.id = id;
             }
             self.move_columns(ui, row, entry.id);
@@ -669,26 +990,27 @@ impl Learnset {
             self.level_up.moves.remove(index);
             self.level_up_order.clear();
         }
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            let room = self.level_up.has_room();
-            let add = ui.add_enabled(room, egui::Button::new(egui::RichText::new("+ Add a move").color(color::WHITE)).fill(color::ACCENT));
-            let add_id = egui::Id::new("learnset_level_up_add");
-            let choices = if ui.memory(|m| m.any_popup_open()) { self.move_choices() } else { Vec::new() };
-            if let Some(id) = choose(ui, add_id, &add, &choices, None) {
-                let level = self.level_up.moves.last().map_or(1, |m| m.level);
-                self.level_up.moves.push(LevelUpMove { id: id as u16, level });
-                self.needs_sort = true;
-                self.level_up_order.clear();
-            }
-            ui.label(widget::hint(&format!("{} of {MAX_LEVEL_UP_MOVES} moves. The game keeps no more.", self.level_up.moves.len())));
-        });
+        if self.level_up.moves.is_empty() {
+            ui.add_space(8.0);
+            ui.label(widget::hint("No level-up moves. Click \"+ Add a move\" above to add one."));
+        }
     }
 
     /// The egg moves.
     fn egg_table(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let add = ui.add(egui::Button::new(egui::RichText::new("+ Add a move").color(color::WHITE)).fill(color::ACCENT));
+            let add_id = egui::Id::new("learnset_egg_add");
+            if let Some(id) = self.choose_move(ui, add_id, &add, None) {
+                self.eggs.push(id);
+            }
+            if !self.eggs.moves.is_empty() && widget::confirm_button(ui, "Delete all moves", "Click again to confirm") {
+                self.eggs.moves.clear();
+            }
+            ui.label(widget::hint(&format!("{} moves", self.eggs.moves.len())));
+        });
+        ui.add_space(8.0);
         self.header(ui, "#");
-        let choices = if ui.memory(|m| m.any_popup_open()) { self.move_choices() } else { Vec::new() };
         let (sort_col, sort_desc) = self.sort[EGG];
         let mut indices: Vec<usize> = (0..self.eggs.moves.len()).collect();
         indices.sort_by(|&i, &j| {
@@ -719,7 +1041,7 @@ impl Learnset {
                 egui::FontId::proportional(13.0),
                 color::MUTED,
             );
-            let new = self.move_cell(ui, row, id, Some((egui::Id::new(("learnset_egg_move", index)), &choices)));
+            let new = self.move_cell(ui, row, id, Some(egui::Id::new(("learnset_egg_move", index))));
             self.move_columns(ui, row, new.unwrap_or(id));
             if trash_button(ui, column(row, 7)) {
                 remove = Some(index);
@@ -731,17 +1053,39 @@ impl Learnset {
         if let Some(index) = remove {
             self.eggs.moves.remove(index);
         }
-        ui.add_space(8.0);
-        let add = ui.add(egui::Button::new(egui::RichText::new("+ Add a move").color(color::WHITE)).fill(color::ACCENT));
-        if let Some(id) = choose(ui, egui::Id::new("learnset_egg_add"), &add, &choices, None) {
-            self.eggs.push(id as u16);
+        if self.eggs.moves.is_empty() {
+            ui.add_space(8.0);
+            ui.label(widget::hint("No egg moves. Click \"+ Add a move\" above to add one."));
         }
     }
 
     /// The moves of the tutors that the species can learn.
     fn tutor_table(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData) {
-        self.header(ui, "Tutor");
         let slots = Slot::all();
+        let learned_count = slots.iter().filter(|(slot, _)| slot.is_set(data)).count();
+        ui.horizontal(|ui| {
+            let add = ui.add(egui::Button::new(egui::RichText::new("+ Add a move").color(color::WHITE)).fill(color::ACCENT));
+            let choices: Vec<Choice> = if ui.memory(|m| m.any_popup_open()) {
+                slots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (slot, _))| !slot.is_set(data))
+                    .map(|(place, (slot, id))| Choice { label: format!("{} ({})", move_name(*id), slot.label()), kind: self.moves.as_ref().and_then(|t| t.get(*id as usize)).map(|m| m.kind), value: place })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if let Some(place) = choose(ui, egui::Id::new("learnset_tutor_add"), &add, &choices, None) {
+                slots[place].0.set(data, true);
+            }
+            if learned_count > 0 && widget::confirm_button(ui, "Delete all moves", "Click again to confirm") {
+                data.special_tutor_moves = 0;
+                data.bp_tutor_moves = [0; 4];
+            }
+            ui.label(widget::hint(&format!("{learned_count} moves learned")));
+        });
+        ui.add_space(8.0);
+        self.header(ui, "Tutor");
         let (sort_col, sort_desc) = self.sort[TUTOR];
         let mut learned: Vec<(usize, Slot, u16)> = slots
             .iter()
@@ -779,25 +1123,34 @@ impl Learnset {
         if let Some(slot) = remove {
             slot.set(data, false);
         }
-        ui.add_space(8.0);
-        let add = ui.add(egui::Button::new(egui::RichText::new("+ Add a move").color(color::WHITE)).fill(color::ACCENT));
-        let choices: Vec<Choice> = if ui.memory(|m| m.any_popup_open()) {
-            slots
-                .iter()
-                .enumerate()
-                .filter(|(_, (slot, _))| !slot.is_set(data))
-                .map(|(place, (slot, id))| Choice { label: format!("{} ({})", move_name(*id), slot.label()), kind: self.moves.as_ref().and_then(|t| t.get(*id as usize)).map(|m| m.kind), value: place })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        if let Some(place) = choose(ui, egui::Id::new("learnset_tutor_add"), &add, &choices, None) {
-            slots[place].0.set(data, true);
+        if learned_count == 0 {
+            ui.add_space(8.0);
+            ui.label(widget::hint("No tutor moves learned. Click \"+ Add a move\" above to add one."));
         }
     }
 
     /// The TMs and HMs that the species can learn.
     fn machine_table(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData) {
+        let learned_count = (0..MACHINES.len()).filter(|&bit| machine_is_set(data, bit)).count();
+        ui.horizontal(|ui| {
+            let add = ui.add(egui::Button::new(egui::RichText::new("+ Add a TM or HM").color(color::WHITE)).fill(color::ACCENT));
+            let choices: Vec<Choice> = if ui.memory(|m| m.any_popup_open()) {
+                (0..MACHINES.len())
+                    .filter(|&bit| !machine_is_set(data, bit))
+                    .map(|bit| Choice { label: format!("{} {}", machine_name(bit), move_name(MACHINES[bit])), kind: self.moves.as_ref().and_then(|t| t.get(MACHINES[bit] as usize)).map(|m| m.kind), value: bit })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            if let Some(bit) = choose(ui, egui::Id::new("learnset_machine_add"), &add, &choices, None) {
+                set_machine(data, bit, true);
+            }
+            if learned_count > 0 && widget::confirm_button(ui, "Delete all moves", "Click again to confirm") {
+                data.tm_hm_moves = [0; 4];
+            }
+            ui.label(widget::hint(&format!("{learned_count} TMs/HMs learned")));
+        });
+        ui.add_space(8.0);
         self.header(ui, "TM/HM");
         let (sort_col, sort_desc) = self.sort[3];
         let mut learned: Vec<usize> = (0..MACHINES.len()).filter(|&bit| machine_is_set(data, bit)).collect();
@@ -833,18 +1186,9 @@ impl Learnset {
         if let Some(bit) = remove {
             set_machine(data, bit, false);
         }
-        ui.add_space(8.0);
-        let add = ui.add(egui::Button::new(egui::RichText::new("+ Add a TM or HM").color(color::WHITE)).fill(color::ACCENT));
-        let choices: Vec<Choice> = if ui.memory(|m| m.any_popup_open()) {
-            (0..MACHINES.len())
-                .filter(|&bit| !machine_is_set(data, bit))
-                .map(|bit| Choice { label: format!("{} {}", machine_name(bit), move_name(MACHINES[bit])), kind: self.moves.as_ref().and_then(|t| t.get(MACHINES[bit] as usize)).map(|m| m.kind), value: bit })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        if let Some(bit) = choose(ui, egui::Id::new("learnset_machine_add"), &add, &choices, None) {
-            set_machine(data, bit, true);
+        if learned_count == 0 {
+            ui.add_space(8.0);
+            ui.label(widget::hint("No TMs or HMs learned. Click \"+ Add a TM or HM\" above to add one."));
         }
     }
 }
@@ -964,6 +1308,34 @@ mod test {
             compare_moves(SortColumn::Type, false, (0, ""), 53, Some(m2), 0, (0, ""), 33, Some(m1), 1),
             std::cmp::Ordering::Less
         );
+    }
+
+    #[test]
+    fn move_picker_sorting_and_matching() {
+        let learnset = Learnset::default();
+        let all = learnset.all_moves();
+        assert!(!all.is_empty());
+
+        // Empty search returns all moves
+        assert_eq!(learnset.matching_moves("").len(), all.len());
+
+        // Search by name prefix
+        let pound_matches = learnset.matching_moves("pound");
+        assert!(!pound_matches.is_empty());
+        assert_eq!(pound_matches[0], 1); // Move 1 is Pound
+
+        // Search by ID number
+        let m33 = learnset.matching_moves("33");
+        assert!(m33.contains(&33));
+
+        // Sort moves by name
+        let mut sample = vec![1, 33, 74]; // Pound, Tackle, Growth
+        learnset.sort_moves(&mut sample, MoveSortColumn::Move, false);
+        // Growth (G) < Pound (P) < Tackle (T)
+        assert_eq!(sample, vec![74, 1, 33]);
+
+        learnset.sort_moves(&mut sample, MoveSortColumn::Move, true);
+        assert_eq!(sample, vec![33, 1, 74]);
     }
 
     /// With the dump of the game: the moves of Bulbasaur are read, drawn in every group, changed, saved on

@@ -131,17 +131,20 @@ impl EvolutionTab {
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
-                self.header(ui);
-                self.rows(ui);
-                ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     let add = ui.add_enabled(self.evolutions.has_room(), egui::Button::new(egui::RichText::new("+ Add an evolution").color(color::WHITE)).fill(color::ACCENT));
                     let choices = if ui.memory(|m| m.any_popup_open()) { Self::species_choices() } else { Vec::new() };
                     if let Some(species) = choose(ui, egui::Id::new("evolution_add"), &add, &choices, None) {
                         self.evolutions.list.push(Evolution { method: 4, argument: default_argument(Argument::Level), species: species as u16 });
                     }
-                    ui.label(widget::hint(&format!("{} of {SLOTS} evolutions.", self.evolutions.list.len())));
+                    if !self.evolutions.list.is_empty() && widget::confirm_button(ui, "Delete all evolutions", "Click again to confirm") {
+                        self.evolutions.list.clear();
+                    }
+                    ui.label(widget::hint(&format!("{} of {SLOTS} evolutions", self.evolutions.list.len())));
                 });
+                ui.add_space(8.0);
+                self.header(ui);
+                self.rows(ui);
             });
         });
     }
