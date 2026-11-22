@@ -421,6 +421,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            remembered: String::new(),
         };
         let ctx = egui::Context::default();
         for _ in 0..6 {
@@ -461,6 +462,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            remembered: String::new(),
         };
 
         let ctx = egui::Context::default();
@@ -503,6 +505,7 @@ mod test {
             warmed: 0,
             side_bar_focus: true,
             confirm_close: false,
+            remembered: String::new(),
         };
 
         let ctx = egui::Context::default();
@@ -555,6 +558,7 @@ mod test {
             warmed: 0,
             side_bar_focus: true,
             confirm_close: false,
+            remembered: String::new(),
         };
 
         let ctx = egui::Context::default();
@@ -612,6 +616,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            remembered: String::new(),
         };
         let ctx = egui::Context::default();
 
@@ -662,6 +667,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            remembered: String::new(),
         };
         let ctx = egui::Context::default();
 
@@ -711,6 +717,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            remembered: String::new(),
         };
 
         let ctx = egui::Context::default();
@@ -757,6 +764,7 @@ mod test {
             warmed: 0,
             side_bar_focus: true,
             confirm_close: false,
+            remembered: String::new(),
         };
 
         let ctx = egui::Context::default();
@@ -826,6 +834,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            remembered: String::new(),
         };
 
         let ctx = egui::Context::default();

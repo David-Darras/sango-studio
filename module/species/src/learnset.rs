@@ -45,6 +45,76 @@ const ROW_HEIGHT: f32 = 40.0;
 /// The height of a row of the list of choices, in points.
 const CHOICE_HEIGHT: f32 = 28.0;
 
+/// The column that orders a moves table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum SortColumn {
+    /// Level for Level up, index for Egg moves, Tutor for Tutor, TM/HM for TM/HM.
+    #[default]
+    First,
+    Move,
+    Type,
+    Category,
+    Power,
+    Accuracy,
+    Pp,
+}
+
+/// Compares two moves for table sorting.
+fn compare_moves(
+    col: SortColumn,
+    descending: bool,
+    a_first: (u16, &str),
+    a_id: u16,
+    a_info: Option<sango_core::moves::Move>,
+    a_index: usize,
+    b_first: (u16, &str),
+    b_id: u16,
+    b_info: Option<sango_core::moves::Move>,
+    b_index: usize,
+) -> std::cmp::Ordering {
+    let ord = match col {
+        SortColumn::First => {
+            if a_first.0 != b_first.0 {
+                a_first.0.cmp(&b_first.0)
+            } else {
+                a_first.1.cmp(b_first.1)
+            }
+        }
+        SortColumn::Move => move_name(a_id).to_lowercase().cmp(&move_name(b_id).to_lowercase()),
+        SortColumn::Type => {
+            let a_type = a_info.map_or("-", |m| names::TYPE.get(m.kind as usize).copied().unwrap_or("-"));
+            let b_type = b_info.map_or("-", |m| names::TYPE.get(m.kind as usize).copied().unwrap_or("-"));
+            a_type.cmp(b_type)
+        }
+        SortColumn::Category => {
+            let cat_val = |c: Option<sango_core::moves::Move>| match c.map(|m| m.category) {
+                Some(Category::Physical) => 0,
+                Some(Category::Special) => 1,
+                Some(Category::Status) => 2,
+                None => 3,
+            };
+            cat_val(a_info).cmp(&cat_val(b_info))
+        }
+        SortColumn::Power => {
+            let a_pow = a_info.map_or(0, |m| m.power);
+            let b_pow = b_info.map_or(0, |m| m.power);
+            a_pow.cmp(&b_pow)
+        }
+        SortColumn::Accuracy => {
+            let a_acc = a_info.map_or(0, |m| m.accuracy);
+            let b_acc = b_info.map_or(0, |m| m.accuracy);
+            a_acc.cmp(&b_acc)
+        }
+        SortColumn::Pp => {
+            let a_pp = a_info.map_or(0, |m| m.pp);
+            let b_pp = b_info.map_or(0, |m| m.pp);
+            a_pp.cmp(&b_pp)
+        }
+    };
+    let ord = if descending { ord.reverse() } else { ord };
+    ord.then_with(|| a_first.cmp(&b_first)).then_with(|| a_index.cmp(&b_index))
+}
+
 /// The number of a move from its name. `None` when the name is not in the list.
 fn move_id(name: &str) -> Option<u16> {
     MOVE.iter().position(|n| *n == name).map(|place| place as u16 + 1)
@@ -284,6 +354,10 @@ pub struct Learnset {
     group: usize,
     /// True when a level changed: the moves go back in the order of the levels when the user lets go.
     needs_sort: bool,
+    /// The sort column and descending state for each of the 4 groups.
+    sort: [(SortColumn, bool); 4],
+    /// The cached visual order of level-up moves so rows don't jump while dragging/typing a level.
+    level_up_order: Vec<usize>,
 }
 
 impl Learnset {
@@ -309,6 +383,7 @@ impl Learnset {
         self.level_up_saved = self.level_up.clone();
         self.eggs_saved = self.eggs.clone();
         self.needs_sort = false;
+        self.level_up_order.clear();
     }
 
     fn read_romfs_level_up(&self, file: usize) -> Option<LevelUp> {
@@ -328,6 +403,7 @@ impl Learnset {
         self.level_up_saved = self.level_up.clone();
         self.eggs_saved = self.eggs.clone();
         self.needs_sort = false;
+        self.level_up_order.clear();
     }
 
     fn read_romfs_eggs(&self, species: usize) -> Option<EggMoves> {
@@ -336,6 +412,11 @@ impl Learnset {
             return None;
         }
         self.egg_archive.as_ref()?.first_file(species).and_then(|b| EggMoves::from_bytes(b).ok())
+    }
+
+    /// Information about a move from its number.
+    fn move_info(&self, id: u16) -> Option<sango_core::moves::Move> {
+        self.moves.as_ref().and_then(|table| table.get(id as usize).copied()).or_else(|| crate::custom_moves::info_of(id))
     }
 
     /// True when the level-up moves or the egg moves changed since they were read or saved.
@@ -352,10 +433,11 @@ impl Learnset {
     pub fn save(&mut self, sd: &SdCard, species: usize, _form: usize) -> Result<Vec<String>, String> {
         let mut written = Vec::new();
         if self.level_up != self.level_up_saved {
-            // The species of the packs have no file in the archive: their moves are in the table of the pack.
+            // Level-up moves in game files are kept in level order.
+            self.level_up.sort();
+            self.level_up_saved = self.level_up.clone();
             let path = learnset::level_up_sd_path(self.file);
             sd.write(&path, &self.level_up.to_bytes()).and_then(|_| sd.mark_changed(&path))?;
-            self.level_up_saved = self.level_up.clone();
             written.push(path);
         }
         if self.eggs != self.eggs_saved {
@@ -394,6 +476,7 @@ impl Learnset {
         if self.needs_sort && !ui.input(|i| i.pointer.any_down()) && ui.memory(|m| m.focused().is_none()) {
             self.level_up.sort();
             self.needs_sort = false;
+            self.level_up_order.clear();
         }
     }
 
@@ -422,14 +505,56 @@ impl Learnset {
         choices
     }
 
-    /// The header of a table: the names of the columns.
-    fn header(&self, ui: &mut egui::Ui, first: &str) {
+    /// The header of a table: the names of the columns. Clicking a column sorts by it.
+    fn header(&mut self, ui: &mut egui::Ui, first: &str) {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(TABLE_WIDTH - 36.0, 24.0), egui::Sense::hover());
-        let names = [first, "Move", "Type", "Category", "Power", "Accuracy", "PP"];
-        for (place, name) in names.iter().enumerate() {
+        let names = [
+            (first, SortColumn::First),
+            ("Move", SortColumn::Move),
+            ("Type", SortColumn::Type),
+            ("Category", SortColumn::Category),
+            ("Power", SortColumn::Power),
+            ("Accuracy", SortColumn::Accuracy),
+            ("PP", SortColumn::Pp),
+        ];
+        let (sort_column, sort_descending) = &mut self.sort[self.group];
+        for (place, (name, col)) in names.iter().enumerate() {
+            if name.is_empty() {
+                continue;
+            }
             let cell = column(rect, place);
-            let (anchor, position) = if place >= 4 { (egui::Align2::RIGHT_CENTER, egui::pos2(cell.right(), cell.center().y)) } else { (egui::Align2::LEFT_CENTER, egui::pos2(cell.left() + 4.0, cell.center().y)) };
-            ui.painter().text(position, anchor, name, egui::FontId::proportional(12.0), color::MUTED);
+            let response = ui.interact(cell, ui.make_persistent_id(("learnset_header", self.group, place)), egui::Sense::click());
+            if response.hovered() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                ui.painter().rect_filled(cell.shrink2(egui::vec2(2.0, 2.0)), egui::Rounding::same(4.0), color::SURFACE_STRONG.linear_multiply(0.5));
+            }
+            let active = *sort_column == *col;
+            let ink = if active { color::ACCENT } else { color::MUTED };
+            let (anchor, position) = if place >= 4 {
+                (egui::Align2::RIGHT_CENTER, egui::pos2(cell.right(), cell.center().y))
+            } else {
+                (egui::Align2::LEFT_CENTER, egui::pos2(cell.left() + 4.0, cell.center().y))
+            };
+            let text_rect = ui.painter().text(position, anchor, *name, egui::FontId::proportional(12.0), ink);
+            if active {
+                let centre_x = if place >= 4 { text_rect.left() - 8.0 } else { text_rect.right() + 8.0 };
+                let centre_y = cell.center().y;
+                let (w, h) = (3.5, 2.5);
+                let points = if *sort_descending {
+                    vec![egui::pos2(centre_x - w, centre_y - h), egui::pos2(centre_x + w, centre_y - h), egui::pos2(centre_x, centre_y + h)]
+                } else {
+                    vec![egui::pos2(centre_x - w, centre_y + h), egui::pos2(centre_x + w, centre_y + h), egui::pos2(centre_x, centre_y - h)]
+                };
+                ui.painter().add(egui::Shape::convex_polygon(points, color::ACCENT, egui::Stroke::NONE));
+            }
+            if response.clicked() {
+                if active {
+                    *sort_descending = !*sort_descending;
+                } else {
+                    *sort_column = *col;
+                    *sort_descending = matches!(col, SortColumn::Power | SortColumn::Accuracy | SortColumn::Pp);
+                }
+            }
         }
         ui.separator();
     }
@@ -445,7 +570,7 @@ impl Learnset {
 
     /// The columns of a move: type, category, power, accuracy and PP.
     fn move_columns(&self, ui: &egui::Ui, row: egui::Rect, id: u16) {
-        let Some(info) = self.moves.as_ref().and_then(|table| table.get(id as usize).copied()).or_else(|| crate::custom_moves::info_of(id)) else { return };
+        let Some(info) = self.move_info(id) else { return };
         let painter = ui.painter();
         let y = row.center().y;
         type_pill(painter, egui::pos2(column(row, 2).left(), y), info.kind, 12.0);
@@ -486,10 +611,34 @@ impl Learnset {
     fn level_up_table(&mut self, ui: &mut egui::Ui) {
         self.header(ui, "Level");
         let choices = if ui.memory(|m| m.any_popup_open()) { self.move_choices() } else { Vec::new() };
+        let (sort_col, sort_desc) = self.sort[LEVEL_UP];
+        let interacting = ui.input(|i| i.pointer.any_down()) || ui.memory(|m| m.focused().is_some());
+        if !interacting || self.level_up_order.len() != self.level_up.moves.len() {
+            let mut indices: Vec<usize> = (0..self.level_up.moves.len()).collect();
+            indices.sort_by(|&i, &j| {
+                let a = self.level_up.moves[i];
+                let b = self.level_up.moves[j];
+                compare_moves(
+                    sort_col,
+                    sort_desc,
+                    (a.level, ""),
+                    a.id,
+                    self.move_info(a.id),
+                    i,
+                    (b.level, ""),
+                    b.id,
+                    self.move_info(b.id),
+                    j,
+                )
+            });
+            self.level_up_order = indices;
+        }
+
         let mut remove = None;
-        for index in 0..self.level_up.moves.len() {
+        for &index in &self.level_up_order {
             let mut entry = self.level_up.moves[index];
             let row = Self::row(ui);
+            let old_level = entry.level;
             // The level: a number that is dragged or typed.
             let level_rect = egui::Rect::from_center_size(column(row, 0).left_center() + egui::vec2(28.0, 0.0), egui::vec2(56.0, 26.0));
             ui.painter().rect_filled(level_rect, egui::Rounding::same(13.0), color::SURFACE_STRONG);
@@ -511,13 +660,14 @@ impl Learnset {
             if trash_button(ui, column(row, 7)) {
                 remove = Some(index);
             }
-            if entry.level != self.level_up.moves[index].level {
+            if entry.level != old_level {
                 self.needs_sort = true;
             }
             self.level_up.moves[index] = entry;
         }
         if let Some(index) = remove {
             self.level_up.moves.remove(index);
+            self.level_up_order.clear();
         }
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -528,6 +678,8 @@ impl Learnset {
             if let Some(id) = choose(ui, add_id, &add, &choices, None) {
                 let level = self.level_up.moves.last().map_or(1, |m| m.level);
                 self.level_up.moves.push(LevelUpMove { id: id as u16, level });
+                self.needs_sort = true;
+                self.level_up_order.clear();
             }
             ui.label(widget::hint(&format!("{} of {MAX_LEVEL_UP_MOVES} moves. The game keeps no more.", self.level_up.moves.len())));
         });
@@ -535,12 +687,38 @@ impl Learnset {
 
     /// The egg moves.
     fn egg_table(&mut self, ui: &mut egui::Ui) {
-        self.header(ui, "");
+        self.header(ui, "#");
         let choices = if ui.memory(|m| m.any_popup_open()) { self.move_choices() } else { Vec::new() };
+        let (sort_col, sort_desc) = self.sort[EGG];
+        let mut indices: Vec<usize> = (0..self.eggs.moves.len()).collect();
+        indices.sort_by(|&i, &j| {
+            let a_id = self.eggs.moves[i];
+            let b_id = self.eggs.moves[j];
+            compare_moves(
+                sort_col,
+                sort_desc,
+                (i as u16 + 1, ""),
+                a_id,
+                self.move_info(a_id),
+                i,
+                (j as u16 + 1, ""),
+                b_id,
+                self.move_info(b_id),
+                j,
+            )
+        });
+
         let mut remove = None;
-        for index in 0..self.eggs.moves.len() {
+        for &index in &indices {
             let row = Self::row(ui);
             let id = self.eggs.moves[index];
+            ui.painter().text(
+                column(row, 0).left_center() + egui::vec2(16.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                format!("#{}", index + 1),
+                egui::FontId::proportional(13.0),
+                color::MUTED,
+            );
             let new = self.move_cell(ui, row, id, Some((egui::Id::new(("learnset_egg_move", index)), &choices)));
             self.move_columns(ui, row, new.unwrap_or(id));
             if trash_button(ui, column(row, 7)) {
@@ -564,8 +742,31 @@ impl Learnset {
     fn tutor_table(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData) {
         self.header(ui, "Tutor");
         let slots = Slot::all();
+        let (sort_col, sort_desc) = self.sort[TUTOR];
+        let mut learned: Vec<(usize, Slot, u16)> = slots
+            .iter()
+            .enumerate()
+            .filter(|(_, (slot, _))| slot.is_set(data))
+            .map(|(slot_idx, &(slot, id))| (slot_idx, slot, id))
+            .collect();
+        learned.sort_by(|&(i, slot_a, id_a), &(j, slot_b, id_b)| {
+            let label_a = slot_a.label();
+            let label_b = slot_b.label();
+            compare_moves(
+                sort_col,
+                sort_desc,
+                (i as u16, &label_a),
+                id_a,
+                self.move_info(id_a),
+                i,
+                (j as u16, &label_b),
+                id_b,
+                self.move_info(id_b),
+                j,
+            )
+        });
         let mut remove = None;
-        for &(slot, id) in slots.iter().filter(|(slot, _)| slot.is_set(data)) {
+        for &(_, slot, id) in &learned {
             let row = Self::row(ui);
             ui.painter().rect_filled(egui::Rect::from_center_size(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::vec2(62.0, 24.0)), egui::Rounding::same(12.0), color::SURFACE_STRONG);
             ui.painter().text(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::Align2::CENTER_CENTER, slot.label(), egui::FontId::proportional(12.5), color::TEXT);
@@ -598,8 +799,28 @@ impl Learnset {
     /// The TMs and HMs that the species can learn.
     fn machine_table(&mut self, ui: &mut egui::Ui, data: &mut SpeciesData) {
         self.header(ui, "TM/HM");
+        let (sort_col, sort_desc) = self.sort[3];
+        let mut learned: Vec<usize> = (0..MACHINES.len()).filter(|&bit| machine_is_set(data, bit)).collect();
+        learned.sort_by(|&bit_a, &bit_b| {
+            let id_a = MACHINES[bit_a];
+            let id_b = MACHINES[bit_b];
+            let name_a = machine_name(bit_a);
+            let name_b = machine_name(bit_b);
+            compare_moves(
+                sort_col,
+                sort_desc,
+                (bit_a as u16, &name_a),
+                id_a,
+                self.move_info(id_a),
+                bit_a,
+                (bit_b as u16, &name_b),
+                id_b,
+                self.move_info(id_b),
+                bit_b,
+            )
+        });
         let mut remove = None;
-        for bit in (0..MACHINES.len()).filter(|&bit| machine_is_set(data, bit)) {
+        for &bit in &learned {
             let row = Self::row(ui);
             ui.painter().rect_filled(egui::Rect::from_center_size(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::vec2(62.0, 24.0)), egui::Rounding::same(12.0), color::SURFACE_STRONG);
             ui.painter().text(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::Align2::CENTER_CENTER, machine_name(bit), egui::FontId::proportional(12.5), color::TEXT);
@@ -716,6 +937,33 @@ mod test {
         let distinct: std::collections::HashSet<_> = (0..18).map(type_color).collect();
         assert_eq!(distinct.len(), 18);
         assert_ne!(category_color(Category::Physical), category_color(Category::Special));
+    }
+
+    #[test]
+    fn compare_moves_sorts_by_level_move_type_and_stats() {
+        let m1 = sango_core::moves::Move { kind: 0, category: Category::Physical, power: 50, accuracy: 100, pp: 35 };
+        let m2 = sango_core::moves::Move { kind: 9, category: Category::Special, power: 90, accuracy: 100, pp: 15 };
+
+        // Level ascending: 5 < 10
+        assert_eq!(
+            compare_moves(SortColumn::First, false, (5, ""), 33, Some(m1), 0, (10, ""), 53, Some(m2), 1),
+            std::cmp::Ordering::Less
+        );
+        // Level descending: 5 > 10 in descending order
+        assert_eq!(
+            compare_moves(SortColumn::First, true, (5, ""), 33, Some(m1), 0, (10, ""), 53, Some(m2), 1),
+            std::cmp::Ordering::Greater
+        );
+        // Power descending: 90 > 50 -> m2 comes first (Less)
+        assert_eq!(
+            compare_moves(SortColumn::Power, true, (0, ""), 53, Some(m2), 0, (0, ""), 33, Some(m1), 1),
+            std::cmp::Ordering::Less
+        );
+        // Type ascending: Fire < Normal
+        assert_eq!(
+            compare_moves(SortColumn::Type, false, (0, ""), 53, Some(m2), 0, (0, ""), 33, Some(m1), 1),
+            std::cmp::Ordering::Less
+        );
     }
 
     /// With the dump of the game: the moves of Bulbasaur are read, drawn in every group, changed, saved on
