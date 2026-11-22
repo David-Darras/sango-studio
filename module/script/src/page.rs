@@ -417,7 +417,7 @@ impl Module for ScriptPage {
     }
 
     fn icon(&self) -> &str {
-        "Sc"
+        "📜"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

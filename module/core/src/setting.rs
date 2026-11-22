@@ -11,6 +11,8 @@ pub struct Settings {
     pub devkitpro: Option<String>,
     /// The folder of the Sango plugin (its headers).
     pub plugin: Option<String>,
+    /// The title of the page that was open at the last run.
+    pub page: Option<String>,
 }
 
 fn base() -> Option<PathBuf> {
@@ -46,6 +48,7 @@ pub fn parse(text: &str) -> Settings {
             "sd" => settings.sd = Some(value.to_string()),
             "devkitpro" => settings.devkitpro = Some(value.to_string()),
             "plugin" => settings.plugin = Some(value.to_string()),
+            "page" => settings.page = Some(value.to_string()),
             _ => {}
         }
     }
@@ -66,6 +69,9 @@ pub fn format(settings: &Settings) -> String {
     }
     if let Some(plugin) = &settings.plugin {
         text.push_str(&format!("plugin={plugin}\n"));
+    }
+    if let Some(page) = &settings.page {
+        text.push_str(&format!("page={page}\n"));
     }
     text
 }
@@ -100,7 +106,7 @@ mod test {
 
     #[test]
     fn the_settings_are_read_back() {
-        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), devkitpro: Some("C:/devkitPro".into()), plugin: Some("C:/work/sango_plugin".into()) };
+        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), devkitpro: Some("C:/devkitPro".into()), plugin: Some("C:/work/sango_plugin".into()), page: None };
         assert_eq!(parse(&format(&settings)), settings);
     }
 
@@ -115,4 +121,19 @@ mod test {
     fn a_path_can_have_an_equal_sign() {
         assert_eq!(parse("dump=C:/a=b/romfs").dump.as_deref(), Some("C:/a=b/romfs"));
     }
+}
+
+/// The title of the page that was open at the last run, when there is one.
+pub fn remembered_page() -> Option<String> {
+    read().page
+}
+
+/// Keeps the title of the page that is open. The other settings stay as they are.
+pub fn save_page(title: &str) {
+    let mut settings = read();
+    if settings.page.as_deref() == Some(title) {
+        return;
+    }
+    settings.page = Some(title.to_string());
+    write(&settings);
 }

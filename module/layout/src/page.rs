@@ -378,7 +378,7 @@ impl Module for LayoutPage {
     }
 
     fn icon(&self) -> &str {
-        "▦"
+        "🖼"
     }
 
     fn unsaved(&self) -> bool {

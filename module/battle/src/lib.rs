@@ -46,7 +46,6 @@ struct Entry {
     id: usize,
     kind: Kind,
     parts: usize,
-    size: usize,
 }
 
 impl Entry {
@@ -186,7 +185,7 @@ impl BattlePage {
             let Some(file) = garc.file(id, 0) else { continue };
             let Ok((raw, _)) = unpack(file) else { continue };
             let (kind, parts) = parts_of(&raw);
-            self.entries.push(Entry { id, kind, parts: parts.len(), size: raw.len() });
+            self.entries.push(Entry { id, kind, parts: parts.len() });
         }
     }
 

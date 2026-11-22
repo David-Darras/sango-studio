@@ -23,13 +23,15 @@ pub mod color {
     pub const GREEN: Color32 = Color32::from_rgb(34, 197, 94);
 }
 
-/// The fonts of the system that have the Japanese and the Korean letters. The first ones that exist are used
-/// after the default fonts, so that the texts of the game in these languages can be read.
-const SYSTEM_FONTS: [(&str, &str); 4] = [
+/// The fonts of the system that have the Japanese, the Korean letters and the emoji (the icons of the side bar).
+/// The first ones that exist are used after the default fonts, so that the texts of the game in these languages
+/// can be read, and the emoji of the pages are drawn with the emoji font of Windows.
+const SYSTEM_FONTS: [(&str, &str); 5] = [
     ("japanese", "C:/Windows/Fonts/YuGothM.ttc"),
     ("japanese-2", "C:/Windows/Fonts/msgothic.ttc"),
     ("korean", "C:/Windows/Fonts/malgun.ttf"),
     ("chinese", "C:/Windows/Fonts/msyh.ttc"),
+    ("emoji", "C:/Windows/Fonts/seguiemj.ttf"),
 ];
 
 /// Adds the fonts of the system for the Japanese and the Korean letters, when the system has them.

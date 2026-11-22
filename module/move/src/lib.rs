@@ -700,7 +700,7 @@ impl Module for Move {
     }
 
     fn icon(&self) -> &str {
-        "M"
+        "💥"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

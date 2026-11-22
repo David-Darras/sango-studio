@@ -520,7 +520,7 @@ impl Module for Archive {
     }
 
     fn icon(&self) -> &str {
-        "Ar"
+        "🗂"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

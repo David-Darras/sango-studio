@@ -694,7 +694,7 @@ impl Module for EffectPage {
     }
 
     fn icon(&self) -> &str {
-        "Ef"
+        "💫"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

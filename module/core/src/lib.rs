@@ -39,6 +39,7 @@ pub use clim::Clim;
 pub use dump::Dump;
 pub use garc::Garc;
 pub use dump::archive_path;
+pub use setting::{remembered_page, save_page};
 pub use sd::{default_workspace, erase_count, set_workspace, Erased, SdCard, SD_FOLDER_NAME};
 
 /// The name of the application.
@@ -146,6 +147,7 @@ impl Session {
             sd: self.sd.as_ref().map(|s| s.root().to_string_lossy().to_string()),
             devkitpro: self.devkitpro.as_ref().map(|p| p.to_string_lossy().to_string()),
             plugin: self.plugin.as_ref().map(|p| p.to_string_lossy().to_string()),
+            page: setting::read().page,
         });
     }
 }

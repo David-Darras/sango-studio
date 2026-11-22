@@ -2979,6 +2979,7 @@ dependencies = [
  "sango-core",
  "sango-cry",
  "sango-modelport",
+ "sango-music",
  "sango-pack",
  "sango-species-base",
  "sango-ui",

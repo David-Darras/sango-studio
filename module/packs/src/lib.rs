@@ -262,7 +262,7 @@ impl Module for Packs {
     }
 
     fn icon(&self) -> &str {
-        "P"
+        "📦"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

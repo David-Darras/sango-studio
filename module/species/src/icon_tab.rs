@@ -169,13 +169,6 @@ impl IconTab {
         }
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(96.0, 96.0), egui::Sense::hover());
-                ui.painter().rect_filled(rect, egui::Rounding::same(10.0), color::SURFACE_STRONG);
-                if let Some(texture) = &self.texture {
-                    let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-                    let image = egui::Rect::from_center_size(rect.center(), egui::vec2(WIDTH as f32 * 2.0, HEIGHT as f32 * 2.0));
-                    ui.painter().image(texture.id(), image, full, egui::Color32::WHITE);
-                }
                 ui.vertical(|ui| {
                     ui.horizontal(|ui| {
                         ui.label(widget::title("Icon"));
@@ -185,7 +178,6 @@ impl IconTab {
                             widget::badge(ui, "From the SD card", color::TEAL);
                         }
                     });
-                    ui.label(widget::hint(&format!("{WIDTH} × {HEIGHT} pixels, in the party and the boxes. Some forms share their icon: a change shows for all of them.")));
                     if has_female_icon(species) {
                         ui.horizontal(|ui| {
                             ui.label(widget::hint("Icon of the"));
@@ -198,11 +190,11 @@ impl IconTab {
                         });
                     }
                     ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if widget::button(ui, "Export PNG…") {
+                    ui.vertical(|ui| {
+                        if widget::button(ui, "Export") {
                             self.status = Some(self.export(file, bytes.as_deref()));
                         }
-                        if widget::button(ui, "Import PNG…") {
+                        if widget::button(ui, "Import") {
                             if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() {
                                 self.status = Some(match self.import(&path, file) {
                                     Ok(()) => (true, "The icon is changed. Save to write it on the SD card.".to_string()),
@@ -212,14 +204,20 @@ impl IconTab {
                         }
                         let has_change = self.pending.contains_key(&file) || self.from_card.contains(&file);
                         ui.add_enabled_ui(has_change, |ui| {
-                            if widget::button(ui, "Reset icon") {
+                            if widget::button(ui, "Reset") {
                                 self.status = Some(self.reset(file, sd));
                             }
-                        })
-                        .response
-                        .on_hover_text("Puts the icon of the game back: the change and the file of the SD card are removed.");
+                        });
                     });
                 });
+                ui.add_space(12.0);
+                let (rect, _) = ui.allocate_exact_size(egui::vec2(96.0, 96.0), egui::Sense::hover());
+                ui.painter().rect_filled(rect, egui::Rounding::same(10.0), color::SURFACE_STRONG);
+                if let Some(texture) = &self.texture {
+                    let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                    let image = egui::Rect::from_center_size(rect.center(), egui::vec2(WIDTH as f32 * 2.0, HEIGHT as f32 * 2.0));
+                    ui.painter().image(texture.id(), image, full, egui::Color32::WHITE);
+                }
             });
             if let Some((ok, message)) = &self.status {
                 ui.add_space(6.0);

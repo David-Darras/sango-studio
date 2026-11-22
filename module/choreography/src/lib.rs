@@ -418,7 +418,7 @@ impl Module for Choreography {
     }
 
     fn icon(&self) -> &str {
-        "Ch"
+        "🎬"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

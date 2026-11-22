@@ -190,7 +190,7 @@ impl Module for Character {
     }
 
     fn icon(&self) -> &str {
-        "Ca"
+        "🧍"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

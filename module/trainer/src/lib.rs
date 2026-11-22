@@ -781,7 +781,7 @@ impl Module for Trainer {
     }
 
     fn icon(&self) -> &str {
-        "Tr"
+        "🎓"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

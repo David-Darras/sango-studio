@@ -196,7 +196,7 @@ impl Module for Formula {
     }
 
     fn icon(&self) -> &str {
-        "Fo"
+        "🧮"
     }
 
     fn unsaved(&self) -> bool {

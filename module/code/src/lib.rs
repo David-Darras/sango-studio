@@ -679,7 +679,7 @@ impl Module for Code {
     }
 
     fn icon(&self) -> &str {
-        "C"
+        "💻"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

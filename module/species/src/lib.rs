@@ -1038,12 +1038,8 @@ fn gender_widget(ui: &mut egui::Ui, value: &mut u8) {
         ui.label(egui::RichText::new(format!("♂ {}%", trim(male_pct))).color(MALE_BLUE).strong().size(12.5));
         ui.label(egui::RichText::new(format!("♀ {}%", trim(female_pct))).color(FEMALE_PINK).strong().size(12.5));
 
-        if ui.small_button("Genderless").on_hover_text("Genderless / gender-unknown (255)").clicked() {
-            *value = 255;
-        }
     }
 
-    ui.label(widget::hint(&format!("0x{:02X}", *value)));
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -1138,9 +1134,9 @@ fn height_field(ui: &mut egui::Ui, id_salt: &str, cm_value: &mut u16) {
         }
 
         let hint = match unit {
-            HeightUnit::Meters => format!("({feet}'{inches:02}\") · 0x{:04X}", *cm_value),
-            HeightUnit::Centimeters => format!("{:.2} m ({feet}'{inches:02}\") · 0x{:04X}", *cm_value as f32 / 100.0, *cm_value),
-            HeightUnit::Inches => format!("{:.2} m / {} cm · 0x{:04X}", *cm_value as f32 / 100.0, *cm_value, *cm_value),
+            HeightUnit::Meters => format!("({feet}'{inches:02}\")"),
+            HeightUnit::Centimeters => format!("{:.2} m ({feet}'{inches:02}\")", *cm_value as f32 / 100.0),
+            HeightUnit::Inches => format!("{:.2} m / {} cm", *cm_value as f32 / 100.0, *cm_value),
         };
         ui.label(widget::hint(&hint));
     });
@@ -1202,8 +1198,8 @@ fn weight_field(ui: &mut egui::Ui, id_salt: &str, hg_value: &mut u16) {
         let kg = *hg_value as f32 / 10.0;
         let lbs = kg * 2.2046226;
         let hint = match unit {
-            WeightUnit::Kg => format!("({lbs:.1} lbs) · raw: {} (0x{:04X})", *hg_value, *hg_value),
-            WeightUnit::Lbs => format!("({kg:.1} kg) · raw: {} (0x{:04X})", *hg_value, *hg_value),
+            WeightUnit::Kg => format!("({lbs:.1} lbs)"),
+            WeightUnit::Lbs => format!("({kg:.1} kg)"),
         };
         ui.label(widget::hint(&hint));
     });
@@ -1396,7 +1392,7 @@ fn color_menu(ui: &mut egui::Ui, id: &str, value: &mut u8) {
 }
 
 /// The width of one column of groups, in points.
-const COLUMN_WIDTH: f32 = 470.0;
+const COLUMN_WIDTH: f32 = 430.0;
 
 /// A grid for the fields of a group.
 fn grid(name: &'static str) -> egui::Grid {
@@ -1426,7 +1422,6 @@ fn stat_line(ui: &mut egui::Ui, label: &str, field: Field, summary: &'static str
             ui.spacing_mut().item_spacing.x = 8.0;
             widget::stat_bar(ui, value, 255.0);
             number(ui, value, 255.0);
-            ui.label(widget::hint(&format!("0x{:02X}", *value)));
         },
     );
 }
@@ -1481,7 +1476,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     type_menu(ui, "type_1", &mut d.type_1, None);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.type_1)));
                 },
             );
             line_with_note(
@@ -1495,7 +1489,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 |ui| {
                     let first = d.type_1;
                     type_menu(ui, "type_2", &mut d.type_2, Some(first));
-                    ui.label(widget::hint(&format!("0x{:02X}", d.type_2)));
                 },
             );
             line_with_note(
@@ -1508,7 +1501,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     ability_picker(ui, "ability_1", &mut d.ability_1);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.ability_1)));
                 },
             );
             line_with_note(
@@ -1521,7 +1513,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     ability_picker(ui, "ability_2", &mut d.ability_2);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.ability_2)));
                 },
             );
             line_with_note(
@@ -1534,7 +1525,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     ability_picker(ui, "ability_hidden", &mut d.ability_hidden);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.ability_hidden)));
                 },
             );
             line_with_note(
@@ -1547,7 +1537,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     menu(ui, "egg_1", &mut d.egg_group_1, &names::EGG_GROUP, 140.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.egg_group_1)));
                 },
             );
             line_with_note(
@@ -1560,7 +1549,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     menu(ui, "egg_2", &mut d.egg_group_2, &names::EGG_GROUP, 140.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.egg_group_2)));
                 },
             );
             line_with_note(
@@ -1573,7 +1561,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     item_picker(ui, "item_50", &mut d.item_50);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.item_50)));
                 },
             );
             line_with_note(
@@ -1586,7 +1573,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     item_picker(ui, "item_5", &mut d.item_5);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.item_5)));
                 },
             );
             line_with_note(
@@ -1599,17 +1585,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     menu(ui, "leveling_rate", &mut d.leveling_rate, &names::LEVELING_RATE, 165.0);
-                    let exp_at_100 = match d.leveling_rate {
-                        0 => "1,000,000 exp",
-                        1 => "600,000 exp",
-                        2 => "1,640,000 exp",
-                        3 => "1,059,860 exp",
-                        4 => "800,000 exp",
-                        5 => "1,250,000 exp",
-                        6 | 7 => "1,000,000 exp",
-                        _ => "unknown",
-                    };
-                    ui.label(widget::hint(&format!("{exp_at_100} · 0x{:02X}", d.leveling_rate)));
                 },
             );
             line_with_note(
@@ -1622,7 +1597,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     menu(ui, "shape", shape, &names::SHAPE, 190.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", *shape)));
                 },
             );
             line_with_note(
@@ -1635,7 +1609,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     color_menu(ui, "pokedex_color", &mut d.color);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.color)));
                 },
             );
             line_with_note(
@@ -1647,7 +1620,12 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::GenderRatio, d.gender_ratio as u32)),
                 }),
                 |ui| {
-                    gender_widget(ui, &mut d.gender_ratio);
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| gender_widget(ui, &mut d.gender_ratio));
+                        if d.gender_ratio != 255 && ui.small_button("Genderless").on_hover_text("Genderless / gender-unknown (255)").clicked() {
+                            d.gender_ratio = 255;
+                        }
+                    });
                 },
             );
             line_with_note(
@@ -1661,7 +1639,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 |ui| {
                     number(ui, &mut d.hatch_time, 255.0);
                     let steps = d.hatch_time as u32 * 256;
-                    ui.label(widget::hint(&format!("{} cycles ({} steps) · 0x{:02X}", d.hatch_time, steps, d.hatch_time)));
+                    ui.label(widget::hint(&format!("{} cycles ({} steps)", d.hatch_time, steps)));
                 },
             );
             line_with_note(
@@ -1698,7 +1676,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     number(ui, &mut d.catch_rate, 255.0);
-                    ui.label(widget::hint(&format!("{} · 0x{:02X}", percent(d.catch_rate), d.catch_rate)));
+                    ui.label(widget::hint(&format!("{}", percent(d.catch_rate))));
                 },
             );
             line_with_note(
@@ -1711,7 +1689,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     number(ui, &mut d.base_friendship, 255.0);
-                    ui.label(widget::hint(&format!("0x{:02X}", d.base_friendship)));
                 },
             );
             line_with_note(
@@ -1724,7 +1701,6 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                 }),
                 |ui| {
                     number(ui, &mut d.base_experience, 65535.0);
-                    ui.label(widget::hint(&format!("0x{:04X}", d.base_experience)));
                 },
             );
             line_with_note(
@@ -1852,14 +1828,13 @@ fn group_ev_yield(ui: &mut egui::Ui, d: &mut SpeciesData, _shape: &mut u8) {
                 ui.horizontal(|ui| {
                     ui.label(widget::hint("Total"));
                     ui.label(egui::RichText::new(format!("{total} EV{}", if total > 1 { "s" } else { "" })).strong());
-                    ui.label(widget::hint(&format!("· raw: 0x{:04X}", d.ev_yield)));
                 });
             });
     });
 }
 
 /// The groups of the General tab, side by side: as many columns as the window has room for.
-fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, above: impl FnOnce(&mut egui::Ui)) {
+fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, side: impl FnOnce(&mut egui::Ui)) {
     const GROUPS: [fn(&mut egui::Ui, &mut SpeciesData, &mut u8); 3] = [
         group_statistics,
         group_characteristics,
@@ -1874,8 +1849,6 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, above: im
         _ => vec![(0..GROUPS.len()).collect()],
     };
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        above(ui);
-        ui.add_space(10.0);
         ui.horizontal_top(|ui| {
             for column in layout {
                 ui.vertical(|ui| {
@@ -1886,6 +1859,8 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, above: im
                 });
                 ui.add_space(10.0);
             }
+            // The icon and the cry, under each other, next to the characteristics.
+            ui.vertical(|ui| side(ui));
         });
     });
 }
@@ -1900,7 +1875,7 @@ impl Module for Species {
     }
 
     fn icon(&self) -> &str {
-        "S"
+        "🐾"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

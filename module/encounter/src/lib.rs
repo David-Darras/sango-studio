@@ -495,7 +495,7 @@ impl Module for EncounterPage {
     }
 
     fn icon(&self) -> &str {
-        "En"
+        "🌿"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

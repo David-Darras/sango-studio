@@ -545,7 +545,7 @@ impl Module for FontPage {
     }
 
     fn icon(&self) -> &str {
-        "Fo"
+        "🔤"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

@@ -57,7 +57,7 @@ impl Module for Overworld {
     }
 
     fn icon(&self) -> &str {
-        "O"
+        "🗺"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

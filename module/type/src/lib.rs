@@ -408,7 +408,7 @@ impl Module for Type {
     }
 
     fn icon(&self) -> &str {
-        "T"
+        "🔥"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

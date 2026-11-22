@@ -705,7 +705,7 @@ impl Module for LevelingRate {
     }
 
     fn icon(&self) -> &str {
-        "L"
+        "📈"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

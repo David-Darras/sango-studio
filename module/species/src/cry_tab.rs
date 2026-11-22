@@ -41,6 +41,8 @@ pub struct CryTab {
     status: Option<(bool, String)>,
     /// The sound that plays: the flag stops it.
     playing: Option<Arc<AtomicBool>>,
+    /// The format of the export: false for an MP3 file (the default), true for a WAV file.
+    wav: bool,
 }
 
 /// Plays a sound in a thread of its own (the audio stream cannot move between threads). The flag stops it.
@@ -114,11 +116,6 @@ impl CryTab {
         found
     }
 
-    /// How many entries of the table use a wave file: the species and the forms that a change reaches.
-    fn users(file: u32) -> usize {
-        table::ROWS.iter().filter(|row| row[1..].iter().any(|&id| id != 0 && id >> 16 == file)).count()
-    }
-
     /// Draws the card.
     pub fn ui(&mut self, ui: &mut egui::Ui, session: &Session, species: usize, form: usize) {
         let sd = session.sd.as_ref();
@@ -158,38 +155,36 @@ impl CryTab {
                     }
                 });
             }
-            match &self.shown {
-                Some((_, _, sound)) => {
-                    ui.label(widget::hint(&format!("{:.2} seconds · {} Hz · file {file} of the archive {ARCHIVE}", sound.seconds(), sound.rate)));
-                }
-                None => {
-                    ui.label(widget::hint("The file of this cry is not in the archive."));
-                }
-            }
-            let users = Self::users(file);
-            if users > 1 {
-                ui.label(widget::hint(&format!("{users} species and forms share this file: a change shows for all of them.")));
+            if self.shown.is_none() {
+                ui.label(widget::hint("No sound."));
             }
             ui.add_space(6.0);
             let busy = self.playing.as_ref().is_some_and(|flag| !flag.load(Ordering::Relaxed));
-            ui.horizontal_wrapped(|ui| {
-                ui.add_enabled_ui(self.shown.is_some(), |ui| {
+            ui.vertical(|ui| {
+                // The big button: Play, or Stop while the sound plays.
+                let seconds = self.shown.as_ref().map_or(0.0, |(_, _, sound)| sound.seconds());
+                let label = if busy { "Stop".to_string() } else { format!("Play {seconds:.2} s") };
+                let clicked = ui.add_enabled_ui(self.shown.is_some(), |ui| widget::button_styled(ui, egui::RichText::new(label).color(color::WHITE), Some(color::ACCENT))).inner;
+                if clicked {
                     if busy {
-                        if widget::button(ui, "Stop") {
-                            if let Some(flag) = &self.playing {
-                                flag.store(true, Ordering::Relaxed);
-                            }
+                        if let Some(flag) = &self.playing {
+                            flag.store(true, Ordering::Relaxed);
                         }
-                    } else if widget::button(ui, "Play") {
-                        if let Some((_, _, sound)) = &self.shown {
-                            self.playing = Some(play(sound));
-                        }
+                    } else if let Some((_, _, sound)) = &self.shown {
+                        self.playing = Some(play(sound));
                     }
-                    if widget::button(ui, "Export WAV…") {
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if widget::button(ui, "Export") {
                         self.status = Some(self.export(species, form));
                     }
+                    egui::ComboBox::from_id_salt("cry_export_format").width(96.0).selected_text(if !self.wav { "MP3" } else { "WAV" }).show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.wav, true, "WAV");
+                        ui.selectable_value(&mut self.wav, false, "MP3");
+                    });
                 });
-                if widget::button(ui, "Import…") {
+                if widget::button(ui, "Import") {
                     if let Some(path) = rfd::FileDialog::new().set_title("Sound for the cry").add_filter("Sound", &["wav", "mp3"]).pick_file() {
                         self.status = Some(match self.import(&path, file) {
                             Ok(message) => (true, message),
@@ -199,12 +194,11 @@ impl CryTab {
                 }
                 let changed = self.pending.contains_key(&file) || self.from_card.contains(&file);
                 ui.add_enabled_ui(changed, |ui| {
-                    if widget::button(ui, "Back to the cry of the game") {
+                    if widget::button(ui, "Reset") {
                         self.status = Some(self.reset(sd, file));
                     }
                 });
             });
-            ui.label(widget::hint("An imported sound is made mono, brought to 32728 Hz and shortened to 3 seconds at most. Save to write it, then restart the game."));
             if let Some((ok, message)) = &self.status {
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }));
             }
@@ -214,11 +208,19 @@ impl CryTab {
         }
     }
 
-    /// Writes the cry that is shown as a WAV file that the user chooses.
+    /// Writes the cry that is shown as a WAV or an MP3 file that the user chooses.
     fn export(&self, species: usize, form: usize) -> (bool, String) {
         let Some((_, _, sound)) = &self.shown else { return (false, "There is no sound to export.".into()) };
-        let Some(path) = rfd::FileDialog::new().set_title("Export the cry").set_file_name(format!("cry_{species:04}_{form}.wav")).add_filter("WAV sound", &["wav"]).save_file() else { return (true, String::new()) };
-        match std::fs::write(&path, sound::write_wav(sound)) {
+        let (extension, label) = if !self.wav { ("mp3", "MP3 sound") } else { ("wav", "WAV sound") };
+        let Some(path) = rfd::FileDialog::new().set_title("Export the cry").set_file_name(format!("cry_{species:04}_{form}.{extension}")).add_filter(label, &[extension]).save_file() else { return (true, String::new()) };
+        let bytes = if !self.wav {
+            let music = sango_music::bcstm::Music { rate: sound.rate, channels: vec![sound.samples.clone()], loop_start: None };
+            sango_music::mp3::write_mp3(&music)
+        } else {
+            Ok(sound::write_wav(sound))
+        };
+        let written = bytes.and_then(|bytes| std::fs::write(&path, bytes).map_err(|error| error.to_string()));
+        match written {
             Ok(()) => (true, format!("Exported {}.", path.display())),
             Err(error) => (false, format!("{}: {error}", path.display())),
         }

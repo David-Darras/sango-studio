@@ -248,7 +248,7 @@ impl Module for Nature {
     }
 
     fn icon(&self) -> &str {
-        "Na"
+        "🍃"
     }
 
     fn unsaved(&self) -> bool {

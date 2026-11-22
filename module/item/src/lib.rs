@@ -846,7 +846,7 @@ impl Module for Item {
     }
 
     fn icon(&self) -> &str {
-        "I"
+        "🎒"
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, session: &mut Session) {

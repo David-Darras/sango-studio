@@ -19,6 +19,8 @@ struct App {
     warmed: usize,
     /// True while the window asks if it can close with changes that are not saved.
     confirm_close: bool,
+    /// The title of the page that the settings file has (it is written when the page changes).
+    remembered: String,
 }
 
 impl App {
@@ -29,37 +31,40 @@ impl App {
             cc.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(sango_overworld::RENDER_STATE_KEY), state));
         }
         let modules = Self::pages();
-        // SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
-        let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).unwrap_or(0);
-        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false }
+        // The page of the last run opens, then SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
+        let last = sango_core::remembered_page().and_then(|title| modules.iter().position(|m| m.title() == title));
+        let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).or(last).unwrap_or(0);
+        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false, remembered: String::new() }
     }
 
     /// All the pages, new and empty. The first one is Home.
     fn pages() -> Vec<Box<dyn Module>> {
+        // In the order of the work: the start, the Pokémon, the battle, the world, the presentation, then the tools
+        // and the least used pages (the archive and the packs) at the end.
         vec![
             Box::new(sango_home::Home::default()),
-            Box::new(sango_archive::Archive::default()),
             Box::new(sango_species::Species::default()),
             Box::new(sango_leveling_rate::LevelingRate::default()),
-            Box::new(sango_item::Item::default()),
-            Box::new(sango_move::Move::default()),
-            Box::new(sango_ability::Ability::default()),
-            Box::new(sango_type::Type::default()),
-            Box::new(sango_trainer::Trainer::default()),
-            Box::new(sango_choreography::Choreography::default()),
-            Box::new(sango_effect::EffectPage::default()),
-            Box::new(sango_script::ScriptPage::default()),
-            Box::new(sango_encounter::EncounterPage::default()),
-            Box::new(sango_formula::Formula::default()),
             Box::new(sango_nature::Nature::default()),
-            Box::new(sango_font::FontPage::default()),
-            Box::new(sango_layout::LayoutPage::default()),
+            Box::new(sango_formula::Formula::default()),
+            Box::new(sango_ability::Ability::default()),
+            Box::new(sango_move::Move::default()),
+            Box::new(sango_type::Type::default()),
+            Box::new(sango_item::Item::default()),
             Box::new(sango_battle::BattlePage::default()),
-            Box::new(sango_character::Character::default()),
+            Box::new(sango_trainer::Trainer::default()),
             Box::new(sango_overworld::Overworld::default()),
-            Box::new(sango_packs::Packs::default()),
+            Box::new(sango_character::Character::default()),
+            Box::new(sango_encounter::EncounterPage::default()),
+            Box::new(sango_choreography::Choreography::default()),
+            Box::new(sango_script::ScriptPage::default()),
+            Box::new(sango_layout::LayoutPage::default()),
+            Box::new(sango_font::FontPage::default()),
             Box::new(sango_music::MusicPage::default()),
+            Box::new(sango_effect::EffectPage::default()),
             Box::new(sango_code::Code::default()),
+            Box::new(sango_archive::Archive::default()),
+            Box::new(sango_packs::Packs::default()),
         ]
     }
 
@@ -300,6 +305,13 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         sango_ui::textures::sweep(ctx);
+        // The page that is open is kept for the next run.
+        if let Some(module) = self.modules.get(self.current) {
+            if self.remembered != module.title() {
+                self.remembered = module.title().to_string();
+                sango_core::save_page(&self.remembered);
+            }
+        }
         if !ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sango_close_now")).unwrap_or(false)) {
             self.close_guard(ctx);
         }
