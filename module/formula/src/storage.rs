@@ -42,9 +42,39 @@ impl Formulas {
         (self.shiny_percent / 100.0 * f64::from(SHINY_OUT_OF)).round().clamp(0.0, f64::from(SHINY_OUT_OF)) as u32
     }
 
-    /// Reads the text file. A line that is not understood is an error (the page shows it).
+    /// Reads the text or CSV file. A line that is not understood is an error (the page shows it).
     pub fn parse(text: &str) -> Result<Formulas, String> {
         let mut formulas = Formulas::game();
+        if text.contains(',') {
+            if let Ok(records) = sango_core::csv_text::records(text) {
+                let mut found_any = false;
+                for (line_no, fields) in records {
+                    if fields.is_empty() {
+                        continue;
+                    }
+                    let key = fields[0].trim().to_lowercase();
+                    if key == "stat" || key == "name" || key.starts_with('#') {
+                        continue;
+                    }
+                    if fields.len() < 2 {
+                        continue;
+                    }
+                    let value = fields[1].trim();
+                    if key == "shiny" {
+                        formulas.shiny_percent = value.parse().map_err(|_| format!("Line {line_no}: the shiny chance is not a number."))?;
+                        found_any = true;
+                    } else if let Some(stat) = KEYS.iter().position(|k| *k == key) {
+                        formulas.texts[stat] = value.to_string();
+                        found_any = true;
+                    } else {
+                        return Err(format!("Line {line_no}: {key} is not a statistic."));
+                    }
+                }
+                if found_any {
+                    return Ok(formulas);
+                }
+            }
+        }
         for (at, line) in text.lines().enumerate() {
             let line = line.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -61,6 +91,16 @@ impl Formulas {
             }
         }
         Ok(formulas)
+    }
+
+    /// The CSV file with all statistics and the shiny chance.
+    pub fn to_csv(&self) -> String {
+        let mut text = String::from("stat,formula\n");
+        for stat in 0..6 {
+            text += &format!("{},{}\n", KEYS[stat], sango_core::csv_text::quote(self.texts[stat].trim()));
+        }
+        text += &format!("shiny,{}\n", self.shiny_percent);
+        text
     }
 
     /// The text file.
@@ -149,6 +189,12 @@ mod test {
         assert_eq!(again, formulas);
         assert!(!again.is_game());
         assert_eq!(again.threshold(), 2294);
+
+        let csv = formulas.to_csv();
+        assert!(csv.contains("attack,(3 * base + iv + ev / 4) * level / 100 + 5"));
+        assert!(csv.contains(&format!("hp,\"{HP}\"")));
+        let from_csv = Formulas::parse(&csv).unwrap();
+        assert_eq!(from_csv, formulas);
     }
 
     #[test]

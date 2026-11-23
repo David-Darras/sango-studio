@@ -73,27 +73,68 @@ impl Formula {
         });
     }
 
+    fn export_file(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("CSV file", &["csv"])
+            .add_filter("Text file", &["txt"])
+            .set_file_name("formulas.csv")
+            .save_file()
+        else {
+            return;
+        };
+        let content = if path.extension().map_or(false, |ext| ext.eq_ignore_ascii_case("txt")) {
+            self.formulas.to_text()
+        } else {
+            self.formulas.to_csv()
+        };
+        self.status = Some(match std::fs::write(&path, content) {
+            Ok(()) => (true, format!("Exported formulas to {}.", path.display())),
+            Err(error) => (false, format!("{}: {error}", path.display())),
+        });
+    }
+
+    fn import_file(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Formulas (CSV or text)", &["csv", "txt"])
+            .pick_file()
+        else {
+            return;
+        };
+        let result = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))
+            .and_then(|text| Formulas::parse(&text));
+        self.status = Some(match result {
+            Ok(formulas) => {
+                self.formulas = formulas;
+                (true, format!("Imported formulas from {}.", path.display()))
+            }
+            Err(message) => (false, message),
+        });
+    }
+
     fn tool_bar(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>) {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
+                if widget::button(ui, "Export") {
+                    self.export_file();
+                }
+                if widget::button(ui, "Import") {
+                    self.import_file();
+                }
+                ui.add_enabled_ui(!self.formulas.is_game(), |ui| {
+                    if widget::confirm_button(ui, "Reset", "Click again to reset") {
+                        self.formulas = Formulas::game();
+                        self.status = Some((true, "Reset all formulas to default.".to_string()));
+                    }
+                });
                 let changed = self.formulas != self.saved;
                 ui.add_enabled_ui(changed && sd.is_some(), |ui| {
-                    if widget::button(ui, "Save") {
+                    if widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
                         if let Some(sd) = sd {
                             self.save(sd);
                         }
                     }
                 });
-                ui.add_enabled_ui(changed, |ui| {
-                    if widget::button(ui, "Undo") {
-                        self.formulas = self.saved.clone();
-                        self.status = None;
-                    }
-                });
-                if !self.formulas.is_game() && widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                    self.formulas = Formulas::game();
-                    self.status = None;
-                }
                 if changed {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_card {
@@ -125,14 +166,17 @@ impl Formula {
             widget::card(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(widget::title(STATS[stat].0));
-                    if Formulas::is_game_text(stat, &self.formulas.texts[stat]) {
+                    let is_game = Formulas::is_game_text(stat, &self.formulas.texts[stat]);
+                    if is_game {
                         widget::badge(ui, "Like the game", color::GREEN);
                     } else {
                         widget::badge(ui, "Changed", color::AMBER);
                     }
-                    if !Formulas::is_game_text(stat, &self.formulas.texts[stat]) && widget::button(ui, "Game formula") {
-                        self.formulas.texts[stat] = STATS[stat].1.to_string();
-                    }
+                    ui.add_enabled_ui(!is_game, |ui| {
+                        if widget::button(ui, "Reset") {
+                            self.formulas.texts[stat] = STATS[stat].1.to_string();
+                        }
+                    });
                 });
                 ui.add(egui::TextEdit::singleline(&mut self.formulas.texts[stat]).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).id_salt(("formula", stat)));
                 match expr::compile(&self.formulas.texts[stat]) {
@@ -173,7 +217,7 @@ impl Formula {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(widget::hint("Quick choice"));
-                if widget::button(ui, "Like the game") {
+                if widget::button(ui, "Reset") {
                     self.formulas.shiny_percent = shiny_game_percent();
                 }
                 for percent in [0.1, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0] {

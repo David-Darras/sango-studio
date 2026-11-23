@@ -281,12 +281,8 @@ impl NatureTable {
         });
         for (number, nature) in self.natures.iter().enumerate() {
             let c = nature.change;
-            let mut others = Vec::new();
-            for (k, other) in nature.other_names.iter().enumerate() {
-                let is_vanilla = number < GAME_COUNT && other == GAME_NATURE_NAMES[k + 1][number];
-                others.push(if is_vanilla { String::new() } else { other.replace(',', " ") });
-            }
-            let name = if number < GAME_COUNT && nature.name == GAME[number].0 { String::new() } else { nature.name.replace(',', " ") };
+            let others: Vec<String> = nature.other_names.iter().map(|o| o.replace(',', " ")).collect();
+            let name = nature.name.replace(',', " ");
             if has_custom_color {
                 let color_str = if nature.color == NatureColor::Blue { String::new() } else { nature.color.csv_str().to_string() };
                 text += &format!("{number},{},{},{},{},{},{},{},{}\n", c[0], c[1], c[2], c[3], c[4], name, others.join(","), color_str);
@@ -339,13 +335,13 @@ mod test {
         assert_eq!(again.natures[25].other_names[6], "코스믹");
         // A file without the name columns is still read.
         assert_eq!(NatureTable::parse("26,0,0,0,0,0,Alone").unwrap().natures[26].name, "Alone");
-        // A nature of the game with a new name: the name goes through the file, and the game names are not written.
+        // A nature of the game with a new name: the name goes through the file, and all names are written.
         let mut renamed = NatureTable::game();
         renamed.natures[3].name = "Fierce".to_string();
         renamed.natures[3].other_names[2] = "Fougueux".to_string();
         let again = NatureTable::parse(&renamed.to_csv()).unwrap();
         assert_eq!(again, renamed);
-        assert!(NatureTable::game().to_csv().lines().skip(1).all(|l| l.split(',').nth(6) == Some("")));
+        assert_eq!(NatureTable::game().to_csv().lines().skip(1).next().and_then(|l| l.split(',').nth(6)), Some("Hardy"));
     }
 
     #[test]

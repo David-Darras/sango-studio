@@ -2824,6 +2824,7 @@ dependencies = [
 name = "sango-formula"
 version = "0.1.0"
 dependencies = [
+ "rfd",
  "sango-core",
  "sango-ui",
 ]

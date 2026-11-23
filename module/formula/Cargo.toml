@@ -5,5 +5,6 @@ edition.workspace = true
 description = "The Formula page of Sango Studio: the formulas of the statistics and the shiny chance."
 
 [dependencies]
+rfd.workspace = true
 sango-core.workspace = true
 sango-ui.workspace = true
