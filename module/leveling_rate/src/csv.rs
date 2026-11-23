@@ -29,13 +29,22 @@ pub const COLUMNS: [&str; 6] = ["medium_fast", "erratic", "fluctuating", "medium
 /// The header line of a file that has all the rates.
 pub const HEADER: &str = "level,medium_fast,erratic,fluctuating,medium_slow,fast,slow";
 
-/// Writes the tables of the six real Leveling rates as the text of a file.
+/// Writes the tables of the Leveling rates as the text of a file.
 pub fn export(table: &ExperienceTable) -> String {
-    let mut text = String::from(HEADER);
+    let mut header = String::from(HEADER);
+    let count = table.count();
+    for rate in 8..count {
+        let _ = write!(header, ",rate_{rate}");
+    }
+    let mut text = header;
     text.push('\n');
     for level in 1..=MAX_LEVEL {
         let _ = write!(text, "{level}");
         for rate in 0..COLUMNS.len() {
+            let value = table.curve(rate).and_then(|curve| curve.experience(level)).unwrap_or(0);
+            let _ = write!(text, ",{value}");
+        }
+        for rate in 8..count {
             let value = table.curve(rate).and_then(|curve| curve.experience(level)).unwrap_or(0);
             let _ = write!(text, ",{value}");
         }
@@ -57,7 +66,12 @@ pub fn parse(text: &str) -> Result<Vec<(usize, Curve)>, String> {
     // The rate of each column after `level`.
     let mut rates = Vec::new();
     for name in &names[1..] {
-        let rate = COLUMNS.iter().position(|column| column == name).ok_or_else(|| format!("Line 1: unknown column `{name}`."))?;
+        let rate = COLUMNS.iter().position(|column| column == name)
+            .or_else(|| name.strip_prefix("rate_").and_then(|s| s.parse::<usize>().ok()))
+            .ok_or_else(|| format!("Line 1: unknown column `{name}`."))?;
+        if rate >= sango_core::experience::MAX_RATES {
+            return Err(format!("Line 1: column `{name}` exceeds maximum of {} leveling rates.", sango_core::experience::MAX_RATES));
+        }
         if rates.contains(&rate) {
             return Err(format!("Line 1: the column `{name}` appears twice."));
         }
@@ -92,7 +106,8 @@ pub fn parse(text: &str) -> Result<Vec<(usize, Curve)>, String> {
 
     let mut tables = Vec::new();
     for (column, &rate) in rates.iter().enumerate() {
-        let name = COLUMNS[rate];
+        let default_name = format!("rate_{rate}");
+        let name = COLUMNS.get(rate).copied().unwrap_or(&default_name);
         let mut levels = [0u32; MAX_LEVEL + 1];
         for level in 1..=MAX_LEVEL {
             levels[level] = values[column][level].ok_or_else(|| format!("Column `{name}`: the level {level} is missing."))?;
@@ -175,6 +190,22 @@ mod test {
     fn windows_line_ends_and_empty_lines_are_accepted() {
         let text = export(&sample()).replace('\n', "\r\n") + "\r\n\r\n";
         assert_eq!(parse(&text).unwrap().len(), 6);
+    }
+
+    #[test]
+    fn custom_rate_can_be_exported_and_imported() {
+        let mut table = sample();
+        let bytes: Vec<u8> = (0..=MAX_LEVEL as u32).flat_map(|n| (3 * n.saturating_sub(1) * n.saturating_sub(1)).to_le_bytes()).collect();
+        let custom_curve = Curve::from_bytes(&bytes).unwrap();
+        table.push_curve(custom_curve.clone());
+        assert_eq!(table.count(), 9);
+
+        let text = export(&table);
+        assert!(text.starts_with("level,medium_fast,erratic,fluctuating,medium_slow,fast,slow,rate_8\n"));
+        let parsed = parse(&text).unwrap();
+        assert_eq!(parsed.len(), 7);
+        assert_eq!(parsed[6].0, 8);
+        assert_eq!(parsed[6].1, custom_curve);
     }
 
     /// With the dump of the game: the six tables of the game go out and come back the same.

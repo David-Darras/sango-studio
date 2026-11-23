@@ -396,10 +396,10 @@ impl Species {
             ui.horizontal(|ui| {
                 let any = self.tools.csv_parts.iter().any(|on| *on);
                 ui.add_enabled_ui(any && self.garc.is_some(), |ui| {
-                    if widget::button(ui, "Export CSV…") {
+                    if widget::button(ui, "Export") {
                         self.export_csv_files(session);
                     }
-                    if session.sd.is_some() && widget::button(ui, "Import CSV…") {
+                    if session.sd.is_some() && widget::button(ui, "Import") {
                         self.import_csv_files(session);
                     }
                 });

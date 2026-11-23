@@ -11,7 +11,7 @@
 
 mod csv;
 
-use sango_core::experience::{self, Curve, ExperienceTable, MAX_LEVEL};
+use sango_core::experience::{self, Curve, ExperienceTable, MAX_LEVEL, MAX_RATES};
 use sango_core::{Garc, SdCard};
 use sango_species::{SpeciesTable, LEVELING_RATE};
 use sango_ui::theme::color;
@@ -46,6 +46,27 @@ const RATE_COLORS: [egui::Color32; REAL_RATES] = [
     egui::Color32::from_rgb(245, 158, 11),
     egui::Color32::from_rgb(20, 170, 160),
 ];
+
+/// The color of a Leveling rate, with extra distinct colors for custom rates.
+fn rate_color(rate: usize) -> egui::Color32 {
+    const EXTRA_COLORS: [egui::Color32; 10] = [
+        egui::Color32::from_rgb(236, 72, 153), // Pink
+        egui::Color32::from_rgb(14, 165, 233), // Sky blue
+        egui::Color32::from_rgb(132, 204, 22), // Lime
+        egui::Color32::from_rgb(249, 115, 22), // Orange
+        egui::Color32::from_rgb(168, 85, 247), // Purple
+        egui::Color32::from_rgb(99, 102, 241), // Indigo
+        egui::Color32::from_rgb(20, 184, 166), // Teal
+        egui::Color32::from_rgb(234, 179, 8),  // Yellow
+        egui::Color32::from_rgb(244, 63, 94),  // Rose
+        egui::Color32::from_rgb(16, 185, 129), // Emerald
+    ];
+    if rate < RATE_COLORS.len() {
+        RATE_COLORS[rate]
+    } else {
+        EXTRA_COLORS[(rate - RATE_COLORS.len()) % EXTRA_COLORS.len()]
+    }
+}
 
 /// What the graph shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -291,7 +312,21 @@ impl LevelingRate {
         VIEWS.get(self.view).map_or(View::Total, |(_, view)| *view)
     }
 
-    /// The top of the vertical axis and the distance between two lines: the six curves must fit.
+    /// The number of Leveling rates.
+    fn rate_count(&self) -> usize {
+        self.table.as_ref().map_or(LEVELING_RATE.len(), |t| t.count().min(MAX_RATES).max(LEVELING_RATE.len()))
+    }
+
+    /// The name of a Leveling rate.
+    fn rate_name(&self, rate: usize) -> String {
+        if let Some(name) = LEVELING_RATE.get(rate) {
+            name.to_string()
+        } else {
+            format!("Rate {rate}")
+        }
+    }
+
+    /// The top of the vertical axis and the distance between two lines: the curves must fit.
     fn axis(&self) -> (u32, f64) {
         if let Some(frozen) = self.frozen_axis {
             return frozen;
@@ -301,7 +336,7 @@ impl LevelingRate {
             .table
             .as_ref()
             .map(|table| {
-                (0..REAL_RATES).filter_map(|rate| table.curve(rate)).flat_map(|curve| view.levels().filter_map(move |level| view.value(curve, level))).max().unwrap_or(0)
+                (0..table.count()).filter_map(|rate| table.curve(rate)).flat_map(|curve| view.levels().filter_map(move |level| view.value(curve, level))).max().unwrap_or(0)
             })
             .unwrap_or(0);
         nice_axis(top)
@@ -327,6 +362,7 @@ impl LevelingRate {
 
     /// The buttons that choose the Leveling rate.
     fn rate_tabs(&mut self, ui: &mut egui::Ui) {
+        let count = self.rate_count();
         egui::Frame::none()
             .fill(color::SURFACE)
             .stroke(egui::Stroke::new(1.0_f32, color::BORDER))
@@ -335,8 +371,9 @@ impl LevelingRate {
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                    for (place, name) in LEVELING_RATE.iter().enumerate() {
-                        self.rate = tab(ui, ("leveling_rate_tab", place), name, place, self.rate);
+                    for place in 0..count {
+                        let name = self.rate_name(place);
+                        self.rate = tab(ui, ("leveling_rate_tab", place), &name, place, self.rate);
                     }
                 });
             });
@@ -346,22 +383,28 @@ impl LevelingRate {
     fn view_tabs(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            ui.label(widget::hint("View"));
             for (place, (name, _)) in VIEWS.iter().enumerate() {
                 self.view = tab(ui, ("leveling_rate_view", place), name, place, self.view);
             }
         });
     }
 
-    /// The state, and the buttons. Returns what the user asked: (reset, save, export, import).
-    fn tool_bar(&mut self, ui: &mut egui::Ui, can_save: bool) -> (bool, bool, bool, bool) {
-        let mut asked = (false, false, false, false);
+    /// The state, and the buttons. Returns what the user asked: (new_rate, export, import, reset, save).
+    fn tool_bar(&mut self, ui: &mut egui::Ui, can_save: bool) -> (bool, bool, bool, bool, bool) {
+        let mut asked = (false, false, false, false, false);
+        let at_limit = self.rate_count() >= MAX_RATES;
         ui.horizontal_wrapped(|ui| {
-            asked.0 = widget::button(ui, "Reset");
-            asked.1 = can_save && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
-            asked.2 = widget::button(ui, "Export CSV");
-            asked.3 = can_save && widget::button(ui, "Import CSV");
-            if (0..LEVELING_RATE.len()).any(|rate| self.changed(rate)) {
+            asked.0 = can_save && widget::button_styled(
+                ui,
+                egui::RichText::new("+ New leveling rate").color(if at_limit { color::MUTED } else { color::WHITE }),
+                Some(if at_limit { color::SURFACE } else { color::ACCENT }),
+            );
+            asked.1 = widget::button(ui, "Export");
+            asked.2 = can_save && widget::button(ui, "Import");
+            asked.3 = widget::button(ui, "Reset");
+            asked.4 = can_save && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+            let count = self.rate_count();
+            if (0..count).any(|rate| self.changed(rate)) {
                 widget::badge(ui, "Not saved", color::AMBER);
             } else if self.from_card.contains(&self.rate) {
                 widget::badge(ui, "From the SD card", color::TEAL);
@@ -449,7 +492,7 @@ impl LevelingRate {
         let line = |curve: &Curve| -> Vec<egui::Pos2> {
             levels.clone().filter_map(|level| view.value(curve, level).map(|value| point_pos(plot, axis, level, value))).collect()
         };
-        let chosen_color = RATE_COLORS[self.rate.min(REAL_RATES - 1) * usize::from(self.rate < REAL_RATES)];
+        let chosen_color = rate_color(self.rate);
 
         // The levels of the box "Between two levels".
         if view == View::Total {
@@ -458,9 +501,9 @@ impl LevelingRate {
             painter.rect_filled(band, egui::Rounding::ZERO, chosen_color.linear_multiply(0.10));
         }
         // The other rates, thin.
-        for other in (0..REAL_RATES).filter(|&other| other != self.rate) {
+        for other in (0..self.rate_count()).filter(|&other| other != self.rate) {
             if let Some(curve) = table.curve(other) {
-                painter.add(egui::Shape::line(line(curve), egui::Stroke::new(1.5_f32, RATE_COLORS[other].linear_multiply(0.75))));
+                painter.add(egui::Shape::line(line(curve), egui::Stroke::new(1.5_f32, rate_color(other).linear_multiply(0.75))));
             }
         }
         // The saved table of this rate, thin and grey, while the user changes it.
@@ -489,10 +532,11 @@ impl LevelingRate {
 
         // The legend: a click on a name chooses the rate.
         let mut x = plot.left();
-        for (rate, name) in LEVELING_RATE.iter().enumerate().take(REAL_RATES) {
-            let text_rect = painter.text(egui::pos2(x + 14.0, rect.top() + 12.0), egui::Align2::LEFT_CENTER, *name, egui::FontId::proportional(12.5), if rate == self.rate { color::TEXT } else { color::MUTED });
+        for rate in 0..self.rate_count() {
+            let name = self.rate_name(rate);
+            let text_rect = painter.text(egui::pos2(x + 14.0, rect.top() + 12.0), egui::Align2::LEFT_CENTER, &name, egui::FontId::proportional(12.5), if rate == self.rate { color::TEXT } else { color::MUTED });
             let swatch = egui::Rect::from_center_size(egui::pos2(x + 5.0, text_rect.center().y), egui::vec2(10.0, 10.0));
-            painter.rect_filled(swatch, egui::Rounding::same(2.0), RATE_COLORS[rate]);
+            painter.rect_filled(swatch, egui::Rounding::same(2.0), rate_color(rate));
             let hit = egui::Rect::from_min_max(egui::pos2(x - 2.0, rect.top() + 2.0), egui::pos2(text_rect.right() + 4.0, rect.top() + 24.0));
             let legend = ui.interact(hit, egui::Id::new(("leveling_rate_legend", rate)), egui::Sense::click());
             if legend.hovered() {
@@ -506,9 +550,10 @@ impl LevelingRate {
             x = text_rect.right() + 22.0;
         }
 
-        // The numbers of the six rates at the column under the pointer.
+        // The numbers of the rates at the column under the pointer.
         if let Some(level) = shown {
-            let rows: Vec<(usize, String)> = (0..REAL_RATES)
+            let count = self.rate_count();
+            let rows: Vec<(usize, String)> = (0..count)
                 .map(|rate| (rate, table.curve(rate).and_then(|curve| view.value(curve, level)).map_or("-".to_string(), thousands)))
                 .collect();
             let title = view.describe(level);
@@ -517,8 +562,8 @@ impl LevelingRate {
                 for (rate, value) in rows {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
-                        ui.colored_label(RATE_COLORS[rate], "■");
-                        ui.label(LEVELING_RATE[rate]);
+                        ui.colored_label(rate_color(rate), "■");
+                        ui.label(self.rate_name(rate));
                         ui.label(egui::RichText::new(value).strong());
                     });
                 }
@@ -534,54 +579,74 @@ impl LevelingRate {
         let editable = view.editable();
         if !editable.is_empty() {
             self.selected = clamp_level(self.selected, &editable);
-            widget::card(ui, |ui| {
-                ui.label(widget::title("Point"));
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(widget::hint("Level"));
-                    let mut level = self.selected as u32;
-                    if widget::spin(ui, &mut level, *editable.start() as f64, *editable.end() as f64) {
-                        self.selected = level as usize;
-                    }
-                    let mut changed = false;
-                    match view {
-                        View::Total => {
-                            ui.label(widget::hint("Experience"));
-                            let mut value = curve.experience(self.selected).unwrap_or(0);
-                            if widget::spin(ui, &mut value, 0.0, TOTAL_CAP as f64) {
-                                changed = curve.set_experience(self.selected, value, TOTAL_CAP, true);
-                            }
-                            let next = if self.selected < MAX_LEVEL { curve.between(self.selected, self.selected + 1) } else { None };
-                            ui.label(widget::hint(&format!("To the next level: {}", next.map_or("-".to_string(), thousands))));
+            let half = (ui.available_width() - 10.0) / 2.0;
+            let card_width = (half - 36.0).max(160.0);
+            ui.horizontal_top(|ui| {
+                widget::card(ui, |ui| {
+                    ui.set_width(card_width);
+                    ui.label(widget::title("Point"));
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(widget::hint("Level"));
+                        let mut level = self.selected as u32;
+                        if widget::spin(ui, &mut level, *editable.start() as f64, *editable.end() as f64) {
+                            self.selected = level as usize;
                         }
-                        _ => {
-                            ui.label(widget::hint("Experience to the next level"));
-                            let mut value = curve.between(self.selected, self.selected + 1).unwrap_or(0);
-                            if widget::spin(ui, &mut value, 0.0, TOTAL_CAP as f64) {
-                                changed = curve.set_gain(self.selected, value, TOTAL_CAP);
+                        let mut changed = false;
+                        match view {
+                            View::Total => {
+                                ui.label(widget::hint("Experience"));
+                                let mut value = curve.experience(self.selected).unwrap_or(0);
+                                if widget::spin(ui, &mut value, 0.0, TOTAL_CAP as f64) {
+                                    changed = curve.set_experience(self.selected, value, TOTAL_CAP, true);
+                                }
+                                let next = if self.selected < MAX_LEVEL { curve.between(self.selected, self.selected + 1) } else { None };
+                                ui.label(widget::hint(&format!("To the next level: {}", next.map_or("-".to_string(), thousands))));
                             }
-                            ui.label(widget::hint(&format!("Total at level {}: {}", self.selected + 1, thousands(curve.experience(self.selected + 1).unwrap_or(0)))));
+                            _ => {
+                                ui.label(widget::hint("Experience to the next level"));
+                                let mut value = curve.between(self.selected, self.selected + 1).unwrap_or(0);
+                                if widget::spin(ui, &mut value, 0.0, TOTAL_CAP as f64) {
+                                    changed = curve.set_gain(self.selected, value, TOTAL_CAP);
+                                }
+                                ui.label(widget::hint(&format!("Total at level {}: {}", self.selected + 1, thousands(curve.experience(self.selected + 1).unwrap_or(0)))));
+                            }
                         }
-                    }
-                    if changed {
-                        self.status = None;
-                    }
+                        if changed {
+                            self.status = None;
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+                widget::card(ui, |ui| {
+                    ui.set_width(card_width);
+                    ui.label(widget::title("Between two levels"));
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(widget::hint("From level"));
+                        widget::spin(ui, &mut self.from, 1.0, MAX_LEVEL as f64);
+                        ui.label(widget::hint("to level"));
+                        widget::spin(ui, &mut self.to, 1.0, MAX_LEVEL as f64);
+                    });
+                    match curve.between(self.from as usize, self.to as usize) {
+                        Some(gain) => ui.label(egui::RichText::new(format!("{} experience", thousands(gain))).strong().size(18.0)),
+                        None => ui.label(widget::hint("The first level must not be above the second one.")),
+                    };
                 });
             });
-            ui.add_space(8.0);
-        }
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Between two levels"));
-            ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("From level"));
-                widget::spin(ui, &mut self.from, 1.0, MAX_LEVEL as f64);
-                ui.label(widget::hint("to level"));
-                widget::spin(ui, &mut self.to, 1.0, MAX_LEVEL as f64);
+        } else {
+            widget::card(ui, |ui| {
+                ui.label(widget::title("Between two levels"));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(widget::hint("From level"));
+                    widget::spin(ui, &mut self.from, 1.0, MAX_LEVEL as f64);
+                    ui.label(widget::hint("to level"));
+                    widget::spin(ui, &mut self.to, 1.0, MAX_LEVEL as f64);
+                });
+                match curve.between(self.from as usize, self.to as usize) {
+                    Some(gain) => ui.label(egui::RichText::new(format!("{} experience", thousands(gain))).strong().size(18.0)),
+                    None => ui.label(widget::hint("The first level must not be above the second one.")),
+                };
             });
-            match curve.between(self.from as usize, self.to as usize) {
-                Some(gain) => ui.label(egui::RichText::new(format!("{} experience", thousands(gain))).strong().size(18.0)),
-                None => ui.label(widget::hint("The first level must not be above the second one.")),
-            };
-        });
+        }
     }
 
     /// The Pokémon that use the chosen rate. A click opens the Species page on that Pokémon.
@@ -606,7 +671,26 @@ impl LevelingRate {
         if let (Some(table), Some(curve)) = (self.table.as_mut(), original) {
             table.set_curve(self.rate, curve);
             self.status = Some((true, "The table comes from the romfs again. Save to write it on the SD card.".into()));
+        } else if self.rate >= LEVELING_RATE.len() {
+            self.status = Some((false, "This custom leveling rate does not exist in the romfs.".into()));
         }
+    }
+
+    /// Duplicates the current curve or a default curve to create a new custom leveling rate.
+    fn add_rate(&mut self) {
+        if self.rate_count() >= MAX_RATES {
+            self.status = Some((false, format!("The maximum limit of {MAX_RATES} leveling rates has been reached.")));
+            return;
+        }
+        let Some(table) = self.table.as_mut() else { return };
+        let template = table.curve(self.rate).cloned().or_else(|| table.curve(0).cloned());
+        let Some(curve) = template else { return };
+        let Some(new_id) = table.push_curve(curve) else {
+            self.status = Some((false, format!("The maximum limit of {MAX_RATES} leveling rates has been reached.")));
+            return;
+        };
+        self.rate = new_id;
+        self.status = Some((true, format!("Leveling rate {new_id} was added. Edit its curve and click Save.")));
     }
 
     /// Writes the six real tables to a CSV file that the user chooses.
@@ -638,10 +722,20 @@ impl LevelingRate {
         let (Some(table), Some(saved)) = (self.table.as_mut(), self.saved.as_mut()) else { return Err("The tables are not read.".into()) };
         let mut written = 0;
         for (rate, curve) in tables {
+            if rate >= MAX_RATES {
+                continue;
+            }
             if table.curve(rate) == Some(&curve) && saved.curve(rate) == Some(&curve) {
                 continue;
             }
             curve.save(sd, rate)?;
+            let default_curve = table.curve(0).cloned().unwrap_or_else(|| curve.clone());
+            while table.count() <= rate && table.count() < MAX_RATES {
+                table.push_curve(default_curve.clone());
+            }
+            while saved.count() <= rate && saved.count() < MAX_RATES {
+                saved.push_curve(default_curve.clone());
+            }
             table.set_curve(rate, curve.clone());
             saved.set_curve(rate, curve);
             if !self.from_card.contains(&rate) {
@@ -656,7 +750,7 @@ impl LevelingRate {
     fn save(&mut self, session: &Session) {
         let (Some(table), Some(sd)) = (&self.table, &session.sd) else { return };
         let mut written = Vec::new();
-        for rate in (0..LEVELING_RATE.len()).filter(|&rate| self.changed(rate)) {
+        for rate in (0..self.rate_count()).filter(|&rate| self.changed(rate)) {
             let Some(curve) = table.curve(rate) else { continue };
             if let Err(message) = curve.save(sd, rate) {
                 self.status = Some((false, message));
@@ -667,6 +761,10 @@ impl LevelingRate {
         if let (Some(saved), Some(table)) = (self.saved.as_mut(), self.table.as_ref()) {
             for &rate in &written {
                 if let Some(curve) = table.curve(rate) {
+                    while saved.count() <= rate && saved.count() < MAX_RATES {
+                        let default_curve = saved.curve(0).cloned().unwrap_or_else(|| curve.clone());
+                        saved.push_curve(default_curve);
+                    }
                     saved.set_curve(rate, curve.clone());
                 }
                 if !self.from_card.contains(&rate) {
@@ -697,7 +795,7 @@ fn tab(ui: &mut egui::Ui, id: (&str, usize), text: &str, place: usize, chosen: u
 
 impl Module for LevelingRate {
     fn unsaved(&self) -> bool {
-        (0..LEVELING_RATE.len()).any(|rate| self.changed(rate))
+        (0..self.rate_count()).any(|rate| self.changed(rate))
     }
 
     fn title(&self) -> &str {
@@ -738,20 +836,23 @@ impl Module for LevelingRate {
         if self.table.is_none() {
             return;
         }
-        let (reset, save, export, import) = self.tool_bar(ui, session.sd.is_some());
+        let (new_rate, export, import, reset, save) = self.tool_bar(ui, session.sd.is_some());
         ui.add_space(8.0);
         self.rate_tabs(ui);
-        if reset {
-            self.reset();
-        }
-        if save {
-            self.save(session);
+        if new_rate {
+            self.add_rate();
         }
         if export {
             self.export_csv();
         }
         if import {
             self.import_csv(session);
+        }
+        if reset {
+            self.reset();
+        }
+        if save {
+            self.save(session);
         }
         ui.add_space(8.0);
         let wide = ui.available_width() >= 760.0 + LIST_CARD_WIDTH;
@@ -997,5 +1098,59 @@ mod test {
     /// The table of the rate 0 as the romfs has it.
     fn before_of_rate_0(page: &LevelingRate) -> Curve {
         page.romfs.as_ref().unwrap().curve(0).unwrap().clone()
+    }
+
+    #[test]
+    fn custom_leveling_rate_can_be_added_and_saved() {
+        let bytes: Vec<u8> = (0..=MAX_LEVEL as u32).flat_map(|n| (n * 1000).to_le_bytes()).collect();
+        let curve = Curve::from_bytes(&bytes).unwrap();
+        let curves = vec![curve; 8];
+        let table = ExperienceTable::from_curves(curves).unwrap();
+        let mut page = LevelingRate::default();
+        page.table = Some(table.clone());
+        page.saved = Some(table.clone());
+        page.romfs = Some(table);
+
+        assert_eq!(page.rate_count(), 8);
+        page.add_rate();
+        assert_eq!(page.rate_count(), 9);
+        assert_eq!(page.rate, 8);
+        assert!(page.unsaved());
+        assert!(page.changed(8));
+
+        let folder = std::env::temp_dir().join(format!("sango_test_new_rate_{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let session = Session {
+            sd: Some(sango_core::SdCard::open(folder.to_str().unwrap()).unwrap()),
+            ..Session::default()
+        };
+        page.save(&session);
+        assert!(!page.changed(8));
+        assert!(!page.unsaved());
+        assert!(folder.join("leveling_rate").join("8.bin").exists());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn adding_rates_is_capped_at_sixteen() {
+        let bytes: Vec<u8> = (0..=MAX_LEVEL as u32).flat_map(|n| (n * 1000).to_le_bytes()).collect();
+        let curve = Curve::from_bytes(&bytes).unwrap();
+        let curves = vec![curve; 8];
+        let table = ExperienceTable::from_curves(curves).unwrap();
+        let mut page = LevelingRate::default();
+        page.table = Some(table.clone());
+        page.saved = Some(table.clone());
+        page.romfs = Some(table);
+
+        assert_eq!(page.rate_count(), 8);
+        for i in 8..16 {
+            page.add_rate();
+            assert_eq!(page.rate, i);
+        }
+        assert_eq!(page.rate_count(), 16);
+        // Attempting to add a 17th rate fails and sets an informative status
+        page.add_rate();
+        assert_eq!(page.rate_count(), 16);
+        assert_eq!(page.status, Some((false, "The maximum limit of 16 leveling rates has been reached.".into())));
     }
 }

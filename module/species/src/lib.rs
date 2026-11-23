@@ -1290,6 +1290,40 @@ const ITEM_LIST_ID: &str = "species_item_list";
 /// The key of the names of the abilities in the memory of the interface.
 const ABILITY_LIST_ID: &str = "species_ability_list";
 
+/// The key of the names of the leveling rates in the memory of the interface.
+const LEVELING_RATE_LIST_ID: &str = "species_leveling_rate_list";
+
+/// The names of the leveling rates: the rates of the game, then the custom rates of the SD card.
+fn leveling_rate_names(ctx: &egui::Context, sd: Option<&sango_core::SdCard>) -> std::sync::Arc<Vec<String>> {
+    let id = egui::Id::new(LEVELING_RATE_LIST_ID);
+    let cached: Option<(std::time::Instant, std::sync::Arc<Vec<String>>)> = ctx.data(|d| d.get_temp(id));
+    if let Some((when, names)) = cached {
+        if when.elapsed() < std::time::Duration::from_secs(1) {
+            return names;
+        }
+    }
+    let mut names: Vec<String> = names::LEVELING_RATE.iter().map(|&s| s.to_string()).collect();
+    if let Some(sd) = sd {
+        let mut max_rate = names.len();
+        for path in sd.files_in("leveling_rate") {
+            let Some(file_name) = path.strip_prefix("leveling_rate/").and_then(|p| p.strip_suffix(".bin")) else { continue };
+            let Ok(rate) = file_name.parse::<usize>() else { continue };
+            if rate >= sango_core::experience::MAX_RATES {
+                continue;
+            }
+            if rate + 1 > max_rate {
+                max_rate = rate + 1;
+            }
+        }
+        for rate in names.len()..max_rate {
+            names.push(format!("Rate {rate}"));
+        }
+    }
+    let names = std::sync::Arc::new(names);
+    ctx.data_mut(|d| d.insert_temp(id, (std::time::Instant::now(), names.clone())));
+    names
+}
+
 /// The names of the abilities: the abilities of the game, then the new ones of the SD card. The card is read again once each
 /// second at most, so a new ability shows in the lists soon after it is saved.
 fn ability_names(ctx: &egui::Context, sd: Option<&sango_core::SdCard>) -> std::sync::Arc<Vec<String>> {
@@ -1641,6 +1675,14 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     item_picker(ui, "item_5", &mut d.item_5);
                 },
             );
+            let rate_list = leveling_rate_names(ui.ctx(), None);
+            let mut rate_refs: Vec<String> = (*rate_list).clone();
+            if (d.leveling_rate as usize) >= rate_refs.len() && (d.leveling_rate as usize) < sango_core::experience::MAX_RATES {
+                for r in rate_refs.len()..=(d.leveling_rate as usize) {
+                    rate_refs.push(format!("Rate {r}"));
+                }
+            }
+            let rate_strs: Vec<&str> = rate_refs.iter().map(|s| s.as_str()).collect();
             line_with_note(
                 ui,
                 "Leveling rate",
@@ -1650,7 +1692,7 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     example: Some((Field::LevelingRate, d.leveling_rate as u32)),
                 }),
                 |ui| {
-                    menu(ui, "leveling_rate", &mut d.leveling_rate, &names::LEVELING_RATE, 165.0);
+                    menu(ui, "leveling_rate", &mut d.leveling_rate, &rate_strs, 165.0);
                 },
             );
             line_with_note(
@@ -2023,6 +2065,7 @@ impl Module for Species {
         }
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(ITEM_LIST_ID), self.item_list.clone()));
         ability_names(ui.ctx(), session.sd.as_ref());
+        leveling_rate_names(ui.ctx(), session.sd.as_ref());
         custom_moves::refresh(session.sd.as_ref());
         if let Ok(mut list) = self.item_list.lock() {
             list.refresh_custom(session.sd.as_ref());

@@ -18,6 +18,9 @@ pub fn sd_path(rate: usize) -> String {
 /// The number of Leveling rates in the archive.
 pub const RATE_COUNT: usize = 8;
 
+/// The maximum number of Leveling rates supported.
+pub const MAX_RATES: usize = 16;
+
 /// The highest level that a table has.
 pub const MAX_LEVEL: usize = 100;
 
@@ -137,15 +140,30 @@ impl ExperienceTable {
         Ok(ExperienceTable { curves })
     }
 
-    /// Builds the tables from one curve for each Leveling rate (8 in all).
+    /// Builds the tables from one curve for each Leveling rate (at least 8 in all).
     pub fn from_curves(curves: Vec<Curve>) -> Result<ExperienceTable, String> {
-        if curves.len() != RATE_COUNT {
-            return Err(format!("There are {} tables. There must be {RATE_COUNT}.", curves.len()));
+        if curves.len() < RATE_COUNT {
+            return Err(format!("There are {} tables. There must be at least {RATE_COUNT}.", curves.len()));
         }
         Ok(ExperienceTable { curves })
     }
 
-    /// The table of a Leveling rate (0 to 7).
+    /// The number of Leveling rates.
+    pub fn count(&self) -> usize {
+        self.curves.len()
+    }
+
+    /// Adds a new Leveling rate and returns its index. Returns None if MAX_RATES is reached.
+    pub fn push_curve(&mut self, curve: Curve) -> Option<usize> {
+        if self.curves.len() >= MAX_RATES {
+            return None;
+        }
+        let index = self.curves.len();
+        self.curves.push(curve);
+        Some(index)
+    }
+
+    /// The table of a Leveling rate (0 to 7, or higher for new rates).
     pub fn curve(&self, rate: usize) -> Option<&Curve> {
         self.curves.get(rate)
     }
@@ -176,6 +194,26 @@ impl ExperienceTable {
                 from_card.push(rate);
             }
         }
+        for path in sd.files_in("leveling_rate") {
+            let Some(file_name) = path.strip_prefix("leveling_rate/").and_then(|p| p.strip_suffix(".bin")) else { continue };
+            let Ok(rate) = file_name.parse::<usize>() else { continue };
+            if rate >= MAX_RATES {
+                continue;
+            }
+            if let Some(curve) = sd.read(&path).and_then(|bytes| Curve::from_bytes(&bytes).ok()) {
+                let default_curve = self.curves.first().cloned().unwrap_or_else(|| curve.clone());
+                while self.curves.len() <= rate && self.curves.len() < MAX_RATES {
+                    self.curves.push(default_curve.clone());
+                }
+                if rate < self.curves.len() {
+                    self.curves[rate] = curve;
+                    if !from_card.contains(&rate) {
+                        from_card.push(rate);
+                    }
+                }
+            }
+        }
+        from_card.sort();
         from_card
     }
 }
@@ -312,7 +350,27 @@ mod test {
         assert_eq!(table.overlay_sd(&sd), [4]);
         assert_eq!(table.curve(4), Some(&curve));
         assert_eq!(table.curve(3), Some(&Curve::from_bytes(&sample()).unwrap()));
+
+        // Add custom rate 8 on SD card
+        let mut custom_curve = Curve::from_bytes(&sample()).unwrap();
+        custom_curve.set_experience(60, 200, 20_000, true);
+        custom_curve.save(&sd, 8).unwrap();
+        assert_eq!(table.overlay_sd(&sd), [4, 8]);
+        assert_eq!(table.count(), 9);
+        assert_eq!(table.curve(8), Some(&custom_curve));
+
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn custom_rates_are_capped_at_max_rates() {
+        let curve = Curve::from_bytes(&sample()).unwrap();
+        let mut table = ExperienceTable::from_curves(vec![curve.clone(); RATE_COUNT]).unwrap();
+        for i in RATE_COUNT..MAX_RATES {
+            assert_eq!(table.push_curve(curve.clone()), Some(i));
+        }
+        assert_eq!(table.count(), MAX_RATES);
+        assert_eq!(table.push_curve(curve), None);
     }
 
     #[test]
