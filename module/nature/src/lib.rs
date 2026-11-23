@@ -8,21 +8,13 @@
 //! A new nature works for the statistics only: the game does not know it for the flavors (Pokéblocks, berries that confuse) and for the
 //! names, so the name of a new nature shows only in Sango Studio.
 
-use sango_core::natures::{Nature as Row, NatureTable, GAME_COUNT, MAX_CHANGE, MAX_COUNT, NAME_LANGUAGES, STATS};
-use sango_core::text::{TextFile, LANGUAGES};
-use sango_core::{Dump, Garc, SdCard};
+use sango_core::natures::{Nature as Row, NatureColor, NatureTable, GAME_COUNT, GAME_NATURE_NAMES, MAX_CHANGE, MAX_COUNT, NAME_LANGUAGES, STATS};
+use sango_core::SdCard;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 const FILE: &str = "nature/natures.csv";
-
-/// The file of the texts of the game with the names of the natures.
-const NAME_FILE: usize = 51;
-
-/// The language of each name column (the order of `NAME_LANGUAGES`) in the list of the languages of the game.
-const TEXT_LANGUAGE: [usize; 8] = [2, 0, 1, 3, 4, 5, 6, 7];
 
 /// The longest name of a new nature.
 const NAME_SIZE: usize = 16;
@@ -36,13 +28,11 @@ pub struct Nature {
     status: Option<(bool, String)>,
     /// The language of the names that the table shows (the place in `NAME_LANGUAGES`).
     language: usize,
-    /// The names of the natures of the game, for each language that was shown.
-    game_names: HashMap<usize, Vec<String>>,
 }
 
 impl Default for Nature {
     fn default() -> Self {
-        Nature { opened_for: None, table: NatureTable::game(), saved: NatureTable::game(), from_card: false, status: None, language: 0, game_names: HashMap::new() }
+        Nature { opened_for: None, table: NatureTable::game(), saved: NatureTable::game(), from_card: false, status: None, language: 0 }
     }
 }
 
@@ -84,32 +74,61 @@ impl Nature {
         });
     }
 
+    fn export_csv(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("natures.csv").save_file() else { return };
+        self.status = Some(match std::fs::write(&path, self.table.to_csv()) {
+            Ok(()) => (true, format!("Exported natures.csv to {}.", path.display())),
+            Err(error) => (false, format!("{}: {error}", path.display())),
+        });
+    }
+
+    fn import_csv(&mut self) {
+        let Some(path) = rfd::FileDialog::new().add_filter("CSV", &["csv"]).pick_file() else { return };
+        let result = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))
+            .and_then(|text| NatureTable::parse(&text));
+        self.status = Some(match result {
+            Ok(table) => {
+                self.table = table;
+                (true, format!("Imported natures from {}.", path.display()))
+            }
+            Err(message) => (false, message),
+        });
+    }
+
     fn tool_bar(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>) {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
+                let full = self.table.natures.len() >= MAX_COUNT;
+                ui.add_enabled_ui(!full, |ui| {
+                    if widget::button_styled(ui, egui::RichText::new("+ New nature").color(color::WHITE), Some(color::ACCENT)) {
+                        let number = self.table.natures.len() + 1;
+                        self.table.natures.push(Row {
+                            name: format!("Nature {number}"),
+                            change: [0; 5],
+                            other_names: Default::default(),
+                            color: NatureColor::Blue,
+                        });
+                    }
+                });
+                if widget::button(ui, "Export") {
+                    self.export_csv();
+                }
+                if widget::button(ui, "Import") {
+                    self.import_csv();
+                }
+                ui.add_enabled_ui(!self.table.is_game(), |ui| {
+                    if widget::confirm_button(ui, "Reset", "Click again to reset") {
+                        self.table = NatureTable::game();
+                        self.status = Some((true, "Reset all natures to default.".to_string()));
+                    }
+                });
                 let changed = self.table != self.saved;
                 ui.add_enabled_ui(changed && sd.is_some(), |ui| {
-                    if widget::button(ui, "Save") {
+                    if widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
                         if let Some(sd) = sd {
                             self.save(sd);
                         }
-                    }
-                });
-                ui.add_enabled_ui(changed, |ui| {
-                    if widget::button(ui, "Undo") {
-                        self.table = self.saved.clone();
-                        self.status = None;
-                    }
-                });
-                if !self.table.is_game() && widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                    self.table = NatureTable::game();
-                    self.status = None;
-                }
-                let full = self.table.natures.len() >= MAX_COUNT;
-                ui.add_enabled_ui(!full, |ui| {
-                    if widget::button(ui, "Add a nature") {
-                        let number = self.table.natures.len() + 1;
-                        self.table.natures.push(Row { name: format!("Nature {number}"), change: [0; 5], other_names: Default::default() });
                     }
                 });
                 if full {
@@ -129,50 +148,30 @@ impl Nature {
         });
     }
 
-    /// The names of the natures of the game in a language: the texts of the game, else the English names.
-    fn game_names_for(&mut self, dump: Option<&Dump>, language: usize) -> Vec<String> {
-        if let Some(found) = self.game_names.get(&language) {
-            return found.clone();
-        }
-        let from_game: Vec<String> = dump
-            .and_then(|d| Garc::open(&d.archive(LANGUAGES[TEXT_LANGUAGE[language]].archive)).ok())
-            .and_then(|garc| garc.first_file(NAME_FILE).and_then(|bytes| TextFile::from_bytes(bytes).ok()))
-            .map(|file| (0..GAME_COUNT).map(|n| file.text(n).unwrap_or_default()).collect())
-            .unwrap_or_default();
-        let names = if from_game.len() == GAME_COUNT { from_game } else { (0..GAME_COUNT).map(|n| Row::game(n).name).collect() };
-        self.game_names.insert(language, names.clone());
-        names
-    }
-
-    fn table_card(&mut self, ui: &mut egui::Ui, dump: Option<&Dump>) {
+    fn table_card(&mut self, ui: &mut egui::Ui) {
         widget::card(ui, |ui| {
-            ui.label(widget::hint(
-                "Write the change of each statistic in percent. +10 raises it by 10 % and -10 lowers it by 10 % (like the natures of the game), +50 raises it \
-                 by 50 %, -200 lowers it by 200 %, 0 changes nothing. The new value is the value times (100 + the change), divided by 100, and a statistic \
-                 is never under 1. The change can be from -1000 to 1000, on any nature.",
-            ));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Names in"));
-                for (place, name) in NAME_LANGUAGES.iter().enumerate() {
-                    if widget::tab_button(ui, name, self.language == place, false).clicked() {
-                        self.language = place;
-                    }
-                }
+            ui.horizontal(|ui| {
+                ui.label("Language:");
+                egui::ComboBox::from_id_salt("nature_language_combo")
+                    .selected_text(NAME_LANGUAGES.get(self.language).copied().unwrap_or("English"))
+                    .width(180.0)
+                    .show_ui(ui, |ui| {
+                        for (place, name) in NAME_LANGUAGES.iter().enumerate() {
+                            if ui.selectable_label(self.language == place, *name).clicked() {
+                                self.language = place;
+                            }
+                        }
+                    });
             });
-            ui.label(widget::hint(
-                "The game shows these names in its own language. You can rename the natures of the game too: a name that you leave empty keeps the name of the \
-                 game (grey). For a new nature (number 25 and more), an empty name is the English name.",
-            ));
             ui.add_space(6.0);
-            let game_names = self.game_names_for(dump, self.language);
             let language = self.language;
             let mut remove = None;
             let mut reset = None;
             let mut restore_name = None;
             let count = self.table.natures.len();
-            egui::Grid::new("nature_table").num_columns(9).spacing([12.0, 6.0]).striped(true).show(ui, |ui| {
-                ui.label(widget::hint("Nature"));
+            egui::Grid::new("nature_table_v3").num_columns(10).spacing([12.0, 6.0]).striped(true).show(ui, |ui| {
+                ui.add_sized([140.0, 0.0], egui::Label::new(widget::hint("Nature")));
+                ui.label(widget::hint("Color"));
                 for name in STATS {
                     ui.label(widget::hint(&format!("{name} (%)")));
                 }
@@ -182,35 +181,50 @@ impl Nature {
                 ui.end_row();
                 for number in 0..count {
                     let is_new = number >= GAME_COUNT;
-                    let game = if is_new { Row { name: String::new(), change: [0; 5], other_names: Default::default() } } else { Row::game(number) };
-                    if !is_new {
-                        // A nature of the game: its name can be changed, an empty name is the name of the game.
-                        let shown = game_names.get(number).cloned().unwrap_or_else(|| game.name.clone());
-                        let text = if language == 0 { &mut self.table.natures[number].name } else { &mut self.table.natures[number].other_names[language - 1] };
-                        let response = ui.add(egui::TextEdit::singleline(text).hint_text(shown).desired_width(140.0).char_limit(NAME_SIZE));
-                        if language == 0 && response.lost_focus() && self.table.natures[number].name.is_empty() {
-                            restore_name = Some(number);
-                        }
-                    } else if is_new {
-                        if language == 0 {
-                            ui.add(egui::TextEdit::singleline(&mut self.table.natures[number].name).desired_width(140.0).char_limit(NAME_SIZE));
-                        } else {
-                            let english = self.table.natures[number].name.clone();
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.table.natures[number].other_names[language - 1])
-                                    .hint_text(english)
-                                    .desired_width(140.0)
-                                    .char_limit(NAME_SIZE),
-                            );
-                        }
+                    let game = if is_new { Row { name: String::new(), change: [0; 5], other_names: Default::default(), color: NatureColor::Blue } } else { Row::game(number) };
+                    let text = if language == 0 {
+                        &mut self.table.natures[number].name
+                    } else {
+                        &mut self.table.natures[number].other_names[language - 1]
+                    };
+                    let response = ui.add_sized([140.0, ui.spacing().interact_size.y], egui::TextEdit::singleline(text).char_limit(NAME_SIZE));
+                    if response.lost_focus() && text.is_empty() {
+                        restore_name = Some(number);
                     }
+
+                    // Color dropdown
+                    let color = &mut self.table.natures[number].color;
+                    let color_text = match color {
+                        NatureColor::Blue => egui::RichText::new("Blue").color(egui::Color32::from_rgb(0, 140, 255)),
+                        NatureColor::Red => egui::RichText::new("Red").color(egui::Color32::from_rgb(255, 70, 70)),
+                        NatureColor::Green => egui::RichText::new("Green").color(egui::Color32::from_rgb(0, 192, 0)),
+                        NatureColor::Default => egui::RichText::new("None").color(egui::Color32::from_rgb(180, 180, 180)),
+                    };
+                    egui::ComboBox::from_id_salt(("nature_color", number))
+                        .selected_text(color_text)
+                        .width(75.0)
+                        .show_ui(ui, |ui| {
+                            for c in NatureColor::ALL {
+                                let label = match c {
+                                    NatureColor::Blue => egui::RichText::new("Blue").color(egui::Color32::from_rgb(0, 140, 255)),
+                                    NatureColor::Red => egui::RichText::new("Red").color(egui::Color32::from_rgb(255, 70, 70)),
+                                    NatureColor::Green => egui::RichText::new("Green").color(egui::Color32::from_rgb(0, 192, 0)),
+                                    NatureColor::Default => egui::RichText::new("None").color(egui::Color32::from_rgb(180, 180, 180)),
+                                };
+                                ui.selectable_value(color, c, label);
+                            }
+                        });
+
                     for stat in 0..5 {
                         widget::spin(ui, &mut self.table.natures[number].change[stat], -f64::from(MAX_CHANGE), f64::from(MAX_CHANGE));
                     }
                     ui.label(widget::hint(&self.table.natures[number].summary()));
-                    let changed = self.table.natures[number].change != game.change || (!is_new && (self.table.natures[number].name != game.name || self.table.natures[number].other_names != game.other_names));
+                    let changed = self.table.natures[number].change != game.change
+                        || (!is_new && (self.table.natures[number].name != game.name
+                            || self.table.natures[number].other_names != game.other_names
+                            || self.table.natures[number].color != game.color));
                     if changed {
-                        if widget::button(ui, if is_new { "Clear" } else { "Game" }) {
+                        if widget::button(ui, "Reset") {
                             reset = Some(number);
                         }
                     } else {
@@ -225,13 +239,21 @@ impl Nature {
                 }
             });
             if let Some(number) = restore_name {
-                self.table.natures[number].name = Row::game(number).name;
+                if language == 0 {
+                    self.table.natures[number].name = Row::game(number).name;
+                } else if number < GAME_COUNT {
+                    self.table.natures[number].other_names[language - 1] = GAME_NATURE_NAMES[language][number].to_string();
+                }
             }
             if let Some(number) = reset {
                 let game = if number >= GAME_COUNT { None } else { Some(Row::game(number)) };
                 self.table.natures[number].change = game.as_ref().map_or([0; 5], |g| g.change);
+                self.table.natures[number].color = NatureColor::Blue;
                 if let Some(game) = game {
                     self.table.natures[number].name = game.name;
+                    self.table.natures[number].other_names = game.other_names;
+                } else {
+                    self.table.natures[number].name = format!("Nature {}", number + 1);
                     self.table.natures[number].other_names = Default::default();
                 }
             }
@@ -269,8 +291,8 @@ impl Module for Nature {
         let sd = session.sd.clone();
         self.tool_bar(ui, sd.as_ref());
         ui.add_space(6.0);
-        egui::ScrollArea::vertical().id_salt("nature_scroll").auto_shrink([false, false]).show(ui, |ui| {
-            self.table_card(ui, session.dump.as_ref());
+        egui::ScrollArea::both().id_salt("nature_scroll").auto_shrink([false, false]).show(ui, |ui| {
+            self.table_card(ui);
         });
     }
 }

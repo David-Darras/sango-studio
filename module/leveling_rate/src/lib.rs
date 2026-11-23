@@ -655,7 +655,6 @@ impl LevelingRate {
         widget::card(ui, |ui| {
             ui.set_width(SpeciesTable::WIDTH);
             ui.label(widget::title(&format!("Pokémon with this rate ({})", list.len())));
-            ui.label(widget::hint("Click a Pokémon to open it in Species."));
             ui.add_space(4.0);
             if list.is_empty() {
                 ui.label(widget::hint("No Pokémon uses this rate."));

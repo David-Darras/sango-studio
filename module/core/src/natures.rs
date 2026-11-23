@@ -61,13 +61,109 @@ pub const GAME: [(&str, [i8; 5]); GAME_COUNT] = [
     ("Quirky", [0, 0, 0, 0, 0]),
 ];
 
+/// Built-in names of the 25 vanilla natures in all eight languages.
+pub const GAME_NATURE_NAMES: [&[&str; GAME_COUNT]; 8] = [
+    // 0: English
+    &[
+        "Hardy", "Lonely", "Brave", "Adamant", "Naughty", "Bold", "Docile", "Relaxed", "Impish",
+        "Lax", "Timid", "Hasty", "Serious", "Jolly", "Naive", "Modest", "Mild", "Quiet", "Bashful",
+        "Rash", "Calm", "Gentle", "Sassy", "Careful", "Quirky",
+    ],
+    // 1: Japanese
+    &[
+        "がんばりや", "さみしがり", "ゆうかん", "いじっぱり", "やんちゃ", "ずぶとい", "すなお", "のんき",
+        "わんぱく", "のうてんき", "おくびょう", "せっかち", "まじめ", "ようき", "むじゃき", "ひかえめ",
+        "おっとり", "れいせい", "てれや", "うっかりや", "おだやか", "おとなしい", "なまいき", "しんちょう",
+        "きまぐれ",
+    ],
+    // 2: Japanese (kanji)
+    &[
+        "がんばりや", "さみしがり", "ゆうかん", "いじっぱり", "やんちゃ", "ずぶとい", "すなお", "のんき",
+        "わんぱく", "のうてんき", "おくびょう", "せっかち", "まじめ", "ようき", "むじゃき", "ひかえめ",
+        "おっとり", "れいせい", "てれや", "うっかりや", "おだやか", "おとなしい", "なまいき", "しんちょう",
+        "きまぐれ",
+    ],
+    // 3: French
+    &[
+        "Hardi", "Solo", "Brave", "Rigide", "Mauvais", "Assuré", "Docile", "Relax", "Malin",
+        "Lâche", "Timide", "Pressé", "Sérieux", "Jovial", "Naïf", "Modeste", "Doux", "Discret",
+        "Pudique", "Foufou", "Calme", "Gentil", "Malpoli", "Prudent", "Bizarre",
+    ],
+    // 4: Italian
+    &[
+        "Ardita", "Schiva", "Audace", "Decisa", "Birbona", "Sicura", "Docile", "Placida", "Scaltra",
+        "Fiacca", "Timida", "Lesta", "Seria", "Allegra", "Ingenua", "Modesta", "Mite", "Quieta",
+        "Ritrosa", "Ardente", "Calma", "Gentile", "Vivace", "Cauta", "Furba",
+    ],
+    // 5: German
+    &[
+        "Robust", "Solo", "Mutig", "Hart", "Frech", "Kühn", "Sanft", "Locker", "Pfiffig", "Lasch",
+        "Scheu", "Hastig", "Ernst", "Froh", "Naiv", "Mäßig", "Mild", "Ruhig", "Zaghaft", "Hitzig",
+        "Still", "Zart", "Forsch", "Sacht", "Kauzig",
+    ],
+    // 6: Spanish
+    &[
+        "fuerte", "huraña", "audaz", "firme", "pícara", "osada", "dócil", "plácida", "agitada",
+        "floja", "miedosa", "activa", "seria", "alegre", "ingenua", "modesta", "afable", "mansa",
+        "tímida", "alocada", "serena", "amable", "grosera", "cauta", "rara",
+    ],
+    // 7: Korean
+    &[
+        "노력", "외로움", "용감", "고집", "개구쟁이", "대담", "온순", "무사태평", "장난꾸러기", "촐랑",
+        "겁쟁이", "성급", "성실", "명랑", "천진난만", "조심", "의젓", "냉정", "수줍음", "덜렁", "차분",
+        "얌전", "건방", "신중", "변덕",
+    ],
+];
+
+/// The display color of a nature in the Trainer Memo summary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NatureColor {
+    #[default]
+    Blue,
+    Red,
+    Green,
+    Default,
+}
+
+impl NatureColor {
+    pub const ALL: [NatureColor; 4] = [NatureColor::Blue, NatureColor::Red, NatureColor::Green, NatureColor::Default];
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            NatureColor::Blue => "Blue",
+            NatureColor::Red => "Red",
+            NatureColor::Green => "Green",
+            NatureColor::Default => "Default",
+        }
+    }
+
+    pub fn csv_str(&self) -> &'static str {
+        match self {
+            NatureColor::Blue => "blue",
+            NatureColor::Red => "red",
+            NatureColor::Green => "green",
+            NatureColor::Default => "none",
+        }
+    }
+
+    pub fn from_str(s: &str) -> NatureColor {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "red" | "1" | "rouge" => NatureColor::Red,
+            "green" | "3" | "vert" => NatureColor::Green,
+            "none" | "default" | "black" | "0" | "noir" => NatureColor::Default,
+            _ => NatureColor::Blue,
+        }
+    }
+}
+
 /// One nature: its name and its change for each statistic, in percent (0 changes nothing, 10 raises by 10 %, -10 lowers by 10 %).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Nature {
     pub name: String,
     pub change: [i16; 5],
-    /// The name in the other languages, in the order of `NAME_LANGUAGES` without English (an empty name is the English name).
+    /// The name in the other languages, in the order of `NAME_LANGUAGES` without English.
     pub other_names: [String; 7],
+    pub color: NatureColor,
 }
 
 impl Nature {
@@ -78,7 +174,11 @@ impl Nature {
         for (c, s) in change.iter_mut().zip(signs) {
             *c = 10 * i16::from(s);
         }
-        Nature { name: name.to_string(), change, other_names: Default::default() }
+        let mut other_names: [String; 7] = Default::default();
+        for (k, other) in other_names.iter_mut().enumerate() {
+            *other = GAME_NATURE_NAMES[k + 1][number].to_string();
+        }
+        Nature { name: name.to_string(), change, other_names, color: NatureColor::Blue }
     }
 
     /// The statistics that the nature changes, in words: `+10 % Attack, -10 % Defense`.
@@ -112,7 +212,13 @@ impl NatureTable {
 
     /// True when the table is the table of the game: nothing to write on the SD card.
     pub fn is_game(&self) -> bool {
-        *self == NatureTable::game()
+        self.natures.len() == GAME_COUNT
+            && self.natures.iter().enumerate().all(|(i, n)| {
+                n.change == Nature::game(i).change
+                    && (n.name.is_empty() || n.name == GAME[i].0)
+                    && n.other_names.iter().enumerate().all(|(k, o)| o.is_empty() || o == GAME_NATURE_NAMES[k + 1][i])
+                    && n.color == NatureColor::Blue
+            })
     }
 
     /// Reads the file `natures.csv`. A line that does not start with a digit is skipped. A nature that the file does not have is the nature of
@@ -142,27 +248,51 @@ impl NatureTable {
             }
             while table.natures.len() <= number {
                 let n = table.natures.len();
-                table.natures.push(Nature { name: format!("Nature {}", n + 1), change: [0; 5], other_names: Default::default() });
+                table.natures.push(Nature { name: format!("Nature {}", n + 1), change: [0; 5], other_names: Default::default(), color: NatureColor::Blue });
             }
-            let name = fields.get(6).filter(|n| !n.is_empty()).map_or_else(|| table.natures[number].name.clone(), |n| (*n).to_string());
+            let name = fields.get(6).filter(|n| !n.is_empty()).map_or_else(
+                || if number < GAME_COUNT { GAME[number].0.to_string() } else { table.natures[number].name.clone() },
+                |n| (*n).to_string(),
+            );
             let mut other_names: [String; 7] = Default::default();
             for (k, other) in other_names.iter_mut().enumerate() {
-                *other = fields.get(7 + k).map(|n| (*n).to_string()).unwrap_or_default();
+                let from_file = fields.get(7 + k).map(|n| (*n).to_string()).unwrap_or_default();
+                *other = if !from_file.is_empty() {
+                    from_file
+                } else if number < GAME_COUNT {
+                    GAME_NATURE_NAMES[k + 1][number].to_string()
+                } else {
+                    String::new()
+                };
             }
-            table.natures[number] = Nature { name, change, other_names };
+            let color = fields.get(14).filter(|c| !c.is_empty()).map_or(NatureColor::Blue, |c| NatureColor::from_str(c));
+            table.natures[number] = Nature { name, change, other_names, color };
         }
         Ok(table)
     }
 
     /// The text of the file `natures.csv`.
     pub fn to_csv(&self) -> String {
-        let mut text = String::from("number,attack,defense,special_attack,special_defense,speed,name,ja,ja_kanji,fr,it,de,es,ko\n");
+        let has_custom_color = self.natures.iter().any(|n| n.color != NatureColor::Blue);
+        let mut text = String::from(if has_custom_color {
+            "number,attack,defense,special_attack,special_defense,speed,name,ja,ja_kanji,fr,it,de,es,ko,color\n"
+        } else {
+            "number,attack,defense,special_attack,special_defense,speed,name,ja,ja_kanji,fr,it,de,es,ko\n"
+        });
         for (number, nature) in self.natures.iter().enumerate() {
             let c = nature.change;
-            let others: Vec<String> = nature.other_names.iter().map(|n| n.replace(',', " ")).collect();
-            // The name of the game is not written: an empty name keeps the text of the game.
+            let mut others = Vec::new();
+            for (k, other) in nature.other_names.iter().enumerate() {
+                let is_vanilla = number < GAME_COUNT && other == GAME_NATURE_NAMES[k + 1][number];
+                others.push(if is_vanilla { String::new() } else { other.replace(',', " ") });
+            }
             let name = if number < GAME_COUNT && nature.name == GAME[number].0 { String::new() } else { nature.name.replace(',', " ") };
-            text += &format!("{number},{},{},{},{},{},{},{}\n", c[0], c[1], c[2], c[3], c[4], name, others.join(","));
+            if has_custom_color {
+                let color_str = if nature.color == NatureColor::Blue { String::new() } else { nature.color.csv_str().to_string() };
+                text += &format!("{number},{},{},{},{},{},{},{},{}\n", c[0], c[1], c[2], c[3], c[4], name, others.join(","), color_str);
+            } else {
+                text += &format!("{number},{},{},{},{},{},{},{}\n", c[0], c[1], c[2], c[3], c[4], name, others.join(","));
+            }
         }
         text
     }
@@ -197,7 +327,7 @@ mod test {
     fn a_table_goes_through_its_file() {
         let mut table = NatureTable::game();
         table.natures[1].change = [25, -20, 0, 0, 0];
-        let mut cosmic = Nature { name: "Cosmic".into(), change: [0, -200, 20, 20, -30], other_names: Default::default() };
+        let mut cosmic = Nature { name: "Cosmic".into(), change: [0, -200, 20, 20, -30], other_names: Default::default(), color: NatureColor::Blue };
         cosmic.other_names[2] = "Cosmique".to_string();
         cosmic.other_names[6] = "코스믹".to_string();
         table.natures.push(cosmic);
