@@ -468,6 +468,19 @@ impl Library {
         self.store_user_pack(sd, Some(&old), pack, None)
     }
 
+    /// Removes a form of a species from the pack that owns it.
+    pub fn remove_form(&mut self, sd: &SdCard, species: &Ref, form: u16) -> Result<(), String> {
+        let place = self
+            .packs
+            .iter()
+            .position(|pack| self.is_active(&pack.id) && pack.forms.iter().any(|f| f.species == *species && f.form == form))
+            .ok_or("No installed pack owns this form.")?;
+        let old = self.packs[place].clone();
+        let mut pack = old.clone();
+        pack.forms.retain(|f| !(f.species == *species && f.form == form));
+        self.store_user_pack(sd, Some(&old), pack, None)
+    }
+
     /// Writes the pack of the user on the SD card and installs it. `new_model` is a model that the pack does not have yet. Nothing changes
     /// when this returns an error.
     fn store_user_pack(&mut self, sd: &SdCard, old: Option<&Pack>, mut pack: Pack, new_model: Option<(String, Vec<Vec<u8>>)>) -> Result<(), String> {

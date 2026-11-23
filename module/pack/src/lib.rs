@@ -453,6 +453,11 @@ mod test {
             assert_eq!(Table::from_bytes(&table.to_bytes().unwrap()).unwrap().forms[1].mega, condition, "the file keeps the condition");
         }
         assert!(library.set_mega(&sd, &Ref::Game(25), 4, MegaCondition::Move(9000)).is_err(), "a number that does not fit is refused");
+        library.remove_form(&sd, &Ref::Game(25), 4).unwrap();
+        library.save(&sd).unwrap();
+        let table = library.table().unwrap();
+        assert_eq!(table.forms[1].data, vec![0; pack::DATA_SIZE]);
+        assert_eq!(table.forms[1].mega, MegaCondition::Never);
         let _ = std::fs::remove_dir_all(&folder);
     }
 

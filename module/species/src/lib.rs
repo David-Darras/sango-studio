@@ -113,8 +113,16 @@ pub struct Species {
     search_focused: bool,
     /// The archive of the Pokémon icons.
     icon_garc: Option<Garc>,
+    /// The archive of the Mega Evolution tables (archive 193).
+    mega_garc: Option<Garc>,
+    /// The Mega Evolution table of the open species (archive 193).
+    pub(crate) mega_table: Option<sango_core::mega_evolution::MegaEvolutionTable>,
+    /// True when the Mega Evolution table came from the SD card.
+    mega_from_sd: bool,
     /// The icon textures, one per species: decoded at the first display, then kept.
     icon_textures: HashMap<usize, Option<egui::TextureHandle>>,
+    /// The form icon textures: decoded at the first display, then kept.
+    form_icon_textures: HashMap<(usize, usize), Option<egui::TextureHandle>>,
     /// The types and the base stats of all the species, for the species list.
     list_rows: Option<Vec<ListRow>>,
     /// The column that sorts the species list.
@@ -163,7 +171,11 @@ impl Default for Species {
             species_search: String::new(),
             search_focused: false,
             icon_garc: None,
+            mega_garc: None,
+            mega_table: None,
+            mega_from_sd: false,
             icon_textures: HashMap::new(),
+            form_icon_textures: HashMap::new(),
             list_rows: None,
             sort_column: SortColumn::Number,
             sort_descending: false,
@@ -289,6 +301,10 @@ fn modified_species(garc: Option<&Garc>, session: &Session) -> std::collections:
     }
     if let Ok(eggs) = Garc::open(&dump.archive(sango_core::learnset::EGG_ARCHIVE)) {
         note(sango_core::modified::changed_files(sd, "species/egg_moves", &|name| eggs.first_file(name.parse().ok()?).map(|bytes| bytes.to_vec())));
+    }
+    if let Ok(mega) = Garc::open(&dump.archive(sango_core::mega_evolution::ARCHIVE)) {
+        let names = sango_core::modified::changed_files(sd, "species/mega_evolution", &|name| mega.first_file(name.parse().ok()?).map(|bytes| bytes.to_vec()));
+        note(names.iter().filter_map(|name| name.parse::<usize>().ok().map(|species| species.to_string())).collect());
     }
     found
 }
@@ -436,6 +452,7 @@ impl Species {
         let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(self.species, self.form))).and_then(|b| SpeciesData::from_bytes(&b).ok());
         self.from_sd = on_card.is_some();
         self.load_shape(session);
+        self.load_mega_table(session);
         let file = self.garc.as_ref().map_or(self.species, |garc| file_index(garc, self.species, self.form));
         self.learnset.load(session.sd.as_ref(), self.species, self.form, file);
         self.evolution.load(session.sd.as_ref(), self.species, self.form, file);
@@ -478,6 +495,19 @@ impl Species {
         self.pokedex = on_card.or_else(|| self.read_pokedex_romfs().ok());
         self.shape = self.pokedex.as_ref().and_then(|e| e.shape(self.species, self.form)).unwrap_or(0);
         self.shape_baseline = self.shape;
+    }
+
+    /// Reads the Mega Evolution table of the open species: the SD card first, then the romfs.
+    fn load_mega_table(&mut self, session: &Session) {
+        let on_card = session.sd.as_ref()
+            .and_then(|sd| sd.read(&sango_core::mega_evolution::sd_path(self.species)))
+            .and_then(|b| sango_core::mega_evolution::MegaEvolutionTable::from_bytes(&b).ok());
+        self.mega_from_sd = on_card.is_some();
+        self.mega_table = on_card.or_else(|| {
+            self.mega_garc.as_ref()
+                .and_then(|g| g.first_file(self.species))
+                .and_then(|b| sango_core::mega_evolution::MegaEvolutionTable::from_bytes(b).ok())
+        });
     }
 
     /// Reads the list data of all the species: the SD card first, then the romfs.
@@ -759,7 +789,7 @@ impl Species {
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
-                } else if self.from_sd || self.pokedex_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() || self.cry_tab.from_card() {
+                } else if self.from_sd || self.pokedex_from_sd || self.mega_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() || self.cry_tab.from_card() {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else if self.data.is_some() {
                     widget::badge(ui, "From the romfs", color::GREEN);
@@ -820,6 +850,72 @@ impl Species {
             }
             Err(message) => self.status = Some((false, message)),
         }
+    }
+
+    /// Deletes a pack form of the open species.
+    pub(crate) fn delete_form(&mut self, session: &Session, form: u16) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        let species = self.pack_ref();
+        let result = sango_pack::Library::open(sd).and_then(|mut library| {
+            library.remove_form(sd, &species, form)?;
+            library.save(sd)
+        });
+        match result {
+            Ok(()) => {
+                let _ = sd.remove(&sd_path(self.species, form as usize));
+                extras::invalidate();
+                extras::refresh(Some(sd));
+                if self.form == form as usize {
+                    self.form = 0;
+                    self.loaded = None;
+                }
+                self.status = Some((true, format!("The form {form} of {} was deleted. Restart the game to see it.", species_name(self.species))));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// Changes an entry in the game mega evolution table for the open species and writes it to SD card.
+    pub(crate) fn set_game_mega(&mut self, session: &Session, entry_index: usize, entry: sango_core::mega_evolution::MegaEntry) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        let mut table = self.mega_table.clone().unwrap_or_else(sango_core::mega_evolution::MegaEvolutionTable::empty);
+        if entry_index < table.entries.len() {
+            table.entries[entry_index] = entry;
+        }
+        let bytes = table.to_bytes();
+        let path = sango_core::mega_evolution::sd_path(self.species);
+        let result = sd.write(&path, &bytes).and_then(|_| sd.mark_changed(&path));
+        match result {
+            Ok(()) => {
+                self.mega_from_sd = true;
+                self.mega_table = Some(table);
+                self.status = Some((true, format!("The Mega Evolution of {} was saved. Restart the game to see it.", species_name(self.species))));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// The texture of the icon of a species and a form: decoded at the first display, then kept.
+    pub(crate) fn form_icon_texture<'a>(
+        &'a mut self,
+        ctx: &egui::Context,
+        session: &sango_core::Session,
+        species: usize,
+        form: usize,
+    ) -> Option<&'a egui::TextureHandle> {
+        let file = crate::icon_tab::icon_file(species, form, false)
+            .or_else(|| crate::icon_tab::icon_file(species, 0, false))?;
+        if !self.form_icon_textures.contains_key(&(species, form)) {
+            let texture = (|| {
+                let on_card = session.sd.as_ref().and_then(|sd| sd.read(&crate::icon_tab::sd_path(file)));
+                let bytes = on_card.or_else(|| self.icon_garc.as_ref()?.first_file(file).map(|b| b.to_vec()))?;
+                let rgba = sango_core::clim::decode_sized(&bytes, 40, 30).ok()?;
+                let pixels = egui::ColorImage::from_rgba_unmultiplied([40, 30], &rgba);
+                Some(sango_ui::textures::load(ctx, format!("form_icon_{species}_{form}"), pixels, egui::TextureOptions::NEAREST))
+            })();
+            self.form_icon_textures.insert((species, form), texture);
+        }
+        self.form_icon_textures.get(&(species, form)).and_then(|t| t.as_ref())
     }
 
     /// Writes the file on the SD card and tells the plugin.
@@ -1895,6 +1991,7 @@ impl Module for Species {
                 }
             }
             self.pokedex_archive = Garc::open(&dump.archive(pokedex_data::ARCHIVE)).ok();
+            self.mega_garc = Garc::open(&dump.archive(sango_core::mega_evolution::ARCHIVE)).ok();
             self.icon_garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).ok();
             self.learnset.open(&dump);
             self.evolution.open(&dump);
@@ -1907,6 +2004,7 @@ impl Module for Species {
                 list.open(&dump);
             }
             self.icon_textures.clear();
+            self.form_icon_textures.clear();
             // The files that older versions wrote by species and form get the number of their file.
             if let (Some(sd), Some(garc)) = (session.sd.as_ref(), self.garc.as_ref()) {
                 if let Err(message) = old_layout::migrate(sd, garc) {

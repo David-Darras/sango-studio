@@ -21,6 +21,7 @@ pub mod garc;
 pub mod item_icons;
 pub mod learnset;
 pub mod lz;
+pub mod mega_evolution;
 pub mod model;
 pub mod motion;
 pub mod patricia;

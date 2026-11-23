@@ -16,6 +16,7 @@ pub fn folders() -> Vec<(String, usize)> {
         ("species/level_up_moves".to_string(), 191),
         ("species/egg_moves".to_string(), 190),
         ("species/evolution".to_string(), 192),
+        ("species/mega_evolution".to_string(), 193),
         ("leveling_rate".to_string(), 194),
         ("trainer/data".to_string(), 36),
         ("trainer/class".to_string(), 37),
