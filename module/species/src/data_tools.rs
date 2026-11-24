@@ -241,11 +241,14 @@ pub struct Tools {
     pub parts: [bool; 6],
     /// The parts of the CSV files: Data, Moves, Evolutions, Texts.
     pub csv_parts: [bool; 4],
+    /// The windows of the buttons Export… and Import….
+    pub export_open: bool,
+    pub import_open: bool,
 }
 
 impl Default for Tools {
     fn default() -> Self {
-        Tools { history: Vec::new(), reset_open: false, scope: Scope::Form, parts: [false; 6], csv_parts: [true; 4] }
+        Tools { history: Vec::new(), reset_open: false, scope: Scope::Form, parts: [false; 6], csv_parts: [true; 4], export_open: false, import_open: false }
     }
 }
 
@@ -380,31 +383,49 @@ impl Species {
         }
     }
 
-    /// The card of the CSV files in the General tab: all the species, whatever the species that is open.
-    pub fn csv_card(&mut self, ui: &mut egui::Ui, session: &Session) {
-        widget::card(ui, |ui| {
-            ui.label(widget::title("CSV files of all the species"));
-            ui.label(widget::hint("These buttons work on all the species and all the forms, not only on the one that is open."));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
+    /// The windows of the buttons Export… and Import…: the parts to write or to read, for all the species.
+    pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
+        for import in [false, true] {
+            let shown = if import { self.tools.import_open } else { self.tools.export_open };
+            if !shown {
+                continue;
+            }
+            let mut open = true;
+            let mut run = false;
+            let mut close = false;
+            let title = if import { "Import CSV files" } else { "Export CSV files" };
+            egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(widget::hint("For all the species and all the forms, not only the one that is open."));
+                ui.add_space(6.0);
                 for (place, (_, file, label)) in CSV_PARTS.iter().enumerate() {
-                    ui.checkbox(&mut self.tools.csv_parts[place], *label).on_hover_text(*file);
+                    ui.checkbox(&mut self.tools.csv_parts[place], format!("{label} ({file})"));
                 }
-            });
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let any = self.tools.csv_parts.iter().any(|on| *on);
-                ui.add_enabled_ui(any && self.garc.is_some(), |ui| {
-                    if widget::button(ui, "Export") {
-                        self.export_csv_files(session);
-                    }
-                    if session.sd.is_some() && widget::button(ui, "Import") {
-                        self.import_csv_files(session);
-                    }
+                ui.add_space(6.0);
+                ui.label(widget::hint(if import { "Choose the folder of the files: they are checked, then the changes go on the SD card." } else { "Choose a folder: one file for each ticked part." }));
+                ui.horizontal(|ui| {
+                    let any = self.tools.csv_parts.iter().any(|on| *on);
+                    ui.add_enabled_ui(any, |ui| {
+                        run = widget::button_styled(ui, egui::RichText::new(if import { "Import" } else { "Export" }).color(color::WHITE), Some(color::ACCENT));
+                    });
+                    close = widget::button(ui, "Cancel");
                 });
             });
-            ui.label(widget::hint("Export writes one file for each ticked part in a folder that you choose: species.csv, learnsets.csv, evolutions.csv and texts.csv. Import reads the files with these names from a folder, checks all of them, and writes the changes on the SD card."));
-        });
+            if run {
+                if import {
+                    self.import_csv_files(session);
+                } else {
+                    self.export_csv_files(session);
+                }
+            }
+            if run || close || !open {
+                if import {
+                    self.tools.import_open = false;
+                } else {
+                    self.tools.export_open = false;
+                }
+            }
+        }
     }
 
     /// The texts library for the CSV functions.

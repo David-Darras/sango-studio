@@ -63,7 +63,7 @@ pub fn glb_of_bch(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// The tabs of the page. Only the first one works for now.
-const TABS: [&str; 5] = ["General", "Model", "Learnset", "Evolution", "CSV"];
+const TABS: [&str; 4] = ["General", "Model", "Learnset", "Evolution"];
 
 /// The data and the shape of all the species of the romfs, form 0: the source of the examples in the help.
 fn build_index(garc: &Garc, pokedex: &PokedexData) -> examples::Index {
@@ -599,7 +599,6 @@ impl Species {
 
     /// The menus, the two buttons and the state.
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
-        let mut reset_tab = false;
         let mut reset_more = false;
         let mut save = false;
         let mut add_form = false;
@@ -820,17 +819,25 @@ impl Species {
                 })
                 .response
                 .on_hover_text("Makes a new form of this species. It starts with the data that are open now. Edit it with the usual tabs.");
-                let tab_part = data_tools::tab_part(self.tab);
-                ui.add_enabled_ui(has_card && tab_part.is_some(), |ui| {
-                    reset_tab = widget::button(ui, "Reset tab");
+                ui.add_enabled_ui(self.garc.is_some(), |ui| {
+                    if widget::button(ui, "Export…") {
+                        self.tools.export_open = true;
+                    }
                 })
                 .response
-                .on_hover_text("Puts the data of this tab for this form back to the romfs.");
+                .on_hover_text("Writes CSV files of all the species: choose the parts in the window.");
+                ui.add_enabled_ui(has_card, |ui| {
+                    if widget::button(ui, "Import…") {
+                        self.tools.import_open = true;
+                    }
+                })
+                .response
+                .on_hover_text("Reads CSV files of all the species: choose the parts in the window.");
                 ui.add_enabled_ui(has_card, |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
-                .on_hover_text("Reset one form, one species or all the species, for the parts that you choose.");
+                .on_hover_text("Puts parts of one form, one species or all the species back to the romfs: choose in the window.");
                 save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -850,11 +857,6 @@ impl Species {
         }
         if add_form {
             self.add_form(session);
-        }
-        if reset_tab {
-            if let Some(part) = data_tools::tab_part(self.tab) {
-                self.run_reset(session, data_tools::Scope::Form, &[part]);
-            }
         }
         if reset_more {
             self.tools.reset_open = true;
@@ -2106,6 +2108,7 @@ impl Module for Species {
         battle_icons::refresh_custom_types(session.sd.as_ref());
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
+        self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
         let mut clicked_tab = None;
         egui::Frame::none()
@@ -2185,9 +2188,6 @@ impl Module for Species {
             }
             (2, Some(data)) => self.learnset.ui(ui, data),
             (1, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
-            (4, Some(_)) => {
-                egui::ScrollArea::vertical().id_salt("species_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
-            }
             // The evolutions, then the Mega Evolutions: both change what the species becomes.
             (3, Some(_)) => {
                 egui::ScrollArea::vertical().id_salt("evolution_tab").auto_shrink([false, false]).show(ui, |ui| {
