@@ -12,6 +12,7 @@
 
 pub mod editor;
 pub mod presets;
+pub mod reasons;
 
 use sango_core::text::LANGUAGES;
 
@@ -118,10 +119,14 @@ pub enum ConditionKind {
     HpFull = 26,
     /// The action "Change the type of the move" of this ability changed the type of this move.
     MoveTypeWasChanged = 27,
+    /// The owner holds no item.
+    OwnerHoldsNoItem = 28,
+    /// The HP of the other Pokémon of the move are under a part of its maximum HP (argument: the percent).
+    OtherHpBelow = 29,
 }
 
 impl ConditionKind {
-    pub const ALL: [ConditionKind; 27] = [
+    pub const ALL: [ConditionKind; 29] = [
         ConditionKind::PokemonIsOwner,
         ConditionKind::PokemonIsFoe,
         ConditionKind::MoveUserIsOwner,
@@ -149,6 +154,8 @@ impl ConditionKind {
         ConditionKind::HpBelow,
         ConditionKind::HpNotFull,
         ConditionKind::HpFull,
+        ConditionKind::OtherHpBelow,
+        ConditionKind::OwnerHoldsNoItem,
     ];
 
     pub fn from_byte(byte: u8) -> Option<ConditionKind> {
@@ -183,7 +190,9 @@ impl ConditionKind {
             ConditionKind::Chance => "A random chance of",
             ConditionKind::NotVeryEffective => "The move is not very effective",
             ConditionKind::HpFull => "The HP are full",
-            ConditionKind::MoveTypeWasChanged => "This ability changed the type of the move",
+            ConditionKind::MoveTypeWasChanged => "This reaction changed the type of the move",
+            ConditionKind::OwnerHoldsNoItem => "This Pokémon holds no item",
+            ConditionKind::OtherHpBelow => "The HP of the other Pokémon are under",
         }
     }
 
@@ -216,6 +225,8 @@ impl ConditionKind {
             ConditionKind::NotVeryEffective => "The type of the move is weak against the target (x0.5 or less, Tinted Lens).",
             ConditionKind::HpFull => "The owner has all its HP (Multiscale).",
             ConditionKind::MoveTypeWasChanged => "Goes with the action \"Change the type of the move\": the power boost of Refrigerate is only for the moves whose type it changed.",
+            ConditionKind::OwnerHoldsNoItem => "The Pokémon that has the ability, uses the move or holds the item has no held item now (Acrobatics).",
+            ConditionKind::OtherHpBelow => "The HP of the other Pokémon of the move are under a part of its maximum HP: the target when this Pokémon uses the move (Brine: under 51%, that is half or less).",
         }
     }
 
@@ -232,6 +243,7 @@ impl ConditionKind {
             ConditionKind::MoveHasFlag => Argument::MoveFlag,
             ConditionKind::MoveInGroup => Argument::MoveGroup,
             ConditionKind::Chance => Argument::Chance,
+            ConditionKind::OtherHpBelow => Argument::Percent,
             _ => Argument::None,
         }
     }
@@ -240,7 +252,7 @@ impl ConditionKind {
     pub fn default_argument(self) -> i16 {
         match self {
             ConditionKind::WeatherIs => 2,
-            ConditionKind::HpBelow => 50,
+            ConditionKind::HpBelow | ConditionKind::OtherHpBelow => 50,
             ConditionKind::MoveCategoryIs => 1,
             ConditionKind::OtherHasAbility => 1,
             ConditionKind::PowerAtMost => 60,
@@ -272,6 +284,7 @@ impl ConditionKind {
                 | ConditionKind::MoveInGroup
                 | ConditionKind::NotVeryEffective
                 | ConditionKind::MoveTypeWasChanged
+                | ConditionKind::OtherHpBelow
         )
     }
 }
@@ -320,10 +333,17 @@ pub enum ActionKind {
     MultiplyEffectChance = 19,
     /// The move is always a critical hit.
     ForceCritical = 20,
+    /// The move never misses.
+    NeverMiss = 21,
+    /// The move does a fixed damage (a: the HP; 0 for the level of the user; a negative number for that percent of the HP that the
+    /// target has now).
+    FixedDamage = 22,
+    /// A hit that would make the target faint leaves it with 1 HP.
+    LeaveOneHp = 23,
 }
 
 impl ActionKind {
-    pub const ALL: [ActionKind; 20] = [
+    pub const ALL: [ActionKind; 23] = [
         ActionKind::MultiplyValue,
         ActionKind::RaiseCritical,
         ActionKind::ForceCritical,
@@ -335,6 +355,9 @@ impl ActionKind {
         ActionKind::ChangeMoveType,
         ActionKind::RaisePriority,
         ActionKind::MultiplyEffectChance,
+        ActionKind::NeverMiss,
+        ActionKind::FixedDamage,
+        ActionKind::LeaveOneHp,
         ActionKind::Heal,
         ActionKind::DamageHp,
         ActionKind::ChangeStat,
@@ -372,6 +395,9 @@ impl ActionKind {
             ActionKind::RaisePriority => "Raise the priority of the move",
             ActionKind::MultiplyEffectChance => "Multiply the chance of the effect",
             ActionKind::ForceCritical => "Make it a critical hit",
+            ActionKind::NeverMiss => "The move never misses",
+            ActionKind::FixedDamage => "Do a fixed damage",
+            ActionKind::LeaveOneHp => "Leave the target with 1 HP",
         }
     }
 
@@ -397,6 +423,9 @@ impl ActionKind {
             ActionKind::RaisePriority => "The move gets this number of priority steps more. Choose the moment \"The priority of a move is calculated\".",
             ActionKind::MultiplyEffectChance => "Multiplies the chance of the secondary effect of the move (200 is x2). Choose one of the moments \"The chance of ... effect is calculated\".",
             ActionKind::ForceCritical => "The move is always a critical hit. Choose the moment \"A critical hit is checked\".",
+            ActionKind::NeverMiss => "The move hits without an accuracy check (Blizzard in hail). Choose the moment \"The accuracy check can be skipped\".",
+            ActionKind::FixedDamage => "The move does this damage, whatever the stats (Sonic Boom: 20). 0 is the level of the user (Seismic Toss); a negative number is that percent of the HP that the target has now (Super Fang: -50). Choose the moment \"The fixed damage is set\".",
+            ActionKind::LeaveOneHp => "A hit of this move that would make the target faint leaves it with 1 HP (False Swipe). Choose the moment \"A Pokémon is about to faint from a move\".",
         }
     }
 
@@ -416,6 +445,8 @@ impl ActionKind {
             ActionKind::BlockStatus => Argument::StatusOrAny,
             ActionKind::ChangeMoveType => Argument::Type,
             ActionKind::RaisePriority => Argument::Priority,
+            ActionKind::FixedDamage => Argument::Damage,
+            ActionKind::NeverMiss | ActionKind::LeaveOneHp => Argument::None,
             ActionKind::MultiplyValue
             | ActionKind::ConsumeItem
             | ActionKind::BlockMove
@@ -448,6 +479,9 @@ impl ActionKind {
             ActionKind::ChangeMoveType => &[40],
             ActionKind::RaisePriority => &[17],
             ActionKind::MultiplyEffectChance => &[109, 90, 181, 117],
+            ActionKind::NeverMiss => &[55],
+            ActionKind::FixedDamage => &[78],
+            ActionKind::LeaveOneHp => &[125],
             _ => &[],
         }
     }
@@ -493,6 +527,8 @@ pub enum Argument {
     Chance,
     /// Priority steps.
     Priority,
+    /// A fixed damage: HP, 0 for the level, a negative number for a percent of the HP of the target.
+    Damage,
 }
 
 /// The kinds of damage of a move. The value is the number of the engine.
@@ -597,6 +633,8 @@ impl Action {
             ActionKind::ChangeMoveType => (14, 0),
             ActionKind::RaisePriority => (1, 0),
             ActionKind::MultiplyEffectChance => (0, 200),
+            ActionKind::NeverMiss | ActionKind::LeaveOneHp => (0, 0),
+            ActionKind::FixedDamage => (20, 0),
         };
         Action { kind, target: 0, a, b, banner: true }
     }
@@ -724,12 +762,24 @@ pub enum Context {
 }
 
 /// The moments of a move, as the engine numbers them.
-pub const MOVE_MOMENTS: [Moment; 5] = [
+pub const MOVE_MOMENTS: [Moment; 17] = [
     Moment { value: 36, label: "The move starts", help: "Before the move does anything." },
     Moment { value: 85, label: "The move hit all its targets", help: "After the damage to all the targets, one time." },
     Moment { value: 140, label: "The move did damage", help: "At the end of a damaging move, once a Pokémon took damage." },
     Moment { value: 146, label: "A move without damage ended", help: "At the end of a move that deals no damage." },
     Moment { value: 176, label: "After the move", help: "After the action of the move." },
+    Moment { value: 38, label: "The move had no effect", help: "The move missed or had no effect (Jump Kick). Use the condition \"It is this Pokémon\"." },
+    Moment { value: 17, label: "The priority of the move is calculated", help: "Use \"Raise the priority of the move\"." },
+    Moment { value: 40, label: "The data of the move is read", help: "Use \"Change the type of the move\" (Weather Ball) with the condition \"It is this Pokémon\"." },
+    Moment { value: 55, label: "The accuracy check can be skipped", help: "Use \"The move never misses\" (Blizzard in hail)." },
+    Moment { value: 57, label: "The accuracy is calculated", help: "Use \"Multiply the value\" to change the chance to hit." },
+    Moment { value: 59, label: "A critical hit is checked", help: "Use \"Raise the critical-hit stage\" or \"Make it a critical hit\"." },
+    Moment { value: 61, label: "The power of the move is calculated", help: "Use \"Multiply the value\" (Hex, Venoshock, Brine, Acrobatics: x2)." },
+    Moment { value: 64, label: "The attack stat is calculated", help: "The Attack or the Sp. Atk of the user. Use \"Multiply the value\"." },
+    Moment { value: 65, label: "The defense stat is calculated", help: "The Defense or the Sp. Def of the target. Use \"Multiply the value\"." },
+    Moment { value: 78, label: "The fixed damage is set", help: "Use \"Do a fixed damage\" (Sonic Boom, Seismic Toss, Super Fang)." },
+    Moment { value: 79, label: "The damage is calculated", help: "After the type effectiveness. Use \"Multiply the value\"." },
+    Moment { value: 125, label: "A Pokémon is about to faint from a move", help: "Use \"Leave the target with 1 HP\" (False Swipe)." },
 ];
 
 /// The moments of an item that a Pokémon holds.
@@ -765,7 +815,7 @@ pub fn moments(context: Context) -> &'static [Moment] {
 
 /// True for a moment of a move: the values of the situation that tell the move and its targets exist.
 pub fn is_move_moment(moment: u16) -> bool {
-    matches!(moment, 36 | 85 | 140 | 146 | 176 | 61 | 64 | 65 | 79 | 57 | 59 | 83 | 17 | 40 | 49 | 100 | 110 | 118 | 109 | 90 | 181 | 117)
+    matches!(moment, 36 | 85 | 140 | 146 | 176 | 61 | 64 | 65 | 79 | 57 | 59 | 83 | 17 | 40 | 49 | 100 | 110 | 118 | 109 | 90 | 181 | 117 | 38 | 55 | 78 | 125)
 }
 
 /// What is wrong with the rules, in words that the user understands. An empty list means the file can be written.
@@ -862,7 +912,9 @@ pub fn condition_sentence(condition: &Condition) -> String {
         ConditionKind::Chance => format!("a chance of {}% succeeds", condition.arg),
         ConditionKind::NotVeryEffective => "the move is not very effective".into(),
         ConditionKind::HpFull => "its HP are full".into(),
-        ConditionKind::MoveTypeWasChanged => "this ability changed the type of the move".into(),
+        ConditionKind::MoveTypeWasChanged => "this reaction changed the type of the move".into(),
+        ConditionKind::OwnerHoldsNoItem => "this Pokémon holds no item".into(),
+        ConditionKind::OtherHpBelow => format!("the HP of the other Pokémon are under {}% of the maximum", condition.arg),
     }
 }
 
@@ -912,6 +964,13 @@ pub fn action_sentence(action: &Action) -> String {
         ActionKind::RaisePriority => format!("raise the priority of the move by {}", action.a),
         ActionKind::MultiplyEffectChance => format!("multiply the chance of the effect by {}", action.b as f32 / 100.0),
         ActionKind::ForceCritical => "make it a critical hit".into(),
+        ActionKind::NeverMiss => "the move never misses".into(),
+        ActionKind::FixedDamage => match action.a {
+            0 => "do damage equal to the level of the user".into(),
+            a if a < 0 => format!("do {}% of the HP that the target has", -a),
+            a => format!("do {a} HP of damage"),
+        },
+        ActionKind::LeaveOneHp => "leave the target with 1 HP".into(),
     };
     if action.banner {
         format!("{text} (the banner shows)")

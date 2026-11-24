@@ -91,6 +91,9 @@ fn argument_ui(ui: &mut egui::Ui, salt: String, argument: Argument, value: &mut 
         Argument::Priority => {
             ui.add(egui::DragValue::new(value).range(1..=5).suffix(" steps"));
         }
+        Argument::Damage => {
+            ui.add(egui::DragValue::new(value).range(-100..=999)).on_hover_text("HP of damage. 0: the level of the user. -50: half of the HP of the target.");
+        }
         Argument::Forever => {
             let mut forever = *value != 0;
             ui.checkbox(&mut forever, "never stops");

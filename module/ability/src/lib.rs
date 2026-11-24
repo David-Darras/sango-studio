@@ -210,11 +210,14 @@ impl Ability {
             }
             widget::card(ui, |ui| {
                 ui.set_min_width(700.0);
-                ui.label(widget::title("The game runs its own code"));
                 if preset.is_some() {
+                    ui.label(widget::title("The game runs its own code"));
                     ui.label(widget::hint("Below is what the code of the game does, written as rules. Change a value: at the next \"Save\", the Studio writes the file ability/<number>.bin and the plugin runs the rules in place of the code of the game. Some values are rounded (1/8 of the HP is 12%)."));
                 } else {
-                    ui.label(widget::hint("The rules cannot do what the code of the game does for this ability (see docs/ability-reactions.md). You can replace the code with your own rules: the ability then loses its effect of the game."));
+                    ui.label(widget::title("No reaction as rules for this ability"));
+                    ui.label(egui::RichText::new(rules::reasons::ability_reason(id as u8)).color(color::AMBER));
+                    ui.add_space(4.0);
+                    ui.label(widget::hint("You can replace the code of the game with your own rules: the ability then loses its effect of the game."));
                     ui.add_space(4.0);
                     own_rules = session.sd.is_some() && widget::button(ui, "Replace with my own rules");
                 }

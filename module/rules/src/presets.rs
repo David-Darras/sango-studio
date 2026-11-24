@@ -1,4 +1,4 @@
-//! The reactions of the abilities of the game, written as rules.
+//! The reactions of the abilities and of the moves of the game, written as rules.
 //!
 //! The game runs its own code for its abilities. When an ability of the game has no file `ability/<id>.bin`, the plugin keeps that
 //! code. The Studio shows the reaction of the game as a rule here, so that the user can change one value of it. When the user saves a
@@ -6,14 +6,15 @@
 //!
 //! Only the abilities whose rules do the same thing as the code of the game are here. Some values are rounded: the rules use
 //! percents, and the game uses fractions (1/8 of the HP is 12%, 1/16 is 6%, 1/3 of the HP is "under 34%"). An ability that is not here
-//! has no rules: its effect needs a part of the code of the game that the rules do not have (see the document
-//! `docs/ability-reactions.md`).
+//! has no rules: its effect needs a part of the code of the game that the rules do not have (the module
+//! [`crate::reasons`] says why).
 
 use crate::{Action, ActionKind as A, Condition, ConditionKind as C, Rule, TARGET_FOES};
 
 /// The numbers of the types (the order of the game).
 mod ty {
     pub const NORMAL: i16 = 0;
+    pub const ROCK: i16 = 5;
     pub const FLYING: i16 = 2;
     pub const BUG: i16 = 6;
     pub const GHOST: i16 = 7;
@@ -80,6 +81,11 @@ mod at {
     pub const FLINCH: u16 = 118;
     pub const TURN_END: u16 = 128;
     pub const SPECIAL_EFFECT_CHANCE: u16 = 181;
+    pub const NO_EFFECT: u16 = 38;
+    pub const SKIP_ACCURACY: u16 = 55;
+    pub const FIXED_DAMAGE: u16 = 78;
+    pub const MOVE_DAMAGE_DONE: u16 = 140;
+    pub const ENDURE: u16 = 125;
 }
 
 /// The targets.
@@ -319,6 +325,64 @@ pub fn game_rules(ability: u8) -> Option<Vec<Rule>> {
     Some(rules)
 }
 
+/// The numbers of the moves of the game that have a reaction as rules, in order.
+pub fn game_moves() -> Vec<u16> {
+    (1..=621).filter(|id| game_move_rules(*id).is_some()).collect()
+}
+
+/// A move power x2 when a condition is true (Hex, Venoshock, Brine, Acrobatics).
+fn double_power(condition: Condition) -> Vec<Rule> {
+    vec![rule(at::POWER, vec![when(C::MoveUserIsOwner), condition], vec![multiply(200)])]
+}
+
+/// A fixed damage (Sonic Boom, Seismic Toss, Super Fang).
+fn fixed_damage(value: i16) -> Vec<Rule> {
+    vec![rule(at::FIXED_DAMAGE, vec![when(C::MoveUserIsOwner)], vec![act(A::FixedDamage, OWNER, value, 0, false)])]
+}
+
+/// The reaction of a move of the game as rules, or `None` when the rules cannot do what the code of the game does. The owner of a
+/// rule of a move is the Pokémon that uses the move.
+pub fn game_move_rules(id: u16) -> Option<Vec<Rule>> {
+    let rules = match id {
+        // Jump Kick, High Jump Kick: the user loses half of its HP when the move fails.
+        26 | 136 => vec![rule(at::NO_EFFECT, vec![when(C::PokemonIsOwner)], vec![act(A::DamageHp, OWNER, 50, 0, false)])],
+        // Sonic Boom, Dragon Rage, Seismic Toss, Night Shade, Super Fang.
+        49 => fixed_damage(20),
+        82 => fixed_damage(40),
+        69 | 101 => fixed_damage(0),
+        162 => fixed_damage(-50),
+        // Blizzard never misses in hail.
+        59 => vec![rule(at::SKIP_ACCURACY, vec![when(C::MoveUserIsOwner), when_arg(C::WeatherIs, weather::HAIL)], vec![act(A::NeverMiss, OWNER, 0, 0, false)])],
+        // False Swipe, Hold Back.
+        206 | 610 => vec![rule(at::ENDURE, vec![when(C::MoveUserIsOwner)], vec![act(A::LeaveOneHp, OWNER, 0, 0, false)])],
+        // Weather Ball: the type of the weather and x2 power.
+        311 => {
+            let mut rules: Vec<Rule> = [
+                (weather::SUN, ty::FIRE),
+                (weather::HARSH_SUN, ty::FIRE),
+                (weather::RAIN, ty::WATER),
+                (weather::HEAVY_RAIN, ty::WATER),
+                (weather::HAIL, ty::ICE),
+                (weather::SAND, ty::ROCK),
+            ]
+            .into_iter()
+            .map(|(w, t)| rule(at::MOVE_DATA, vec![when(C::PokemonIsOwner), when_arg(C::WeatherIs, w)], vec![act(A::ChangeMoveType, OWNER, t, 0, false)]))
+            .collect();
+            rules.push(rule(at::POWER, vec![when(C::MoveUserIsOwner), when(C::MoveTypeWasChanged)], vec![multiply(200)]));
+            rules
+        }
+        // Brine, Venoshock, Hex, Acrobatics.
+        362 => double_power(when_arg(C::OtherHpBelow, 51)),
+        474 => double_power(when_arg(C::OtherHasStatus, status::POISON)),
+        506 => double_power(when_arg(C::OtherHasStatus, status::ANY)),
+        512 => double_power(when(C::OwnerHoldsNoItem)),
+        // Fell Stinger: the Attack +2 when the move makes the target faint.
+        565 => vec![rule(at::MOVE_DAMAGE_DONE, vec![when(C::MoveUserIsOwner), when(C::TargetFainted)], vec![act(A::ChangeStat, OWNER, stat::ATTACK, 2, false)])],
+        _ => return None,
+    };
+    Some(rules)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -345,6 +409,22 @@ mod test {
             write_rules(&mut bytes, &rules);
             assert_eq!(read_rules(&mut Reader::new(&bytes), rules.len()).unwrap(), rules, "ability {id}");
         }
+    }
+
+    #[test]
+    fn every_game_move_reaction_is_a_valid_file() {
+        let list = game_moves();
+        assert_eq!(list, vec![26, 49, 59, 69, 82, 101, 136, 162, 206, 311, 362, 474, 506, 512, 565, 610]);
+        for id in list {
+            let rules = game_move_rules(id).unwrap();
+            assert!(rules.len() <= MAX_RULES, "move {id}");
+            let found = problems(&rules, Context::Move);
+            assert!(found.is_empty(), "move {id}: {found:?}");
+            for rule in &rules {
+                assert!(crate::moments(Context::Move).iter().any(|m| m.value == rule.moment), "move {id}: the editor offers the moment {}", rule.moment);
+            }
+        }
+        assert_eq!(crate::rule_sentence(&game_move_rules(162).unwrap()[0]), "When the fixed damage is set, and this Pokémon used the move: do 50% of the HP that the target has.");
     }
 
     #[test]
