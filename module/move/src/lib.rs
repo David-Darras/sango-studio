@@ -8,7 +8,6 @@
 mod csv;
 mod custom;
 pub mod data;
-mod game_rules;
 mod picker;
 mod texts;
 mod tools;
@@ -82,7 +81,7 @@ pub struct Move {
     /// The language of the texts of a new move.
     custom_language: usize,
     /// The rules that replace the code of the moves of the game.
-    game_rules: game_rules::Store,
+    game_rules: sango_rules::game_files::Store,
     /// The reaction of the game as rules, for the open move of the game that has no file yet. It goes in `game_rules` at the
     /// first change.
     draft: Option<(u16, Vec<sango_rules::Rule>)>,
@@ -108,7 +107,7 @@ impl Default for Move {
             tools: tools::Tools::default(),
             store: custom::Store::default(),
             custom_language: 2,
-            game_rules: game_rules::Store::default(),
+            game_rules: sango_rules::game_files::Store::new(&sango_rules::game_files::MOVES),
             draft: None,
         }
     }
@@ -287,70 +286,14 @@ impl Move {
         self.data != self.baseline || self.texts.changed() || self.store.changed() || self.game_rules.changed()
     }
 
-    /// The Reactions tab of a move of the game. Without a file, the game runs its own code, and the tab shows the code of the game
-    /// as rules when the rules can do it. The first change puts the rules in the list: "Save" writes the file, and then the plugin
-    /// runs the rules in place of the code of the game.
+    /// The Reactions tab of a move of the game: the code of the game as rules, or why there are none (see
+    /// `sango_rules::game_files`).
     fn game_reactions_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
         let id = self.id as u16;
-        let mut back_to_game = false;
-        let mut own_rules = false;
         let preset = sango_rules::presets::game_move_rules(id);
-        egui::ScrollArea::vertical().id_salt("move_game_reactions").auto_shrink([false, false]).show(ui, |ui| {
-            if let Some(rules) = self.game_rules.find_mut(id) {
-                widget::card(ui, |ui| {
-                    ui.set_min_width(700.0);
-                    ui.label(widget::title("Your rules replace the code of the game"));
-                    ui.label(widget::hint("The file move/rules/<number>.bin is on the SD card (or is written at the next \"Save\"): in battle, the plugin runs these rules and not the code of the game for this move. The data of the move (power, accuracy, secondary effect) stays. Omega Ruby and Alpha Sapphire only."));
-                    ui.add_space(4.0);
-                    back_to_game = session.sd.is_some() && widget::button(ui, "Back to the code of the game");
-                });
-                ui.add_space(10.0);
-                game_rules::rules_ui(ui, id, rules);
-                return;
-            }
-            if self.draft.as_ref().map(|d| d.0) != Some(id) {
-                self.draft = preset.clone().map(|rules| (id, rules));
-            }
-            widget::card(ui, |ui| {
-                ui.set_min_width(700.0);
-                if preset.is_some() {
-                    ui.label(widget::title("The game runs its own code"));
-                    ui.label(widget::hint("Below is what the code of the game does for this move, written as rules. Change a value: at the next \"Save\", the Studio writes the file move/rules/<number>.bin and the plugin runs the rules in place of the code of the game."));
-                } else {
-                    ui.label(widget::title("No reaction as rules for this move"));
-                    ui.label(egui::RichText::new(sango_rules::reasons::move_reason(id)).color(color::AMBER));
-                    ui.add_space(4.0);
-                    ui.label(widget::hint("You can give the move your own rules. A move with code of the game then loses this code; its data stays."));
-                    ui.add_space(4.0);
-                    own_rules = session.sd.is_some() && widget::button(ui, "Add my own rules");
-                }
-            });
-            if let Some((_, rules)) = &mut self.draft {
-                ui.add_space(10.0);
-                game_rules::rules_ui(ui, id, rules);
-            }
-        });
-        if let (Some((draft_id, rules)), Some(preset)) = (&self.draft, &preset) {
-            if *draft_id == id && rules != preset {
-                self.game_rules.insert(id, rules.clone());
-                self.draft = None;
-            }
-        }
-        if own_rules {
-            let mut rule = sango_rules::Rule::new();
-            rule.moment = 36;
-            rule.conditions.clear();
-            rule.actions[0].target = 3;
-            self.game_rules.insert(id, vec![rule]);
-        }
-        if back_to_game {
-            if let Some(sd) = session.sd.as_ref() {
-                match self.game_rules.delete(sd, id) {
-                    Ok(()) => self.status = Some((true, format!("The move {id} runs the code of the game again."))),
-                    Err(message) => self.status = Some((false, message)),
-                }
-            }
-            self.draft = None;
+        let reason = sango_rules::reasons::move_reason(id);
+        if let Some(status) = sango_rules::game_files::reactions_tab(ui, &mut self.game_rules, &mut self.draft, id, preset, &reason, session.sd.as_ref()) {
+            self.status = Some(status);
         }
     }
 

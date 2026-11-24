@@ -11,6 +11,7 @@
 //! and the byte of the flags (bit 0: show the banner of the ability).
 
 pub mod editor;
+pub mod game_files;
 pub mod presets;
 pub mod reasons;
 

@@ -85,6 +85,11 @@ pub struct Item {
     store: custom::Store,
     /// The language of the texts of a new item.
     custom_language: usize,
+    /// The rules that replace the code of the held items of the game.
+    game_rules: sango_rules::game_files::Store,
+    /// The reaction of the game as rules, for the open item of the game that has no file yet. It goes in `game_rules` at the
+    /// first change.
+    draft: Option<(u16, Vec<sango_rules::Rule>)>,
 }
 
 impl Default for Item {
@@ -111,6 +116,8 @@ impl Default for Item {
             tools: tools::Tools::default(),
             store: custom::Store::default(),
             custom_language: 2,
+            game_rules: sango_rules::game_files::Store::new(&sango_rules::game_files::ITEMS),
+            draft: None,
         }
     }
 }
@@ -226,6 +233,17 @@ impl Item {
         self.list_names.clone().unwrap_or_default()
     }
 
+    /// The Reactions tab of a held item of the game: the code of the game as rules, or why there are none (see
+    /// `sango_rules::game_files`).
+    fn game_reactions_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
+        let id = self.item as u16;
+        let preset = sango_rules::presets::game_item_rules(id);
+        let reason = sango_rules::reasons::item_reason(id);
+        if let Some(status) = sango_rules::game_files::reactions_tab(ui, &mut self.game_rules, &mut self.draft, id, preset, &reason, session.sd.as_ref()) {
+            self.status = Some(status);
+        }
+    }
+
     /// Writes the data and the texts on the SD card, and tells the plugin.
     fn save(&mut self, session: &Session) {
         let Some(sd) = session.sd.as_ref() else { return };
@@ -241,6 +259,9 @@ impl Item {
                 let path = data::sd_path(self.item);
                 result = sd.write(&path, &item.to_bytes()).and_then(|_| sd.mark_changed(&path));
             }
+        }
+        if result.is_ok() {
+            result = self.game_rules.save(sd).map(|_| ());
         }
         if result.is_ok() && self.pockets != self.pockets_baseline {
             result = pockets::write(sd, &self.pockets);
@@ -265,7 +286,7 @@ impl Item {
 
     /// True when something changed and was not saved.
     fn dirty(&self) -> bool {
-        self.data != self.baseline || self.pockets != self.pockets_baseline || self.texts.changed() || self.icons.changed() || self.store.changed()
+        self.data != self.baseline || self.pockets != self.pockets_baseline || self.texts.changed() || self.icons.changed() || self.store.changed() || self.game_rules.changed()
     }
 
     /// The rows of the item list: the names as the user has them, with the price and the pocket of the romfs.
@@ -278,8 +299,9 @@ impl Item {
             })
             .collect();
         let changed = self.modified_items(session);
+        let with_rules = self.game_rules.ids();
         for (item, row) in rows.iter_mut().enumerate() {
-            row.modified = changed.contains(&item);
+            row.modified = changed.contains(&item) || with_rules.contains(&(item as u16));
         }
         // The new items come after the items of the game, at their numbers: a number between is a row without a name that the list skips.
         if let Some(last) = self.store.ids().into_iter().max() {
@@ -865,6 +887,7 @@ impl Module for Item {
             self.open(&dump);
         }
         self.store.ensure(session.sd.as_ref());
+        self.game_rules.ensure(session.sd.as_ref());
         if !self.icons_ready {
             self.icons.load_card(session.sd.as_ref());
             self.icons_ready = true;
@@ -912,9 +935,7 @@ impl Module for Item {
                 let item = self.item;
                 match self.store.find_mut(item) {
                     Some(entry) => egui::ScrollArea::vertical().id_salt("item_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
-                    None => widget::card(ui, |ui| {
-                        ui.label(widget::hint("The items of the game have their reactions in the code of the game. A new item (the button \"+ New item\") has its own reactions here."));
-                    }),
+                    None => self.game_reactions_tab(ui, session),
                 }
             }
             _ => {
@@ -1012,5 +1033,37 @@ mod add_test {
         other.delete_item(&session);
         assert!(other.store.find(900).is_none() && session.sd.as_ref().unwrap().read("item/custom/900.bin").is_none());
         let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod game_rules_test {
+    use super::*;
+
+    fn draw(page: &mut Item, session: &Session) {
+        let ctx = egui::Context::default();
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.game_reactions_tab(ui, session));
+            });
+        }
+    }
+
+    /// The reaction of the game shows as rules and changes nothing; the first change puts the rules in the list to save.
+    #[test]
+    fn a_game_item_reaction_goes_to_the_store_at_the_first_change() {
+        let session = Session::default();
+        let mut page = Item { item: 234, ..Item::default() };
+        draw(&mut page, &session);
+        assert!(!page.game_rules.changed(), "drawing the reaction of the game changes nothing");
+        assert_eq!(page.draft.as_ref().map(|d| d.1.clone()), sango_rules::presets::game_item_rules(234));
+        page.draft.as_mut().unwrap().1[0].actions[0].a = 12;
+        draw(&mut page, &session);
+        assert!(page.game_rules.changed() && page.draft.is_none());
+        assert_eq!(page.game_rules.ids(), vec![234]);
+        // An item without rules of the game (Choice Band) shows no rules.
+        page.item = 220;
+        draw(&mut page, &session);
+        assert!(page.draft.is_none());
     }
 }

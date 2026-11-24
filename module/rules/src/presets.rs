@@ -1,4 +1,4 @@
-//! The reactions of the abilities and of the moves of the game, written as rules.
+//! The reactions of the abilities, of the moves and of the held items of the game, written as rules.
 //!
 //! The game runs its own code for its abilities. When an ability of the game has no file `ability/<id>.bin`, the plugin keeps that
 //! code. The Studio shows the reaction of the game as a rule here, so that the user can change one value of it. When the user saves a
@@ -14,7 +14,13 @@ use crate::{Action, ActionKind as A, Condition, ConditionKind as C, Rule, TARGET
 /// The numbers of the types (the order of the game).
 mod ty {
     pub const NORMAL: i16 = 0;
+    pub const FIGHTING: i16 = 1;
+    pub const POISON: i16 = 3;
+    pub const GROUND: i16 = 4;
     pub const ROCK: i16 = 5;
+    pub const STEEL: i16 = 8;
+    pub const PSYCHIC: i16 = 13;
+    pub const DRAGON: i16 = 15;
     pub const FLYING: i16 = 2;
     pub const BUG: i16 = 6;
     pub const GHOST: i16 = 7;
@@ -41,6 +47,8 @@ mod weather {
 mod stat {
     pub const ATTACK: i16 = 1;
     pub const DEFENSE: i16 = 2;
+    pub const SP_ATK: i16 = 3;
+    pub const SP_DEF: i16 = 4;
     pub const SPEED: i16 = 5;
 }
 
@@ -86,6 +94,7 @@ mod at {
     pub const FIXED_DAMAGE: u16 = 78;
     pub const MOVE_DAMAGE_DONE: u16 = 140;
     pub const ENDURE: u16 = 125;
+    pub const TURN_BEGIN: u16 = 127;
 }
 
 /// The targets.
@@ -383,6 +392,80 @@ pub fn game_move_rules(id: u16) -> Option<Vec<Rule>> {
     Some(rules)
 }
 
+/// The numbers of the held items of the game that have a reaction as rules, in order.
+pub fn game_items() -> Vec<u16> {
+    (1..=775).filter(|id| game_item_rules(*id).is_some()).collect()
+}
+
+/// x1.2 power for the moves of a type (Charcoal, the plates, the incenses).
+fn type_boost(move_type: i16) -> Vec<Rule> {
+    vec![rule(at::POWER, vec![when(C::MoveUserIsOwner), when_arg(C::MoveTypeIs, move_type)], vec![multiply(120)])]
+}
+
+/// A stat +1 when a move of a type hits the holder, then the item is used up (Absorb Bulb, Cell Battery...).
+fn boost_and_use(move_type: i16, stat_value: i16) -> Vec<Rule> {
+    vec![rule(
+        at::HIT,
+        vec![when(C::DefenderIsOwner), when(C::NoSubstitute), when_arg(C::MoveTypeIs, move_type)],
+        vec![act(A::ChangeStat, OWNER, stat_value, 1, false), act(A::ConsumeItem, OWNER, 0, 0, false)],
+    )]
+}
+
+/// The reaction of a held item of the game as rules, or `None` when the rules cannot do what the code of the game does. The owner of
+/// a rule of an item is the Pokémon that holds it. The values are the ones of the data of the items of the game.
+pub fn game_item_rules(id: u16) -> Option<Vec<Rule>> {
+    let rules = match id {
+        // The items that raise the power of a type by 20%.
+        222 | 308 => type_boost(ty::BUG),
+        233 | 313 => type_boost(ty::STEEL),
+        237 | 305 => type_boost(ty::GROUND),
+        238 | 309 | 315 => type_boost(ty::ROCK),
+        239 | 301 | 318 => type_boost(ty::GRASS),
+        240 | 312 => type_boost(ty::DARK),
+        241 | 303 => type_boost(ty::FIGHTING),
+        242 | 300 => type_boost(ty::ELECTRIC),
+        243 | 254 | 299 | 317 => type_boost(ty::WATER),
+        244 | 306 => type_boost(ty::FLYING),
+        246 | 302 => type_boost(ty::ICE),
+        247 | 310 => type_boost(ty::GHOST),
+        248 | 307 | 314 => type_boost(ty::PSYCHIC),
+        249 | 298 => type_boost(ty::FIRE),
+        250 | 311 => type_boost(ty::DRAGON),
+        251 => type_boost(ty::NORMAL),
+        304 => type_boost(ty::POISON),
+        644 => type_boost(ty::FAIRY),
+        // Bright Powder, Lax Incense: the moves against the holder hit 10% less.
+        213 | 255 => vec![rule(at::ACCURACY, vec![when(C::DefenderIsOwner)], vec![multiply(90)])],
+        // Macho Brace and the Power items: the Speed is halved.
+        215 | 289..=294 => vec![rule(at::SPEED, vec![when(C::PokemonIsOwner)], vec![multiply(50)])],
+        // Scope Lens, Razor Claw.
+        232 | 326 => vec![rule(at::CRITICAL, vec![when(C::MoveUserIsOwner)], vec![act(A::RaiseCritical, OWNER, 1, 0, false)])],
+        // Leftovers: 1/16 of the HP at the start of the end of the turn.
+        234 => vec![rule(at::TURN_BEGIN, vec![when(C::PokemonIsOwner), when(C::HpNotFull)], vec![act(A::Heal, OWNER, 6, 0, false)])],
+        // Wide Lens.
+        265 => vec![rule(at::ACCURACY, vec![when(C::MoveUserIsOwner)], vec![multiply(110)])],
+        // Muscle Band, Wise Glasses.
+        266 => vec![rule(at::POWER, vec![when(C::MoveUserIsOwner), when_arg(C::MoveCategoryIs, 1)], vec![multiply(110)])],
+        267 => vec![rule(at::POWER, vec![when(C::MoveUserIsOwner), when_arg(C::MoveCategoryIs, 2)], vec![multiply(110)])],
+        // Expert Belt.
+        268 => vec![rule(at::DAMAGE, vec![when(C::MoveUserIsOwner), when(C::SuperEffective)], vec![multiply(120)])],
+        // Life Orb: x1.3 damage, then the holder loses 1/10 of its HP.
+        270 => vec![
+            rule(at::DAMAGE, vec![when(C::MoveUserIsOwner)], vec![multiply(130)]),
+            rule(at::MOVE_DAMAGE_DONE, vec![when(C::MoveUserIsOwner)], vec![act(A::DamageHp, OWNER, 10, 0, false)]),
+        ],
+        // Rocky Helmet: 1/6 of the HP of the attacker that makes contact.
+        540 => vec![rule(at::HIT, vec![when(C::DefenderIsOwner), when(C::NoSubstitute), when(C::MoveMakesContact)], vec![act(A::DamageHp, MOVE_USER, 16, 0, false)])],
+        // Absorb Bulb, Cell Battery, Luminous Moss, Snowball.
+        545 => boost_and_use(ty::WATER, stat::SP_ATK),
+        546 => boost_and_use(ty::ELECTRIC, stat::ATTACK),
+        648 => boost_and_use(ty::WATER, stat::SP_DEF),
+        649 => boost_and_use(ty::ICE, stat::ATTACK),
+        _ => return None,
+    };
+    Some(rules)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -425,6 +508,21 @@ mod test {
             }
         }
         assert_eq!(crate::rule_sentence(&game_move_rules(162).unwrap()[0]), "When the fixed damage is set, and this Pokémon used the move: do 50% of the HP that the target has.");
+    }
+
+    #[test]
+    fn every_game_item_reaction_is_a_valid_file() {
+        let list = game_items();
+        assert_eq!(list.len(), 60, "{list:?}");
+        assert!(game_item_rules(245).is_none(), "Poison Barb also poisons when it is flung: no rules");
+        for id in list {
+            let rules = game_item_rules(id).unwrap();
+            let found = problems(&rules, Context::Item);
+            assert!(found.is_empty(), "item {id}: {found:?}");
+            for rule in &rules {
+                assert!(crate::moments(Context::Item).iter().any(|m| m.value == rule.moment), "item {id}: the editor offers the moment {}", rule.moment);
+            }
+        }
     }
 
     #[test]
