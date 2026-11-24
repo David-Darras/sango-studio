@@ -13,7 +13,7 @@ mod csv;
 
 use sango_core::experience::{self, Curve, ExperienceTable, MAX_LEVEL, MAX_RATES};
 use sango_core::{Garc, SdCard};
-use sango_species::{SpeciesTable, LEVELING_RATE};
+use sango_species::{is_unused_rate, SpeciesTable, LEVELING_RATE};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::ops::RangeInclusive;
@@ -368,6 +368,10 @@ impl LevelingRate {
     /// The buttons that choose the Leveling rate.
     fn rate_tabs(&mut self, ui: &mut egui::Ui) {
         let count = self.rate_count();
+        // The two rates that no Pokémon uses have no tab.
+        if is_unused_rate(self.rate) {
+            self.rate = 0;
+        }
         egui::Frame::none()
             .fill(color::SURFACE)
             .stroke(egui::Stroke::new(1.0_f32, color::BORDER))
@@ -376,7 +380,7 @@ impl LevelingRate {
             .show(ui, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                    for place in 0..count {
+                    for place in (0..count).filter(|&rate| !is_unused_rate(rate)) {
                         let name = self.rate_name(place);
                         self.rate = tab(ui, ("leveling_rate_tab", place), &name, place, self.rate);
                     }
@@ -506,7 +510,7 @@ impl LevelingRate {
             painter.rect_filled(band, egui::Rounding::ZERO, chosen_color.linear_multiply(0.10));
         }
         // The other rates, thin.
-        for other in (0..self.rate_count()).filter(|&other| other != self.rate) {
+        for other in (0..self.rate_count()).filter(|&other| other != self.rate && !is_unused_rate(other)) {
             if let Some(curve) = table.curve(other) {
                 painter.add(egui::Shape::line(line(curve), egui::Stroke::new(1.5_f32, rate_color(other).linear_multiply(0.75))));
             }
@@ -537,7 +541,7 @@ impl LevelingRate {
 
         // The legend: a click on a name chooses the rate.
         let mut x = plot.left();
-        for rate in 0..self.rate_count() {
+        for rate in (0..self.rate_count()).filter(|&rate| !is_unused_rate(rate)) {
             let name = self.rate_name(rate);
             let text_rect = painter.text(egui::pos2(x + 14.0, rect.top() + 12.0), egui::Align2::LEFT_CENTER, &name, egui::FontId::proportional(12.5), if rate == self.rate { color::TEXT } else { color::MUTED });
             let swatch = egui::Rect::from_center_size(egui::pos2(x + 5.0, text_rect.center().y), egui::vec2(10.0, 10.0));
@@ -559,6 +563,7 @@ impl LevelingRate {
         if let Some(level) = shown {
             let count = self.rate_count();
             let rows: Vec<(usize, String)> = (0..count)
+                .filter(|&rate| !is_unused_rate(rate))
                 .map(|rate| (rate, table.curve(rate).and_then(|curve| view.value(curve, level)).map_or("-".to_string(), thousands)))
                 .collect();
             let title = view.describe(level);

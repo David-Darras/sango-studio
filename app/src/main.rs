@@ -7,6 +7,9 @@ use sango_ui::{widget, Module, Session};
 /// The width of the side bar, in points.
 const SIDE_BAR_WIDTH: f32 = 210.0;
 
+/// The sections of the side bar: the place of their first page in [`App::pages`], and their title.
+const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (17, "Look and sound"), (20, "Tools")];
+
 struct App {
     modules: Vec<Box<dyn Module>>,
     current: usize,
@@ -37,34 +40,38 @@ impl App {
         App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false, remembered: String::new() }
     }
 
-    /// All the pages, new and empty. The first one is Home.
+    /// All the pages, new and empty. The first one is Home. The pages go by section (see [`SECTIONS`]): what a Pokémon is, the battle,
+    /// the world, the look and the sound, then the tools.
     fn pages() -> Vec<Box<dyn Module>> {
-        // In the order of the work: the start, the Pokémon, the battle, the world, the presentation, then the tools
-        // and the least used pages (the archive and the packs) at the end.
         vec![
             Box::new(sango_home::Home::default()),
+            // Pokémon.
             Box::new(sango_species::Species::default()),
             Box::new(sango_leveling_rate::LevelingRate::default()),
             Box::new(sango_nature::Nature::default()),
-            Box::new(sango_formula::Formula::default()),
             Box::new(sango_ability::Ability::default()),
             Box::new(sango_move::Move::default()),
             Box::new(sango_type::Type::default()),
             Box::new(sango_item::Item::default()),
+            // Battle.
+            Box::new(sango_formula::Formula::default()),
             Box::new(sango_battle::BattlePage::default()),
             Box::new(sango_trainer::Trainer::default()),
-            Box::new(sango_overworld::Overworld::default()),
-            Box::new(sango_character::Character::default()),
-            Box::new(sango_encounter::EncounterPage::default()),
             Box::new(sango_choreography::Choreography::default()),
+            Box::new(sango_effect::EffectPage::default()),
+            // World.
+            Box::new(sango_overworld::Overworld::default()),
+            Box::new(sango_encounter::EncounterPage::default()),
+            Box::new(sango_character::Character::default()),
             Box::new(sango_script::ScriptPage::default()),
+            // Look and sound.
             Box::new(sango_layout::LayoutPage::default()),
             Box::new(sango_font::FontPage::default()),
             Box::new(sango_music::MusicPage::default()),
-            Box::new(sango_effect::EffectPage::default()),
+            // Tools.
+            Box::new(sango_packs::Packs::default()),
             Box::new(sango_code::Code::default()),
             Box::new(sango_archive::Archive::default()),
-            Box::new(sango_packs::Packs::default()),
         ]
     }
 
@@ -94,6 +101,11 @@ impl App {
             let height = (ui.available_height() - 26.0).max(80.0);
             egui::ScrollArea::vertical().id_salt("side_bar_scroll").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
                 for (i, module) in self.modules.iter().enumerate() {
+                    if let Some((_, title)) = SECTIONS.iter().find(|(first, _)| *first == i) {
+                        ui.add_space(10.0);
+                        ui.label(egui::RichText::new(title.to_uppercase()).size(11.0).strong().color(color::MUTED));
+                        ui.add_space(2.0);
+                    }
                     let selected = i == self.current;
                     let response = widget::side_button(ui, module.icon(), module.title(), selected);
                     if response.clicked() {
@@ -898,5 +910,20 @@ mod test {
         });
         assert!(app.side_bar_focus);
         assert!(!app.session.focus_page);
+    }
+}
+
+#[cfg(test)]
+mod side_bar_test {
+    use super::*;
+
+    /// Each section starts at the page that it names.
+    #[test]
+    fn the_sections_start_at_their_first_page() {
+        let pages = App::pages();
+        let first: Vec<&str> = SECTIONS.iter().map(|(place, _)| pages[*place].title()).collect();
+        assert_eq!(first, ["Species", "Formula", "Overworld", "Layout", "Packs"]);
+        assert_eq!(pages[0].title(), "Home");
+        assert_eq!(pages.len(), 23);
     }
 }

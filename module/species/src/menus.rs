@@ -259,7 +259,7 @@ mod test {
         set_source(&Session::default());
         let ctx = egui::Context::default();
         let mut value = (25, 0);
-        let mut frame = |events: Vec<egui::Event>, value: &mut (usize, usize)| {
+        let frame = |events: Vec<egui::Event>, value: &mut (usize, usize)| {
             let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))), ..Default::default() };
             input.events = events;
             let mut changed = false;

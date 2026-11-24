@@ -51,7 +51,7 @@ use std::sync::Arc;
 const ARCHIVE: usize = 195;
 
 pub use extras::{is_species, max_species, species_ids, species_name};
-pub use names::{LEVELING_RATE, SPECIES};
+pub use names::{is_unused_rate, LEVELING_RATE, SPECIES};
 pub use table::SpeciesTable;
 
 /// A GLB file of a model of the game that is a plain BCH with its textures (the models of the trainers): the skeleton, the meshes and
@@ -1600,7 +1600,8 @@ fn leveling_rate_names(ctx: &egui::Context, sd: Option<&sango_core::SdCard>) -> 
             return names;
         }
     }
-    let mut names: Vec<String> = names::LEVELING_RATE.iter().map(|&s| s.to_string()).collect();
+    // The two rates that no Pokémon uses have no name: the menu does not offer them.
+    let mut names: Vec<String> = names::LEVELING_RATE.iter().enumerate().map(|(rate, &s)| if names::is_unused_rate(rate) { String::new() } else { s.to_string() }).collect();
     if let Some(sd) = sd {
         let mut max_rate = names.len();
         for path in sd.files_in("leveling_rate") {

@@ -15,7 +15,7 @@ pub use move_names::MOVE as MOVE_NAMES;
 pub use names::ABILITY as ABILITY_NAMES;
 pub use names::ITEM as ITEM_NAMES;
 pub use names::TYPE as TYPE_NAMES;
-pub use names::{LEVELING_RATE, SPECIES};
+pub use names::{is_unused_rate, LEVELING_RATE, SPECIES};
 
 use data::SpeciesData;
 use sango_core::{Clim, Garc};
@@ -649,6 +649,10 @@ pub fn type_menu_of(ui: &mut egui::Ui, id: &str, value: &mut u8, first: Option<u
 pub fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f32) {
     let combo = egui::ComboBox::from_id_salt(id).selected_text(name_from(list, *value as usize, 0)).width(width).show_ui(ui, |ui| {
         for (place, name) in list.iter().enumerate() {
+            // An empty name is a place that the list does not offer.
+            if name.is_empty() && *value != place as u8 {
+                continue;
+            }
             let chosen = *value == place as u8;
             let row = ui.selectable_label(chosen, *name);
             widget::scroll_to_chosen(ui, &row, chosen);
@@ -677,7 +681,18 @@ pub fn menu(ui: &mut egui::Ui, id: &str, value: &mut u8, list: &[&str], width: f
                 step -= 1;
             }
             if step != 0 && !list.is_empty() {
-                *value = (*value as isize + step).clamp(0, list.len() as isize - 1) as u8;
+                // The next place with a name.
+                let mut place = *value as isize;
+                loop {
+                    place += step;
+                    if place < 0 || place >= list.len() as isize {
+                        break;
+                    }
+                    if !list[place as usize].is_empty() {
+                        *value = place as u8;
+                        break;
+                    }
+                }
             }
         });
     }

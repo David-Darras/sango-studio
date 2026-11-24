@@ -1749,6 +1749,12 @@ pub const LEVELING_RATE: [&str; 8] = [
     "Medium Fast (unused)",
 ];
 
+/// True for the two Leveling rates that no Pokémon of the game uses (the places 6 and 7, copies of Medium Fast). The menus do not
+/// show them; the files keep them.
+pub fn is_unused_rate(rate: usize) -> bool {
+    rate == 6 || rate == 7
+}
+
 
 /// The shapes of the Pokédex, in the order of the game. The names are the ones of Bulbapedia.
 pub const SHAPE: [&str; 14] = [
