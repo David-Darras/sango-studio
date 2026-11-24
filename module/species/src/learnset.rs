@@ -41,6 +41,8 @@ const TABLE_WIDTH: f32 = 736.0;
 
 /// The height of a row, in points.
 const ROW_HEIGHT: f32 = 40.0;
+/// The number of rows that a table shows at once. More rows scroll inside the table.
+const VISIBLE_ROWS: usize = 10;
 
 /// The height of a row of the list of choices, in points.
 const CHOICE_HEIGHT: f32 = 28.0;
@@ -579,6 +581,23 @@ impl Learnset {
         ui.separator();
     }
 
+    /// The rows of a table in an area that shows at most 10 rows and scrolls inside. The header and the buttons stay
+    /// outside, so they do not move. `add` draws the rows of the range, each one `ROW_HEIGHT` high.
+    fn rows_area(ui: &mut egui::Ui, name: &str, count: usize, mut add: impl FnMut(&mut egui::Ui, std::ops::Range<usize>)) {
+        if count == 0 {
+            return;
+        }
+        // The height comes from the number of rows, not from the room that the parent has left.
+        let height = count.min(VISIBLE_ROWS) as f32 * ROW_HEIGHT;
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let width = ui.available_width();
+            ui.allocate_ui(egui::vec2(width, height), |ui| {
+                egui::ScrollArea::vertical().id_salt(("learnset_rows", name)).auto_shrink([false, false]).show_rows(ui, ROW_HEIGHT, count, |ui, range| add(ui, range));
+            });
+        });
+    }
+
     /// A row: the background that shows under the pointer, and the rectangle to draw in.
     fn row(ui: &mut egui::Ui) -> egui::Rect {
         let (rect, _) = ui.allocate_exact_size(egui::vec2(TABLE_WIDTH - 36.0, ROW_HEIGHT), egui::Sense::hover());
@@ -956,7 +975,8 @@ impl Learnset {
 
         let order = self.level_up_order.clone();
         let mut remove = None;
-        for &index in &order {
+        Self::rows_area(ui, "level_up", order.len(), |ui, range| {
+          for &index in &order[range] {
             let mut entry = self.level_up.moves[index];
             let row = Self::row(ui);
             let old_level = entry.level;
@@ -985,7 +1005,8 @@ impl Learnset {
                 self.needs_sort = true;
             }
             self.level_up.moves[index] = entry;
-        }
+          }
+        });
         if let Some(index) = remove {
             self.level_up.moves.remove(index);
             self.level_up_order.clear();
@@ -1031,7 +1052,8 @@ impl Learnset {
         });
 
         let mut remove = None;
-        for &index in &indices {
+        Self::rows_area(ui, "egg", indices.len(), |ui, range| {
+          for &index in &indices[range] {
             let row = Self::row(ui);
             let id = self.eggs.moves[index];
             ui.painter().text(
@@ -1049,7 +1071,8 @@ impl Learnset {
             if let Some(new) = new {
                 self.eggs.moves[index] = new;
             }
-        }
+          }
+        });
         if let Some(index) = remove {
             self.eggs.moves.remove(index);
         }
@@ -1110,7 +1133,8 @@ impl Learnset {
             )
         });
         let mut remove = None;
-        for &(_, slot, id) in &learned {
+        Self::rows_area(ui, "tutor", learned.len(), |ui, range| {
+          for &(_, slot, id) in &learned[range] {
             let row = Self::row(ui);
             ui.painter().rect_filled(egui::Rect::from_center_size(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::vec2(62.0, 24.0)), egui::Rounding::same(12.0), color::SURFACE_STRONG);
             ui.painter().text(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::Align2::CENTER_CENTER, slot.label(), egui::FontId::proportional(12.5), color::TEXT);
@@ -1119,7 +1143,8 @@ impl Learnset {
             if trash_button(ui, column(row, 7)) {
                 remove = Some(slot);
             }
-        }
+          }
+        });
         if let Some(slot) = remove {
             slot.set(data, false);
         }
@@ -1173,7 +1198,8 @@ impl Learnset {
             )
         });
         let mut remove = None;
-        for &bit in &learned {
+        Self::rows_area(ui, "machine", learned.len(), |ui, range| {
+          for &bit in &learned[range] {
             let row = Self::row(ui);
             ui.painter().rect_filled(egui::Rect::from_center_size(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::vec2(62.0, 24.0)), egui::Rounding::same(12.0), color::SURFACE_STRONG);
             ui.painter().text(column(row, 0).left_center() + egui::vec2(31.0, 0.0), egui::Align2::CENTER_CENTER, machine_name(bit), egui::FontId::proportional(12.5), color::TEXT);
@@ -1182,7 +1208,8 @@ impl Learnset {
             if trash_button(ui, column(row, 7)) {
                 remove = Some(bit);
             }
-        }
+          }
+        });
         if let Some(bit) = remove {
             set_machine(data, bit, false);
         }
@@ -1308,6 +1335,42 @@ mod test {
             compare_moves(SortColumn::Type, false, (0, ""), 53, Some(m2), 0, (0, ""), 33, Some(m1), 1),
             std::cmp::Ordering::Less
         );
+    }
+
+    /// The height that the level-up table takes in its first frame, for `count` moves.
+    fn level_up_height(count: usize) -> f32 {
+        let mut learnset = Learnset::default();
+        learnset.level_up.moves = (0..count).map(|n| LevelUpMove { id: 33, level: 1 + n as u16 }).collect();
+        let ctx = egui::Context::default();
+        let mut input = egui::RawInput::default();
+        input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0)));
+        let mut height = 0.0;
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                // A parent with almost no room must not shrink the rows.
+                ui.allocate_ui(egui::vec2(TABLE_WIDTH, 20.0), |ui| {
+                    let before = ui.cursor().top();
+                    learnset.level_up_table(ui);
+                    height = ui.cursor().top() - before;
+                });
+            });
+        });
+        height
+    }
+
+    #[test]
+    fn a_table_shows_ten_rows_and_scrolls_inside() {
+        let (ten, thirty) = (level_up_height(10), level_up_height(30));
+        // The header and the buttons are the same for both. Only 10 rows show, and the rest scrolls.
+        assert!((thirty - ten).abs() < 1.0, "{ten} {thirty}");
+        assert!(thirty >= 10.0 * ROW_HEIGHT && thirty < 14.0 * ROW_HEIGHT, "{thirty}");
+        assert!(thirty < 30.0 * ROW_HEIGHT);
+    }
+
+    #[test]
+    fn a_short_table_takes_only_its_rows() {
+        let (three, five) = (level_up_height(3), level_up_height(5));
+        assert!((five - three - 2.0 * ROW_HEIGHT).abs() < 1.0, "{three} {five}");
     }
 
     #[test]

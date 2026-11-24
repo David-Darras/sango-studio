@@ -3,6 +3,10 @@
 //! Each row has the species that it evolves into, the method (level up, an item, a trade...) and what the
 //! method needs (a level, an item, a move...). The user can change every part, add an evolution and delete one.
 //! The file of the evolutions goes on the SD card (see `sango_core::evolution` for its path and layout).
+//!
+//! The game keeps the form of the Pokémon when it evolves. The target of an evolution can be any form of the species ("Rotom-Heat"):
+//! the form goes in `species/evolution_form/<species>_<form>.bin`, one byte for each place of the evolution table (0xFF keeps the form
+//! of the game). The plugin gives this form to the Pokémon after the evolution.
 
 use crate::evolution_csv;
 use crate::learnset::{choose, trash_button, Choice};
@@ -42,9 +46,25 @@ fn default_argument(kind: Argument) -> u16 {
     }
 }
 
+/// The value of a place of the file of the target forms that keeps the form of the game.
+const KEEP_FORM: u8 = 0xFF;
+
+/// The path on the SD card of the target forms of the evolutions of a species and a form.
+pub fn form_path(species: usize, form: usize) -> String {
+    format!("species/evolution_form/{species}_{form}.bin")
+}
+
 /// The state of the Evolution tab.
 #[derive(Default)]
 pub struct EvolutionTab {
+    /// The form that each place of the table gives (KEEP_FORM: the form stays), one for each place.
+    forms: Vec<u8>,
+    saved_forms: Vec<u8>,
+    /// The species and the form that are open.
+    species: usize,
+    form: usize,
+    sd: Option<SdCard>,
+    form_icons: HashMap<(usize, usize), Option<egui::TextureHandle>>,
     archive: Option<Garc>,
     species_archive: Option<Garc>,
     evolutions: Evolutions,
@@ -55,7 +75,6 @@ pub struct EvolutionTab {
     /// The place of the form in the archive: the number of the file that the plugin replaces.
     file: usize,
     icon_garc: Option<Garc>,
-    icon_textures: HashMap<usize, Option<egui::TextureHandle>>,
 }
 
 impl EvolutionTab {
@@ -64,7 +83,7 @@ impl EvolutionTab {
         self.archive = Garc::open(&dump.archive(evolution::ARCHIVE)).ok();
         self.species_archive = Garc::open(&dump.archive(crate::ARCHIVE)).ok();
         self.icon_garc = Garc::open(&dump.archive(crate::icons::ICON_ARCHIVE)).ok();
-        self.icon_textures.clear();
+        self.form_icons.clear();
     }
 
     /// The number of evolutions that the tab shows (for the tests).
@@ -79,14 +98,25 @@ impl EvolutionTab {
         self.saved = self.evolutions.clone();
     }
 
+    /// Reads the target forms of the evolutions of the open species and form.
+    fn load_forms(&mut self, sd: Option<&SdCard>) {
+        let mut forms = sd.and_then(|sd| sd.read(&form_path(self.species, self.form))).unwrap_or_default();
+        forms.resize(SLOTS, KEEP_FORM);
+        self.forms = forms;
+        self.saved_forms = self.forms.clone();
+    }
+
     fn read_romfs(&self, file: usize) -> Option<Evolutions> {
         self.archive.as_ref()?.first_file(file).and_then(|bytes| Evolutions::from_bytes(bytes).ok())
     }
 
     /// Reads the evolutions of a species and a form: the SD card first, then the romfs.
     /// `file` is the place of the form in the archive.
-    pub fn load(&mut self, sd: Option<&SdCard>, _species: usize, _form: usize, file: usize) {
+    pub fn load(&mut self, sd: Option<&SdCard>, species: usize, form: usize, file: usize) {
         self.file = file;
+        (self.species, self.form) = (species, form);
+        self.sd = sd.cloned();
+        self.load_forms(sd);
         let on_card = sd.and_then(|sd| sd.read(&evolution::sd_path(file))).and_then(|bytes| Evolutions::from_bytes(&bytes).ok());
         self.from_card = on_card.is_some();
         self.evolutions = on_card.or_else(|| self.read_romfs(file)).unwrap_or_default();
@@ -95,7 +125,7 @@ impl EvolutionTab {
 
     /// True when the evolutions changed since they were read or saved.
     pub fn changed(&self) -> bool {
-        self.evolutions != self.saved
+        self.evolutions != self.saved || self.forms != self.saved_forms
     }
 
     /// True when the file comes from the SD card.
@@ -105,7 +135,16 @@ impl EvolutionTab {
 
     /// Writes the file when it changed, and tells the game. Returns the path that was written.
     pub fn save(&mut self, sd: &SdCard, _species: usize, _form: usize) -> Result<Option<String>, String> {
-        if !self.changed() {
+        if self.forms != self.saved_forms {
+            let path = form_path(self.species, self.form);
+            if self.forms.iter().all(|&form| form == KEEP_FORM) {
+                sd.remove(&path).and_then(|_| sd.mark_changed(&path))?;
+            } else {
+                sd.write(&path, &self.forms).and_then(|_| sd.mark_changed(&path))?;
+            }
+            self.saved_forms = self.forms.clone();
+        }
+        if self.evolutions == self.saved {
             return Ok(None);
         }
         let path = evolution::sd_path(self.file);
@@ -120,9 +159,14 @@ impl EvolutionTab {
         list.iter().enumerate().map(|(place, name)| Choice { label: name.to_string(), kind: None, value: place + first }).collect()
     }
 
-    /// The choices for the species that it evolves into.
+    /// The choices for the species that a method needs.
     fn species_choices() -> Vec<Choice> {
         crate::species_ids().into_iter().map(|number| Choice { label: crate::species_name(number), kind: None, value: number }).collect()
+    }
+
+    /// The choices for the Pokémon that it evolves into: each species and each of its forms ("Rotom-Heat").
+    fn target_choices() -> Vec<Choice> {
+        crate::species_form_menu(crate::species_ids()).into_iter().map(|(key, label)| Choice { label, kind: None, value: key as usize }).collect()
     }
 
     /// Draws the tab.
@@ -202,6 +246,11 @@ impl EvolutionTab {
         }
         if let Some(index) = remove {
             self.evolutions.list.remove(index);
+            // The forms follow the places of the evolutions.
+            if index < self.forms.len() {
+                self.forms.remove(index);
+                self.forms.push(KEEP_FORM);
+            }
         }
     }
 
@@ -221,16 +270,23 @@ impl EvolutionTab {
         let id = egui::Id::new(("evolution_species", index));
         let response = Self::click_area(ui, cell, id);
         let species = entry.species as usize;
-        if let Some(texture) = crate::icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), species) {
+        let target = self.forms.get(index).copied().unwrap_or(KEEP_FORM);
+        let shown_form = if target == KEEP_FORM { 0 } else { target as usize };
+        if let Some(texture) = crate::form_icon(&mut self.form_icons, self.icon_garc.as_ref(), self.sd.as_ref(), ui.ctx(), species, shown_form) {
             let icon = egui::Rect::from_min_size(egui::pos2(cell.left() + 4.0, cell.center().y - 15.0), egui::vec2(40.0, 30.0));
             let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
             ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
         }
         ui.painter().text(egui::pos2(cell.left() + 52.0, cell.center().y), egui::Align2::LEFT_CENTER, format!("#{species:04}"), egui::FontId::proportional(12.0), color::MUTED);
-        ui.painter().text(egui::pos2(cell.left() + 104.0, cell.center().y), egui::Align2::LEFT_CENTER, crate::species_name(species), egui::FontId::proportional(15.0), color::TEXT);
-        let choices = if popup_open { Self::species_choices() } else { Vec::new() };
-        if let Some(value) = choose(ui, id, &response, &choices, Some(species)) {
-            entry.species = value as u16;
+        ui.painter().text(egui::pos2(cell.left() + 104.0, cell.center().y), egui::Align2::LEFT_CENTER, crate::species_form_name(species, shown_form), egui::FontId::proportional(15.0), color::TEXT);
+        let choices = if popup_open { Self::target_choices() } else { Vec::new() };
+        if let Some(value) = choose(ui, id, &response, &choices, Some(crate::form_key(species, shown_form) as usize)) {
+            let (chosen, form) = crate::from_form_key(value as u16);
+            entry.species = chosen as u16;
+            // The first form is the rule of the game: the Pokémon keeps its form.
+            if let Some(place) = self.forms.get_mut(index) {
+                *place = if form == 0 { KEEP_FORM } else { form as u8 };
+            }
         }
     }
 
@@ -298,6 +354,30 @@ impl EvolutionTab {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// The target form of an evolution goes in its own file, which goes away when every place keeps the form again.
+    #[test]
+    fn the_target_form_of_an_evolution_is_saved() {
+        let folder = std::env::temp_dir().join(format!("sango_evolution_forms_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let mut tab = EvolutionTab::default();
+        tab.load(Some(&sd), 412, 1, 412);
+        assert_eq!(tab.forms, vec![KEEP_FORM; SLOTS]);
+        tab.evolutions.list = vec![Evolution { method: 4, argument: 20, species: 413 }];
+        tab.forms[0] = 2;
+        assert!(tab.changed());
+        tab.save(&sd, 412, 1).unwrap();
+        assert_eq!(sd.read(&form_path(412, 1)).unwrap(), [2, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        let mut again = EvolutionTab::default();
+        again.load(Some(&sd), 412, 1, 412);
+        assert_eq!(again.forms[0], 2);
+        again.forms[0] = KEEP_FORM;
+        again.save(&sd, 412, 1).unwrap();
+        assert!(sd.read(&form_path(412, 1)).is_none());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 
     #[test]
     fn a_new_argument_fits_its_method() {

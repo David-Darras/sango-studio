@@ -201,6 +201,23 @@ impl Library {
         }
     }
 
+    /// The names of the forms of the active packs that have one: `(species, form, name)`.
+    pub fn form_names(&self) -> Vec<(u16, u16, String)> {
+        let mut names = Vec::new();
+        for pack in self.packs.iter().filter(|pack| self.is_active(&pack.id)) {
+            for form in pack.forms.iter().filter(|form| !form.name.trim().is_empty()) {
+                let species = match &form.species {
+                    Ref::Game(number) => Some(*number),
+                    Ref::Key(key) => self.number_of(key),
+                };
+                if let Some(species) = species {
+                    names.push((species, form.form, form.name.trim().to_string()));
+                }
+            }
+        }
+        names
+    }
+
     fn is_active(&self, pack_id: &str) -> bool {
         self.registry.packs.iter().any(|p| p.id == pack_id && p.active)
     }
@@ -435,9 +452,10 @@ impl Library {
         self.store_user_pack(sd, old.as_ref(), pack, new_files)
     }
 
-    /// Adds a form to a species of the game or of a pack, with the data `data` (80 bytes) and the number `form`. The form is kept in the pack
-    /// of the user, `studio-models`, that this creates. The form shows the model that the game has for it until the user imports one.
-    pub fn add_form(&mut self, sd: &SdCard, species: Ref, form: u16, data: &[u8], mega: crate::table::MegaCondition) -> Result<(), String> {
+    /// Adds a form to a species of the game or of a pack, with the data `data` (80 bytes), the number `form` and the name `name` for the
+    /// menus (can be empty). The form is kept in the pack of the user, `studio-models`, that this creates. The form shows the model that
+    /// the game has for it until the user imports one.
+    pub fn add_form(&mut self, sd: &SdCard, species: Ref, form: u16, name: &str, data: &[u8], mega: crate::table::MegaCondition) -> Result<(), String> {
         mega.check()?;
         if data.len() != crate::pack::DATA_SIZE {
             return Err(format!("The data of a form has {} bytes, not {}.", crate::pack::DATA_SIZE, crate::pack::DATA_SIZE));
@@ -447,8 +465,43 @@ impl Library {
         if pack.forms.iter().any(|f| f.species == species && f.form == form) {
             return Err(format!("The form {form} is already one of your forms."));
         }
-        pack.forms.push(PackForm { species, form, name: String::new(), model: None, female_model: None, data: crate::pack::to_hex(data), mega: Some(mega) });
+        pack.forms.push(PackForm { species, form, name: name.trim().to_string(), model: None, female_model: None, data: crate::pack::to_hex(data), mega: Some(mega) });
         self.store_user_pack(sd, old.as_ref(), pack, None)
+    }
+
+    /// Adds a species of its own (a number from 724 on), with its name, its data (80 bytes) and the model of a species of the game
+    /// until the user imports one. It goes in the pack of the user, `studio-models`. Gives the number of the new species.
+    pub fn add_species(&mut self, sd: &SdCard, name: &str, data: &[u8], native_model: u16) -> Result<u16, String> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err("The new species needs a name.".into());
+        }
+        if data.len() != crate::pack::DATA_SIZE {
+            return Err(format!("The data of a species has {} bytes, not {}.", data.len(), crate::pack::DATA_SIZE));
+        }
+        if self.registry.species.iter().any(|s| s.name == name) {
+            return Err(format!("A species is already named '{name}'."));
+        }
+        let old = self.packs.iter().find(|p| p.id == REPLACEMENT_PACK).cloned();
+        let mut pack = old.clone().unwrap_or_else(|| Pack { id: REPLACEMENT_PACK.into(), name: "My models".into(), version: "1".into(), ..Pack::default() });
+        pack.species.push(crate::pack::PackSpecies { name: name.to_string(), model: ModelRef::Native { native: native_model }, data: crate::pack::to_hex(data), moves: Vec::new(), evolutions: Vec::new() });
+        self.store_user_pack(sd, old.as_ref(), pack, None)?;
+        self.number_of(name).ok_or_else(|| format!("The species '{name}' has no number."))
+    }
+
+    /// Removes a species that the user made (see [`Library::add_species`]) and its forms. Its number stays taken, with an empty
+    /// entry in the table, so that the numbers of the other species do not move.
+    pub fn remove_species(&mut self, sd: &SdCard, name: &str) -> Result<(), String> {
+        let old = self
+            .packs
+            .iter()
+            .find(|p| p.id == REPLACEMENT_PACK && p.species.iter().any(|s| s.name == name))
+            .cloned()
+            .ok_or("Only a species made in Sango Studio can be deleted here: remove the pack that has it on the Pack page.")?;
+        let mut pack = old.clone();
+        pack.species.retain(|s| s.name != name);
+        pack.forms.retain(|f| f.species != Ref::key(name));
+        self.store_user_pack(sd, Some(&old), pack, None)
     }
 
     /// Sets what lets a Pokémon of the species change into its form `form` of a pack in a battle. The pack that owns the form is written

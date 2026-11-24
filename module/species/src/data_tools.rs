@@ -37,10 +37,18 @@ pub enum Part {
     Texts,
     Icons,
     Cries,
+    Mega,
 }
 
 impl Part {
-    pub const ALL: [Part; 6] = [Part::Data, Part::Moves, Part::Evolutions, Part::Texts, Part::Icons, Part::Cries];
+    pub const ALL: [Part; 7] = [Part::Data, Part::Moves, Part::Evolutions, Part::Texts, Part::Icons, Part::Cries, Part::Mega];
+
+    /// The parts of each tab of the page, for the reset window.
+    pub const BY_TAB: [(&'static str, &'static [Part]); 3] = [
+        ("General", &[Part::Data, Part::Texts, Part::Icons, Part::Cries]),
+        ("Learnset", &[Part::Moves]),
+        ("Evolution", &[Part::Evolutions, Part::Mega]),
+    ];
 
     fn label(self) -> &'static str {
         match self {
@@ -50,18 +58,20 @@ impl Part {
             Part::Texts => "Texts",
             Part::Icons => "Icons",
             Part::Cries => "Cries",
+            Part::Mega => "Mega Evolutions",
         }
     }
 
     /// What the part holds, for the help text.
     fn hint(self) -> &'static str {
         match self {
-            Part::Data => "General tab: stats, types, abilities, items, shape and the other fields.",
-            Part::Moves => "Learnset tab: level-up moves and egg moves.",
-            Part::Evolutions => "Evolution tab.",
-            Part::Texts => "Text tab: name, category, entry, form name, height and weight, in every language.",
-            Part::Icons => "The icon card of the General tab: the pictures of the species in the lists.",
-            Part::Cries => "The cry card of the General tab: the sound of the species.",
+            Part::Data => "Stats, types, abilities, items, shape and the other fields.",
+            Part::Moves => "Level-up moves and egg moves.",
+            Part::Evolutions => "The evolutions.",
+            Part::Texts => "Name, category, description, form name, height and weight, in every language.",
+            Part::Icons => "The pictures of the species in the lists.",
+            Part::Cries => "The sound of the species.",
+            Part::Mega => "The Mega Evolutions of the game for the species (all its forms).",
         }
     }
 
@@ -70,10 +80,11 @@ impl Part {
         match self {
             Part::Data => &["species/data"],
             Part::Moves => &["species/level_up_moves", "species/egg_moves"],
-            Part::Evolutions => &["species/evolution"],
+            Part::Evolutions => &["species/evolution", "species/evolution_form"],
             Part::Texts => &["game_text"],
             Part::Icons => &["species/icon"],
             Part::Cries => &["species/cry"],
+            Part::Mega => &["species/mega_evolution"],
         }
     }
 
@@ -162,8 +173,10 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
             }
             (Part::Evolutions, Scope::All) => {
                 remove(sd.files_in("species/evolution"))?;
+                remove(sd.files_in("species/evolution_form"))?;
             }
             (Part::Evolutions, _) => {
+                remove(forms.iter().map(|&f| crate::evolution::form_path(species, f)).collect())?;
                 remove(forms.iter().filter(|_| species <= crate::SPECIES.len()).map(|&f| evolution::sd_path(crate::file_index(library.species, species, f))).collect())?;
             }
             (Part::Icons, Scope::All) => remove(sd.files_in("species/icon"))?,
@@ -177,6 +190,8 @@ pub fn reset(sd: &SdCard, scope: Scope, parts: &[Part], species: usize, form: us
                 }
             }
             (Part::Texts, _) => reset_texts(sd, species, &forms, library)?,
+            (Part::Mega, Scope::All) => remove(sd.files_in("species/mega_evolution"))?,
+            (Part::Mega, _) => remove(vec![sango_core::mega_evolution::sd_path(species)])?,
             (Part::Cries, Scope::All) => remove(sd.files_in("species/cry"))?,
             (Part::Cries, _) => {
                 let waves: BTreeSet<u32> = forms.iter().flat_map(|&f| (0..sango_cry::table::KINDS.len()).filter_map(move |kind| sango_cry::table::voice(species, f, kind))).map(|voice| voice.wave).collect();
@@ -238,7 +253,7 @@ pub struct Tools {
     pub history: Vec<Backup>,
     pub reset_open: bool,
     pub scope: Scope,
-    pub parts: [bool; 6],
+    pub parts: [bool; 7],
     /// The parts of the CSV files: Data, Moves, Evolutions, Texts.
     pub csv_parts: [bool; 4],
     /// The windows of the buttons Export… and Import….
@@ -248,7 +263,7 @@ pub struct Tools {
 
 impl Default for Tools {
     fn default() -> Self {
-        Tools { history: Vec::new(), reset_open: false, scope: Scope::Form, parts: [false; 6], csv_parts: [true; 4], export_open: false, import_open: false }
+        Tools { history: Vec::new(), reset_open: false, scope: Scope::Form, parts: [false; 7], csv_parts: [true; 4], export_open: false, import_open: false }
     }
 }
 
@@ -345,16 +360,23 @@ impl Species {
             ui.radio_value(&mut self.tools.scope, Scope::All, "All the species");
             ui.add_space(8.0);
             ui.label(egui::RichText::new("What").strong());
-            for (place, part) in Part::ALL.iter().enumerate() {
-                ui.checkbox(&mut self.tools.parts[place], part.label()).on_hover_text(part.hint());
-                ui.label(widget::hint(part.hint()));
+            for (tab, parts) in Part::BY_TAB {
+                ui.label(egui::RichText::new(tab).color(color::MUTED).size(12.5));
+                for part in parts {
+                    let place = Part::ALL.iter().position(|p| p == part).unwrap_or(0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(12.0);
+                        ui.checkbox(&mut self.tools.parts[place], part.label());
+                        ui.label(widget::hint(part.hint()));
+                    });
+                }
             }
             ui.horizontal(|ui| {
                 if ui.small_button("All parts").clicked() {
-                    self.tools.parts = [true; 6];
+                    self.tools.parts = [true; 7];
                 }
                 if ui.small_button("No part").clicked() {
-                    self.tools.parts = [false; 6];
+                    self.tools.parts = [false; 7];
                 }
             });
             ui.add_space(8.0);

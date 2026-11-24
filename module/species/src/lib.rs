@@ -35,7 +35,7 @@ pub use names::TYPE as TYPE_NAMES;
 
 pub use sango_species_base::{battle_icons, data, extras, form_names, icons, move_names, names};
 pub use sango_species_base::{form_choices, form_key, form_leveling_rates, from_form_key, menu_form_count, species_form_menu, species_form_name, game_type_menu, leveling_rates, open_species, open_species_form, searchable_picker, species_abilities, summaries, type_menu, SpeciesAbilities, SpeciesIcons, Summary};
-use sango_species_base::{file_index, game_data, icon_texture, menu, name_from, sd_path, OPEN_SPECIES, SPECIES_COUNT};
+use sango_species_base::{file_index, game_data, menu, name_from, sd_path, OPEN_SPECIES, SPECIES_COUNT};
 use data::SpeciesData;
 use examples::{Examples, Field};
 use pokedex_data::PokedexData;
@@ -84,6 +84,11 @@ pub struct Species {
     form: usize,
     /// The data in the form.
     data: Option<SpeciesData>,
+    /// The data of the game (or of the pack) of the open species and form: the fields that differ from it show a mark and a button
+    /// that puts the value of the game back.
+    game: Option<SpeciesData>,
+    /// The window of the button "+ New species", when it is open.
+    new_pokemon: Option<NewPokemon>,
     /// The data as it was loaded or saved: to know what changed.
     baseline: Option<SpeciesData>,
     /// True when the data came from the SD card.
@@ -157,6 +162,8 @@ impl Default for Species {
             form: 0,
             data: None,
             baseline: None,
+            game: None,
+            new_pokemon: None,
             from_sd: false,
             pokedex: None,
             pokedex_archive: None,
@@ -244,6 +251,132 @@ pub(crate) fn form_icon<'a>(
             Some(sango_ui::textures::load(ctx, format!("form_icon_{species}_{form}"), pixels, egui::TextureOptions::NEAREST))
         })
         .as_ref()
+}
+
+/// The state of the window of the button "+ New species".
+struct NewPokemon {
+    /// True: a species of its own (a number of its own, for example a creature of another game). False: a new form of a species.
+    own: bool,
+    /// The species that gets the new form.
+    species: usize,
+    /// The name of the form in the menus ("Ice" gives "Rotom-Ice"), or the name of the new species.
+    name: String,
+    /// True: a copy of the open Pokémon. False: a template.
+    copy: bool,
+}
+
+/// The data of a new species-form made from a template: the data of the open Pokémon with stats of 50, the Normal type, no EV yield and
+/// no held item. The fields of the forms stay: the game needs them.
+fn template_data(open: &SpeciesData) -> SpeciesData {
+    let mut data = open.clone();
+    data.base_hp = 50;
+    data.base_attack = 50;
+    data.base_defense = 50;
+    data.base_special_attack = 50;
+    data.base_special_defense = 50;
+    data.base_speed = 50;
+    data.type_1 = 0;
+    data.type_2 = 0;
+    for set in [SpeciesData::set_ev_hp, SpeciesData::set_ev_attack, SpeciesData::set_ev_defense, SpeciesData::set_ev_special_attack, SpeciesData::set_ev_special_defense, SpeciesData::set_ev_speed] {
+        set(&mut data, 0);
+    }
+    data.item_50 = 0;
+    data.item_5 = 0;
+    data
+}
+
+/// The keys in the memory of the interface: the group of the fields that are drawn, the fields that differ from the game, and the field
+/// whose value of the game the user asked back.
+const GROUP_ID: &str = "species_field_group";
+const MODIFIED_ID: &str = "species_modified_fields";
+const REVERT_ID: &str = "species_revert_field";
+
+/// The fields of the General tab that can show a mark and go back to the value of the game: "group/label".
+const FIELD_KEYS: [&str; 31] = [
+    "Base stats/HP", "Base stats/Attack", "Base stats/Defense", "Base stats/Special Attack", "Base stats/Special Defense", "Base stats/Speed",
+    "EV yield/HP", "EV yield/Attack", "EV yield/Defense", "EV yield/Special Attack", "EV yield/Special Defense", "EV yield/Speed",
+    "Characteristics/Type 1", "Characteristics/Type 2", "Characteristics/Ability 1", "Characteristics/Ability 2", "Characteristics/Hidden ability",
+    "Characteristics/Egg Group 1", "Characteristics/Egg Group 2", "Characteristics/Held Item 50%", "Characteristics/Held Item 5%",
+    "Characteristics/Leveling rate", "Characteristics/Color", "Characteristics/Gender ratio", "Characteristics/Hatch time",
+    "Characteristics/Height", "Characteristics/Weight", "Characteristics/Catch rate", "Characteristics/Base friendship",
+    "Characteristics/Base experience", "Characteristics/Burrowed entry",
+];
+
+/// The value of a field of [`FIELD_KEYS`].
+fn field_value(key: &str, d: &SpeciesData) -> Option<u32> {
+    Some(match key {
+        "Base stats/HP" => d.base_hp as u32,
+        "Base stats/Attack" => d.base_attack as u32,
+        "Base stats/Defense" => d.base_defense as u32,
+        "Base stats/Special Attack" => d.base_special_attack as u32,
+        "Base stats/Special Defense" => d.base_special_defense as u32,
+        "Base stats/Speed" => d.base_speed as u32,
+        "EV yield/HP" => d.ev_hp() as u32,
+        "EV yield/Attack" => d.ev_attack() as u32,
+        "EV yield/Defense" => d.ev_defense() as u32,
+        "EV yield/Special Attack" => d.ev_special_attack() as u32,
+        "EV yield/Special Defense" => d.ev_special_defense() as u32,
+        "EV yield/Speed" => d.ev_speed() as u32,
+        "Characteristics/Type 1" => d.type_1 as u32,
+        "Characteristics/Type 2" => d.type_2 as u32,
+        "Characteristics/Ability 1" => d.ability_1 as u32,
+        "Characteristics/Ability 2" => d.ability_2 as u32,
+        "Characteristics/Hidden ability" => d.ability_hidden as u32,
+        "Characteristics/Egg Group 1" => d.egg_group_1 as u32,
+        "Characteristics/Egg Group 2" => d.egg_group_2 as u32,
+        "Characteristics/Held Item 50%" => d.item_50 as u32,
+        "Characteristics/Held Item 5%" => d.item_5 as u32,
+        "Characteristics/Leveling rate" => d.leveling_rate as u32,
+        "Characteristics/Color" => d.color as u32,
+        "Characteristics/Gender ratio" => d.gender_ratio as u32,
+        "Characteristics/Hatch time" => d.hatch_time as u32,
+        "Characteristics/Height" => d.height as u32,
+        "Characteristics/Weight" => d.weight as u32,
+        "Characteristics/Catch rate" => d.catch_rate as u32,
+        "Characteristics/Base friendship" => d.base_friendship as u32,
+        "Characteristics/Base experience" => d.base_experience as u32,
+        "Characteristics/Burrowed entry" => d.is_burrowed_entry() as u32,
+        _ => return None,
+    })
+}
+
+/// Gives a value to a field of [`FIELD_KEYS`].
+fn set_field(key: &str, d: &mut SpeciesData, value: u32) {
+    let (byte, word) = (value as u8, value as u16);
+    match key {
+        "Base stats/HP" => d.base_hp = byte,
+        "Base stats/Attack" => d.base_attack = byte,
+        "Base stats/Defense" => d.base_defense = byte,
+        "Base stats/Special Attack" => d.base_special_attack = byte,
+        "Base stats/Special Defense" => d.base_special_defense = byte,
+        "Base stats/Speed" => d.base_speed = byte,
+        "EV yield/HP" => d.set_ev_hp(byte),
+        "EV yield/Attack" => d.set_ev_attack(byte),
+        "EV yield/Defense" => d.set_ev_defense(byte),
+        "EV yield/Special Attack" => d.set_ev_special_attack(byte),
+        "EV yield/Special Defense" => d.set_ev_special_defense(byte),
+        "EV yield/Speed" => d.set_ev_speed(byte),
+        "Characteristics/Type 1" => d.type_1 = byte,
+        "Characteristics/Type 2" => d.type_2 = byte,
+        "Characteristics/Ability 1" => d.ability_1 = byte,
+        "Characteristics/Ability 2" => d.ability_2 = byte,
+        "Characteristics/Hidden ability" => d.ability_hidden = byte,
+        "Characteristics/Egg Group 1" => d.egg_group_1 = byte,
+        "Characteristics/Egg Group 2" => d.egg_group_2 = byte,
+        "Characteristics/Held Item 50%" => d.item_50 = word,
+        "Characteristics/Held Item 5%" => d.item_5 = word,
+        "Characteristics/Leveling rate" => d.leveling_rate = byte,
+        "Characteristics/Color" => d.color = byte,
+        "Characteristics/Gender ratio" => d.gender_ratio = byte,
+        "Characteristics/Hatch time" => d.hatch_time = byte,
+        "Characteristics/Height" => d.height = word,
+        "Characteristics/Weight" => d.weight = word,
+        "Characteristics/Catch rate" => d.catch_rate = byte,
+        "Characteristics/Base friendship" => d.base_friendship = byte,
+        "Characteristics/Base experience" => d.base_experience = word,
+        "Characteristics/Burrowed entry" => d.set_burrowed_entry(value != 0),
+        _ => {}
+    }
 }
 
 /// The name of a species and a form in the list ("Rotom-Heat").
@@ -544,6 +677,7 @@ impl Species {
                 }
             }
         }
+        self.game = self.read_romfs().ok();
         match on_card.map(Ok).unwrap_or_else(|| self.read_romfs()) {
             Ok(data) => {
                 self.baseline = Some(data.clone());
@@ -602,6 +736,7 @@ impl Species {
         let mut reset_more = false;
         let mut save = false;
         let mut add_form = false;
+        let mut delete_open = false;
         let before = (self.species, self.form);
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -815,10 +950,19 @@ impl Species {
                 self.form = self.form.min(forms.saturating_sub(1));
                 let has_card = session.sd.is_some() && self.garc.is_some();
                 ui.add_enabled_ui(has_card && self.data.is_some(), |ui| {
-                    add_form = widget::button_styled(ui, egui::RichText::new("+ New form").color(color::WHITE), Some(color::ACCENT));
+                    add_form = widget::button_styled(ui, egui::RichText::new("+ New species").color(color::WHITE), Some(color::ACCENT));
                 })
                 .response
-                .on_hover_text("Makes a new form of this species. It starts with the data that are open now. Edit it with the usual tabs.");
+                .on_hover_text("Makes a new species-form (for example \"Rotom-Ice\"), with its own data, icon and model. It starts as a copy of the open one or as a template.");
+                // Only a species-form that was added (by a pack or by "+ New species") can be deleted.
+                let added = (self.form > 0 && extras::pack_forms(self.species).iter().any(|f| f.form as usize == self.form)) || (self.form == 0 && self.species > SPECIES_COUNT);
+                ui.add_enabled_ui(session.sd.is_some() && added, |ui| {
+                    if widget::confirm_button(ui, "Delete", "Click again to delete") {
+                        delete_open = true;
+                    }
+                })
+                .response
+                .on_hover_text(if added { "Deletes this added species-form: its data, and its place in the lists." } else { "Only an added species-form can be deleted, not one of the game." });
                 ui.add_enabled_ui(self.garc.is_some(), |ui| {
                     if widget::button(ui, "Export…") {
                         self.tools.export_open = true;
@@ -855,12 +999,20 @@ impl Species {
         if (self.species, self.form) != before {
             self.loaded = None;
         }
+        if delete_open {
+            if self.form == 0 && self.species > SPECIES_COUNT {
+                self.delete_species(session);
+            } else {
+                let form = self.form as u16;
+                self.delete_form(session, form);
+            }
+        }
         if add_form {
-            self.add_form(session);
+            self.new_pokemon = Some(NewPokemon { own: false, species: self.species, name: String::new(), copy: true });
         }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [false; 6];
+            self.tools.parts = [false; 7];
             if let Some(part) = data_tools::tab_part(self.tab) {
                 self.tools.parts[data_tools::Part::ALL.iter().position(|p| *p == part).unwrap_or(0)] = true;
             }
@@ -870,10 +1022,118 @@ impl Species {
         }
     }
 
-    /// Makes a new form of the open species with the data that are open (like the button "+ New item"): the form is kept in the pack of
-    /// the user and is open at once.
-    fn add_form(&mut self, session: &Session) {
-        self.new_form(session, sango_pack::table::MegaCondition::Never);
+    /// The window of the button "+ New species": the species, the name of the form, and what the new species-form starts with.
+    fn new_pokemon_window(&mut self, ctx: &egui::Context, session: &Session) {
+        let Some(mut state) = self.new_pokemon.take() else { return };
+        let mut open = true;
+        let mut create = false;
+        let mut cancel = false;
+        let open_name = format!("#{:04} {}", self.species, entry_name(self.species, self.form));
+        egui::Window::new("New species").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+            ui.set_max_width(480.0);
+            ui.label(egui::RichText::new("What is it?").strong());
+            ui.radio_value(&mut state.own, false, "A new form of a species that exists (Rotom-Ice, a regional form...)");
+            ui.radio_value(&mut state.own, true, "A species of its own, linked to no other (a creature of another game, a fakemon...)");
+            ui.add_space(6.0);
+            egui::Grid::new("new_pokemon").num_columns(2).spacing(egui::vec2(10.0, 8.0)).show(ui, |ui| {
+                if state.own {
+                    ui.label("Name of the species");
+                    ui.add(egui::TextEdit::singleline(&mut state.name).hint_text("Jibanyan").desired_width(260.0));
+                    ui.end_row();
+                } else {
+                    ui.label("Species");
+                    let mut number = state.species as u16;
+                    let shown = format!("#{:04} {}", state.species, species_name(state.species));
+                    if sango_ui::picker::picker(ui, "new_pokemon_species", &shown, 260.0, &mut number, None, || {
+                        vec![sango_ui::picker::Group { title: String::new(), entries: extras::species_ids().into_iter().map(|n| (n as u16, format!("#{n:04} {}", species_name(n)))).collect() }]
+                    }) {
+                        state.species = number as usize;
+                    }
+                    ui.end_row();
+                    ui.label("Name of the form");
+                    ui.add(egui::TextEdit::singleline(&mut state.name).hint_text("Ice").desired_width(260.0));
+                    ui.end_row();
+                }
+                ui.label("Starts with");
+                ui.vertical(|ui| {
+                    ui.radio_value(&mut state.copy, true, format!("A copy of {open_name}"));
+                    ui.radio_value(&mut state.copy, false, "A template: stats of 50, Normal type, no held item");
+                });
+                ui.end_row();
+            });
+            ui.add_space(6.0);
+            if state.own {
+                let shown = if state.name.trim().is_empty() { "(name)".to_string() } else { state.name.trim().to_string() };
+                ui.label(widget::hint(&format!("In the lists: {shown}, with the next free number (724 and more). It has no evolution and no move at first. It shows the model of {} until you import its own (Model tab); give it its icon in the General tab.", species_name(self.species))));
+            } else {
+                let shown_name = if state.name.trim().is_empty() { "Form".to_string() } else { state.name.trim().replace(' ', "-") };
+                ui.label(widget::hint(&format!("In the lists: {}-{shown_name}. Then give it its icon (General tab) and its model (Model tab).", species_name(state.species))));
+            }
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                let named = !state.own || !state.name.trim().is_empty();
+                ui.add_enabled_ui(session.sd.is_some() && self.data.is_some() && named, |ui| {
+                    create = widget::button_styled(ui, egui::RichText::new("Create").color(color::WHITE), Some(color::ACCENT));
+                });
+                cancel = widget::button(ui, "Cancel");
+            });
+        });
+        if create {
+            self.create_pokemon(session, &state);
+        } else if open && !cancel {
+            self.new_pokemon = Some(state);
+        }
+    }
+
+    /// Makes the new species-form of the window: a form of its species in the pack of the user, open at once.
+    fn create_pokemon(&mut self, session: &Session, state: &NewPokemon) {
+        let (Some(sd), Some(open)) = (session.sd.as_ref(), self.data.as_ref()) else { return };
+        let mut data = if state.copy { open.clone() } else { template_data(open) };
+        if state.own {
+            // A species of its own has one form, and no link to the forms of the open species.
+            data.total_form_count = 1;
+            data.alternate_form_file = 0;
+            data.alternate_form_model = 0;
+            let native_model = if self.species <= SPECIES_COUNT { self.species as u16 } else { 1 };
+            let result = sango_pack::Library::open(sd).and_then(|mut library| {
+                let number = library.add_species(sd, &state.name, &data.to_bytes(), native_model)?;
+                library.save(sd)?;
+                Ok(number)
+            });
+            match result {
+                Ok(number) => {
+                    extras::invalidate();
+                    extras::refresh(Some(sd));
+                    self.species = number as usize;
+                    self.form = 0;
+                    self.loaded = None;
+                    self.list_rows = None;
+                    self.status = Some((true, format!("#{number:04} {} is made. Change its data with the tabs and press Save. Restart the game to see it.", state.name.trim())));
+                }
+                Err(message) => self.status = Some((false, message)),
+            }
+            return;
+        }
+        let species = state.species;
+        let reference = if species <= SPECIES_COUNT { sango_pack::Ref::Game(species as u16) } else { sango_pack::Ref::key(&species_name(species)) };
+        let form = form_count_of(self.garc.as_ref(), species);
+        let result = u16::try_from(form).map_err(|_| "The species has too many forms.".to_string()).and_then(|number| {
+            let mut library = sango_pack::Library::open(sd)?;
+            library.add_form(sd, reference, number, &state.name, &data.to_bytes(), sango_pack::table::MegaCondition::Never)?;
+            library.save(sd)
+        });
+        match result {
+            Ok(()) => {
+                extras::invalidate();
+                extras::refresh(Some(sd));
+                self.species = species;
+                self.form = form;
+                self.loaded = None;
+                self.list_rows = None;
+                self.status = Some((true, format!("{} is made. Change its data with the tabs and press Save. Restart the game to see it.", entry_name(species, form))));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
     }
 
     /// Makes a new form of the open species with the data that are open. `mega` tells what lets the Pokémon change into the form in a
@@ -884,7 +1144,7 @@ impl Species {
         let form = self.total_form_count();
         let result = u16::try_from(form).map_err(|_| "The species has too many forms.".to_string()).and_then(|number| {
             let mut library = sango_pack::Library::open(sd)?;
-            library.add_form(sd, species, number, &data.to_bytes(), mega)?;
+            library.add_form(sd, species, number, "", &data.to_bytes(), mega)?;
             library.save(sd)
         });
         match result {
@@ -900,6 +1160,31 @@ impl Species {
     }
 
     /// Deletes a pack form of the open species.
+    /// Deletes the open species when the user made it with "+ New species", with its forms.
+    fn delete_species(&mut self, session: &Session) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        let name = species_name(self.species);
+        let result = sango_pack::Library::open(sd).and_then(|mut library| {
+            library.remove_species(sd, &name)?;
+            library.save(sd)
+        });
+        match result {
+            Ok(()) => {
+                for form in 0..self.total_form_count() {
+                    let _ = sd.remove(&sd_path(self.species, form));
+                }
+                extras::invalidate();
+                extras::refresh(Some(sd));
+                self.species = 1;
+                self.form = 0;
+                self.loaded = None;
+                self.list_rows = None;
+                self.status = Some((true, format!("{name} was deleted. Restart the game to see it.")));
+            }
+            Err(message) => self.status = Some((false, message)),
+        }
+    }
+
     pub(crate) fn delete_form(&mut self, session: &Session, form: u16) {
         let Some(sd) = session.sd.as_ref() else { return };
         let species = self.pack_ref();
@@ -912,11 +1197,13 @@ impl Species {
                 let _ = sd.remove(&sd_path(self.species, form as usize));
                 extras::invalidate();
                 extras::refresh(Some(sd));
+                let name = entry_name(self.species, form as usize);
                 if self.form == form as usize {
                     self.form = 0;
                     self.loaded = None;
                 }
-                self.status = Some((true, format!("The form {form} of {} was deleted. Restart the game to see it.", species_name(self.species))));
+                self.list_rows = None;
+                self.status = Some((true, format!("{name} was deleted. Restart the game to see it.")));
             }
             Err(message) => self.status = Some((false, message)),
         }
@@ -1428,9 +1715,20 @@ fn example_lines(ui: &egui::Ui, field: Field, value: u32) -> Vec<String> {
 
 /// A line of the grid: field label with an optional Bulbapedia info note, then its widgets.
 fn line_with_note(ui: &mut egui::Ui, label: &str, note: Option<FieldNote>, add: impl FnOnce(&mut egui::Ui)) {
+    let group: String = ui.ctx().data(|d| d.get_temp(egui::Id::new(GROUP_ID))).unwrap_or_default();
+    let key = format!("{group}/{label}");
+    let modified: std::collections::HashSet<String> = ui.ctx().data(|d| d.get_temp(egui::Id::new(MODIFIED_ID))).unwrap_or_default();
+    let is_modified = modified.contains(&key);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(widget::hint(label));
+        ui.label(if is_modified { egui::RichText::new(label).color(color::ACCENT).size(13.0) } else { widget::hint(label) });
+        if is_modified {
+            // The value is not the one of the game: a button puts it back.
+            let back = ui.add(egui::Button::new(egui::RichText::new("↺").color(color::ACCENT)).small().frame(false)).on_hover_text("Changed. Click to put back the value of the game.");
+            if back.clicked() {
+                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(REVERT_ID), key.clone()));
+            }
+        }
         if let Some(n) = note {
             let info = ui.hyperlink_to("ℹ", n.url);
             info.on_hover_ui(|ui| {
@@ -1536,6 +1834,8 @@ fn grid(name: &'static str) -> egui::Grid {
 
 /// A group of fields: a card with a title.
 fn group(ui: &mut egui::Ui, title: &str, add: impl FnOnce(&mut egui::Ui)) {
+    // The fields of the group know their group: "HP" is a base stat and an EV yield.
+    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(GROUP_ID), title.to_string()));
     widget::card(ui, |ui| {
         ui.set_min_width(COLUMN_WIDTH - 36.0);
         ui.label(widget::title(title));
@@ -2109,6 +2409,7 @@ impl Module for Species {
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
         self.csv_windows(ui.ctx(), session);
+        self.new_pokemon_window(ui.ctx(), session);
         ui.add_space(8.0);
         let mut clicked_tab = None;
         egui::Frame::none()
@@ -2171,6 +2472,11 @@ impl Module for Species {
             (0, Some(_)) => {
                 // The data leaves the page while the tab is drawn: the icon card can read the files again.
                 if let Some(mut data) = self.data.take() {
+                    let modified: std::collections::HashSet<String> = match &self.game {
+                        Some(game) => FIELD_KEYS.iter().filter(|key| field_value(key, &data) != field_value(key, game)).map(|key| key.to_string()).collect(),
+                        None => Default::default(),
+                    };
+                    ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(MODIFIED_ID), modified));
                     let mut shape = self.shape;
                     let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                     general_tab(ui, &mut data, &mut shape, |ui| {
@@ -2180,6 +2486,11 @@ impl Module for Species {
                         ui.add_space(8.0);
                         self.cry_tab.ui(ui, session, self.species, self.form);
                     });
+                    if let (Some(key), Some(game)) = (ui.ctx().data_mut(|d| d.remove_temp::<String>(egui::Id::new(REVERT_ID))), &self.game) {
+                        if let Some(value) = field_value(&key, game) {
+                            set_field(&key, &mut data, value);
+                        }
+                    }
                     if self.loaded.is_some() {
                         self.data = Some(data);
                         self.shape = shape;
@@ -2242,6 +2553,24 @@ mod test {
         assert_eq!(gender_text(255), "no gender");
         assert_eq!(gender_text(31), "12.5 % female, 87.5 % male");
         assert_eq!(gender_text(127), "50 % female, 50 % male");
+    }
+
+    #[test]
+    fn every_field_goes_back_to_the_value_of_the_game() {
+        let game = SpeciesData::from_bytes(&[3; 0x50]).unwrap();
+        for key in FIELD_KEYS {
+            let mut data = game.clone();
+            let value = field_value(key, &game).unwrap_or_else(|| panic!("{key} has no value"));
+            set_field(key, &mut data, if value == 0 { 1 } else { 0 });
+            assert_ne!(field_value(key, &data), field_value(key, &game), "{key} changes");
+            let changed: Vec<&str> = FIELD_KEYS.iter().copied().filter(|k| field_value(k, &data) != field_value(k, &game)).collect();
+            assert_eq!(changed, [key], "only {key} shows a mark");
+            set_field(key, &mut data, value);
+            assert_eq!(data, game, "{key} goes back");
+        }
+        let template = template_data(&game);
+        assert_eq!((template.base_hp, template.type_1, template.item_50, template.ev_hp()), (50, 0, 0, 0));
+        assert_eq!(template.total_form_count, game.total_form_count, "the fields of the forms stay");
     }
 
     #[test]
@@ -2524,9 +2853,9 @@ mod test {
         let garc = Garc::open(&dump.archive(icons::ICON_ARCHIVE)).ok();
         let ctx = egui::Context::default();
         let mut textures = HashMap::new();
-        let texture = icon_texture(&mut textures, garc.as_ref(), &ctx, 25).expect("no texture");
+        let texture = sango_species_base::icon_texture(&mut textures, garc.as_ref(), &ctx, 25).expect("no texture");
         assert_eq!(texture.size(), [40, 30]);
-        let _ = icon_texture(&mut textures, garc.as_ref(), &ctx, 25);
+        let _ = sango_species_base::icon_texture(&mut textures, garc.as_ref(), &ctx, 25);
         assert_eq!(textures.len(), 1);
     }
 

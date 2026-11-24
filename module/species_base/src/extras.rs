@@ -20,12 +20,14 @@ const KEEP: Duration = Duration::from_millis(1500);
 
 struct State {
     table: Table,
+    /// The names of the forms of the packs that have one: the species, the form and the name.
+    names: Vec<(u16, u16, String)>,
     /// The bytes that the table was read from, to know when the file changed.
     bytes: Vec<u8>,
     checked: Option<Instant>,
 }
 
-static STATE: RwLock<State> = RwLock::new(State { table: Table { species: Vec::new(), forms: Vec::new() }, bytes: Vec::new(), checked: None });
+static STATE: RwLock<State> = RwLock::new(State { table: Table { species: Vec::new(), forms: Vec::new() }, names: Vec::new(), bytes: Vec::new(), checked: None });
 
 /// Reads `species/table.bin` of the SD card when it changed. It looks at the file once each second and a half at most.
 /// Returns true when the species or the forms changed.
@@ -41,8 +43,15 @@ pub fn refresh(sd: Option<&SdCard>) -> bool {
         return false;
     }
     state.table = if bytes.is_empty() { Table::default() } else { Table::from_bytes(&bytes).unwrap_or_default() };
+    state.names = sd.and_then(|sd| sango_pack::Library::open(sd).ok()).map(|library| library.form_names()).unwrap_or_default();
     state.bytes = bytes;
     true
+}
+
+/// The name that a pack gives to a form, for the menus, when it has one.
+pub fn pack_form_name(species: usize, form: usize) -> Option<String> {
+    let state = STATE.read().ok()?;
+    state.names.iter().find(|(s, f, _)| *s as usize == species && *f as usize == form).map(|(_, _, name)| name.clone())
 }
 
 /// Makes the next `refresh` read the file again: the table was just written.

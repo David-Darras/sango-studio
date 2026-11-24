@@ -52,7 +52,7 @@ pub fn species_form_name(species: usize, form: usize) -> String {
     // A form of the game has a name of the list ("Mega X" gives "Mega-X"); another form keeps its label ("Form 3").
     let label = match form_names::game_form_name(species, form) {
         Some(name) => name.replace(' ', "-"),
-        None => form_names::form_label(species, form, extras::pack_forms(species).iter().any(|f| f.form as usize == form && f.mega.is_mega())),
+        None => form_names::form_label(species, form, extras::pack_forms(species).iter().any(|f| f.form as usize == form && f.mega.is_mega())).replace(' ', "-"),
     };
     format!("{}-{label}", species_name(species))
 }

@@ -96,7 +96,6 @@ enum MegaRow {
     Game {
         entry_index: usize,
         form: u16,
-        name: String,
         entry: MegaEntry,
     },
     Pack {
@@ -205,11 +204,9 @@ impl Species {
                 if let Some(table) = &self.mega_table {
                     for (idx, entry) in table.entries.iter().enumerate() {
                         if entry.evolved_form != 0 {
-                            let name = crate::form_names::form_label(self.species, entry.evolved_form as usize, true);
                             rows.push(MegaRow::Game {
                                 entry_index: idx,
                                 form: entry.evolved_form,
-                                name,
                                 entry: *entry,
                             });
                         }
@@ -225,9 +222,9 @@ impl Species {
                 }
 
                 for row_item in rows {
-                    let (form, form_label) = match &row_item {
-                        MegaRow::Game { form, name, .. } => (*form, name.clone()),
-                        MegaRow::Pack { form, condition } => (*form, crate::form_names::form_label(self.species, *form as usize, condition.is_mega())),
+                    let form = match &row_item {
+                        MegaRow::Game { form, .. } => *form,
+                        MegaRow::Pack { form, .. } => *form,
                     };
 
                     let (row, _) = ui.allocate_exact_size(egui::vec2(TABLE_WIDTH - 36.0, ROW_HEIGHT), egui::Sense::hover());
@@ -242,7 +239,7 @@ impl Species {
                         let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                         ui.painter().image(texture.id(), icon_rect, full, egui::Color32::WHITE);
                     }
-                    let full_name = format!("{} ({form_label})", species_name(self.species));
+                    let full_name = crate::species_form_name(self.species, form as usize);
                     ui.painter().text(
                         egui::pos2(cell0.left() + 52.0, cell0.center().y),
                         egui::Align2::LEFT_CENTER,

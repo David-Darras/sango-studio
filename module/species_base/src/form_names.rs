@@ -103,6 +103,9 @@ pub fn names_of(species: usize) -> Vec<String> {
 }
 
 pub fn form_label(species: usize, form: usize, pack_item: bool) -> String {
+    if let Some(name) = crate::extras::pack_form_name(species, form) {
+        return name;
+    }
     match game_form_name(species, form) {
         Some(name) => name.to_string(),
         None if form == 0 => "Normal".to_string(),

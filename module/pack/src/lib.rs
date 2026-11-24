@@ -430,15 +430,41 @@ mod test {
     }
 
     #[test]
+    fn a_species_of_its_own_gets_the_next_free_number() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_new_species_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let mut library = Library::open(&sd).unwrap();
+        let number = library.add_species(&sd, "Jibanyan", &[5u8; pack::DATA_SIZE], 52).unwrap();
+        assert_eq!(number, table::FIRST_SPECIES);
+        assert!(library.add_species(&sd, "Jibanyan", &[5u8; pack::DATA_SIZE], 52).is_err(), "a name is used once");
+        assert!(library.add_species(&sd, " ", &[5u8; pack::DATA_SIZE], 52).is_err(), "a species needs a name");
+        assert_eq!(library.add_species(&sd, "Whisper", &[6u8; pack::DATA_SIZE], 92).unwrap(), table::FIRST_SPECIES + 1);
+        library.save(&sd).unwrap();
+        let table = Library::open(&sd).unwrap().table().unwrap();
+        assert_eq!(table.species.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["Jibanyan", "Whisper"]);
+        let mut library = Library::open(&sd).unwrap();
+        library.remove_species(&sd, "Jibanyan").unwrap();
+        assert!(library.remove_species(&sd, "Pikachu").is_err(), "only a species of the user is deleted");
+        library.save(&sd).unwrap();
+        let table = Library::open(&sd).unwrap().table().unwrap();
+        assert_eq!(table.species.len(), 2, "the number of Jibanyan stays taken");
+        assert!(table.species[0].name.is_empty() || table.species[0].data.iter().all(|&b| b == 0), "its entry is empty");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
     fn a_new_form_is_kept_in_the_pack_of_the_user_and_written_in_the_table() {
         let folder = std::env::temp_dir().join(format!("sango_pack_new_form_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
         let mut library = Library::open(&sd).unwrap();
-        library.add_form(&sd, Ref::Game(25), 3, &[7u8; pack::DATA_SIZE], MegaCondition::Item(0x10E)).unwrap();
-        library.add_form(&sd, Ref::Game(25), 4, &[8u8; pack::DATA_SIZE], MegaCondition::Never).unwrap();
-        assert!(library.add_form(&sd, Ref::Game(25), 3, &[1u8; pack::DATA_SIZE], MegaCondition::Never).is_err(), "a form number is used once");
+        library.add_form(&sd, Ref::Game(25), 3, "Rock Star", &[7u8; pack::DATA_SIZE], MegaCondition::Item(0x10E)).unwrap();
+        library.add_form(&sd, Ref::Game(25), 4, "", &[8u8; pack::DATA_SIZE], MegaCondition::Never).unwrap();
+        assert_eq!(library.form_names(), vec![(25, 3, "Rock Star".to_string())]);
+        assert!(library.add_form(&sd, Ref::Game(25), 3, "", &[1u8; pack::DATA_SIZE], MegaCondition::Never).is_err(), "a form number is used once");
         library.save(&sd).unwrap();
         let again = Library::open(&sd).unwrap();
         assert_eq!(again.registry, library.registry);
@@ -469,7 +495,7 @@ mod test {
         let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
         let files = |name: &str| -> Vec<Vec<u8>> { (0..8u8).map(|n| vec![name.as_bytes()[0], n, 9, 9]).collect() };
         let mut library = Library::open(&sd).unwrap();
-        library.add_form(&sd, Ref::Game(197), 1, &[7u8; pack::DATA_SIZE], MegaCondition::Item(0x10E)).unwrap();
+        library.add_form(&sd, Ref::Game(197), 1, "", &[7u8; pack::DATA_SIZE], MegaCondition::Item(0x10E)).unwrap();
         assert_eq!(library.registry.forms[0].slots, 0, "a form without a model has no slot");
         // The import gives only this form a model: it takes a slot after the models of the species.
         library.set_form_model(&sd, &Ref::Game(197), 1, Some(files("Mega")), "pm0197_01").unwrap();
