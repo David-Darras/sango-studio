@@ -12,7 +12,7 @@ mod navi_view;
 
 use data::{Encounter, RateKind, Slot, Zones, METHODS};
 use sango_overworld::names::MAP_NAMES;
-use sango_species_base::{form_key, from_form_key, species_form_menu, species_form_name, SpeciesIcons, SPECIES};
+use sango_species_base::{form_key, from_form_key, species_form_name, SpeciesIcons};
 use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
@@ -379,13 +379,9 @@ impl EncounterPage {
                     }
                 }
                 // One menu for the species and the form: each form is a Pokémon of its own ("Rotom-Heat").
-                let current = if edited.species == 0 { 0 } else { form_key(edited.species as usize, edited.form as usize) };
-                let mut value = current;
-                if picker(ui, &format!("encounter_species_{place}_{at}"), &pokemon_label(edited.species, edited.form), 220.0, &mut value, Some("No Pokémon"), || {
-                    vec![Group { title: "Pokémon".to_string(), entries: species_form_menu(1..=SPECIES.len()) }]
-                }) && value != current
-                {
-                    let (species, form) = from_form_key(value);
+                let mut value = (edited.species as usize, edited.form as usize);
+                if sango_species::menus::pokemon_menu(ui, &format!("encounter_species_{place}_{at}"), &mut value, 260.0, None, Some("No Pokémon")) {
+                    let (species, form) = value;
                     if species != edited.species as usize && species != 0 && edited.min_level == 0 {
                         edited.min_level = 5;
                         edited.max_level = 5;
@@ -428,10 +424,10 @@ impl EncounterPage {
         ui.separator();
         ui.horizontal_wrapped(|ui| {
             ui.label(widget::hint("Fill every place with"));
-            let (fill_species, fill_form) = from_form_key(self.fill_species);
-            picker(ui, &format!("encounter_fill_{place}"), &pokemon_label(fill_species as u16, fill_form as u8), 220.0, &mut self.fill_species, None, || {
-                vec![Group { title: "Pokémon".to_string(), entries: species_form_menu(1..=SPECIES.len()) }]
-            });
+            let mut fill = from_form_key(self.fill_species);
+            if sango_species::menus::pokemon_menu(ui, &format!("encounter_fill_{place}"), &mut fill, 260.0, None, None) {
+                self.fill_species = form_key(fill.0, fill.1);
+            }
             ui.label(widget::hint("level"));
             widget::spin(ui, &mut self.fill_levels.0, 1.0, 100.0);
             ui.label(widget::hint("to"));

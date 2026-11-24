@@ -2806,6 +2806,7 @@ dependencies = [
  "rfd",
  "sango-core",
  "sango-overworld",
+ "sango-species",
  "sango-species-base",
  "sango-ui",
 ]
@@ -2966,6 +2967,7 @@ name = "sango-script"
 version = "0.1.0"
 dependencies = [
  "sango-core",
+ "sango-species",
  "sango-species-base",
  "sango-ui",
  "serde",

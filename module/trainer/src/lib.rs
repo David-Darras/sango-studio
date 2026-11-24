@@ -22,6 +22,8 @@ use store::Store;
 mod builder;
 mod lists;
 mod model_view;
+// Generated data: some lists (the strategic items) are kept for the tests and the next uses.
+#[allow(dead_code)]
 mod gen6;
 mod showdown;
 

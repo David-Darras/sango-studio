@@ -269,6 +269,8 @@ impl App {
         // The Overworld page uses all the area, for the 3D view.
         let margin = if self.modules.get(self.current).is_some_and(|module| module.title() == "Overworld") { 0.0 } else { 18.0 };
         let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(margin));
+        // The menus of Pokémon, items and moves read the dump and the SD card of the session.
+        sango_species::menus::set_source(&self.session);
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             widget::update_navigation(ui);
             if let Some(module) = self.modules.get_mut(self.current) {

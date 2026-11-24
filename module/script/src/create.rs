@@ -9,8 +9,6 @@
 
 use crate::create_model::{self as model, Block, Compare, Condition, Event, COUNT, FIRST_SCRIPT, MAX_STEPS};
 use sango_core::SdCard;
-use sango_species_base::{extras, form_key, from_form_key, species_form_menu, species_form_name, ITEM_NAMES};
-use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
 use std::path::PathBuf;
@@ -202,24 +200,17 @@ impl Creator {
 /// A picker of the items of the game.
 fn item_field(ui: &mut egui::Ui, value: &mut u32) {
     let mut number = (*value).min(u32::from(u16::MAX)) as u16;
-    let shown = match number {
-        0 => "(no item)".to_string(),
-        n => ITEM_NAMES.get(n as usize - 1).map_or_else(|| format!("Item {n}"), |name| format!("{name} (#{n})")),
-    };
-    if picker(ui, "item", &shown, 240.0, &mut number, None, || vec![Group { title: String::new(), entries: ITEM_NAMES.iter().enumerate().map(|(i, name)| (i as u16 + 1, (*name).to_string())).collect() }]) {
+    if sango_species::menus::item_menu(ui, "item", &mut number, 280.0, true) {
         *value = u32::from(number);
     }
 }
 
 /// A picker of the species of the game and of the packs, and of their forms: each form is a Pokémon of its own ("Rotom-Heat").
 fn species_field(ui: &mut egui::Ui, species: &mut u32, form: &mut u32) {
-    let current = form_key(*species as usize, *form as usize);
-    let mut key = current;
-    let shown = format!("#{:04} {}", species, species_form_name(*species as usize, *form as usize));
-    if picker(ui, "species", &shown, 240.0, &mut key, None, || vec![Group { title: String::new(), entries: species_form_menu(extras::species_ids()) }]) && key != current {
-        let (number, chosen) = from_form_key(key);
-        *species = number as u32;
-        *form = chosen as u32;
+    let mut value = (*species as usize, *form as usize);
+    if sango_species::menus::pokemon_menu(ui, "species", &mut value, 280.0, None, None) {
+        *species = value.0 as u32;
+        *form = value.1 as u32;
     }
 }
 

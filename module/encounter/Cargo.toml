@@ -7,6 +7,7 @@ description = "The Encounter page of Sango Studio: the wild Pokémon of each map
 [dependencies]
 sango-core.workspace = true
 sango-species-base.workspace = true
+sango-species.workspace = true
 sango-overworld.workspace = true
 sango-ui.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -26,6 +26,7 @@ mod pokedex_data;
 mod table;
 mod text_csv;
 mod text_tab;
+pub mod menus;
 
 /// The names of the 18 types, in the order of the game: Normal to Fairy.
 pub use move_names::MOVE as MOVE_NAMES;
@@ -468,8 +469,9 @@ fn sort_entries(list: &mut [usize], entries: &[ListEntry], column: SortColumn, d
 }
 
 /// A column of the species list. A click on its header sorts the list.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum SortColumn {
+    #[default]
     Number,
     Name,
     Type1,
@@ -1042,12 +1044,10 @@ impl Species {
                     ui.end_row();
                 } else {
                     ui.label("Species");
-                    let mut number = state.species as u16;
-                    let shown = format!("#{:04} {}", state.species, species_name(state.species));
-                    if sango_ui::picker::picker(ui, "new_pokemon_species", &shown, 260.0, &mut number, None, || {
-                        vec![sango_ui::picker::Group { title: String::new(), entries: extras::species_ids().into_iter().map(|n| (n as u16, format!("#{n:04} {}", species_name(n)))).collect() }]
-                    }) {
-                        state.species = number as usize;
+                    // A form belongs to a species: the menu offers the species (their first form).
+                    let mut chosen = (state.species, 0);
+                    if menus::pokemon_menu(ui, "new_pokemon_species", &mut chosen, 300.0, Some(&|_, form| form == 0), None) {
+                        state.species = chosen.0;
                     }
                     ui.end_row();
                     ui.label("Name of the form");
@@ -1136,30 +1136,6 @@ impl Species {
         }
     }
 
-    /// Makes a new form of the open species with the data that are open. `mega` tells what lets the Pokémon change into the form in a
-    /// battle (`Never`: it does not change). The new form is open at once.
-    fn new_form(&mut self, session: &Session, mega: sango_pack::table::MegaCondition) {
-        let (Some(sd), Some(data)) = (session.sd.as_ref(), self.data.as_ref()) else { return };
-        let species = self.pack_ref();
-        let form = self.total_form_count();
-        let result = u16::try_from(form).map_err(|_| "The species has too many forms.".to_string()).and_then(|number| {
-            let mut library = sango_pack::Library::open(sd)?;
-            library.add_form(sd, species, number, "", &data.to_bytes(), mega)?;
-            library.save(sd)
-        });
-        match result {
-            Ok(()) => {
-                extras::invalidate();
-                extras::refresh(Some(sd));
-                self.form = form;
-                self.loaded = None;
-                self.status = Some((true, format!("The new form {form} starts like the form that was open. Change its data with the tabs and press Save. Restart the game to see it.")));
-            }
-            Err(message) => self.status = Some((false, message)),
-        }
-    }
-
-    /// Deletes a pack form of the open species.
     /// Deletes the open species when the user made it with "+ New species", with its forms.
     fn delete_species(&mut self, session: &Session) {
         let Some(sd) = session.sd.as_ref() else { return };
@@ -1673,18 +1649,9 @@ fn ability_picker(ui: &mut egui::Ui, id_salt: &str, value: &mut u8) {
     }
 }
 
-/// A drop-down list of items, with their pictures. Without the list of items it is the list of names.
-fn item_picker(ui: &mut egui::Ui, id_salt: &str, value: &mut u16) {
-    let shared: Option<std::sync::Arc<std::sync::Mutex<sango_ui::item_menu::ItemList>>> = ui.ctx().data(|d| d.get_temp(egui::Id::new(ITEM_LIST_ID)));
-    match shared {
-        Some(list) => {
-            let mut item = *value as usize;
-            if sango_ui::item_menu::shared_menu(ui, id_salt, &mut item, 240.0, &list, true) {
-                *value = item as u16;
-            }
-        }
-        None => searchable_picker(ui, id_salt, value, &names::ITEM, 180.0),
-    }
+/// A drop-down list of items, with their pictures (see [`menus::item_menu`]).
+pub(crate) fn item_picker(ui: &mut egui::Ui, id_salt: &str, value: &mut u16) {
+    menus::item_menu(ui, id_salt, value, 240.0, true);
 }
 
 /// The key of the examples in the memory of the interface.

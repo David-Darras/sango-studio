@@ -10,7 +10,6 @@
 
 use crate::evolution_csv;
 use crate::learnset::{choose, trash_button, Choice};
-use crate::move_names::MOVE;
 use crate::names;
 use sango_core::evolution::{self, argument_of, method_name, Argument, Evolution, Evolutions, METHODS, SLOTS};
 use sango_core::{Dump, Garc, SdCard};
@@ -44,6 +43,12 @@ fn default_argument(kind: Argument) -> u16 {
         Argument::Type => 0,
         Argument::Beauty => 170,
     }
+}
+
+/// Draws a menu in a cell of a row, centred in its height. Gives what the menu gives.
+fn menu_in(ui: &mut egui::Ui, cell: egui::Rect, add: impl FnOnce(&mut egui::Ui) -> bool) -> bool {
+    let area = egui::Rect::from_center_size(cell.center(), egui::vec2(cell.width() - 4.0, 36.0));
+    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(area), add).inner
 }
 
 /// The value of a place of the file of the target forms that keeps the form of the game.
@@ -159,15 +164,7 @@ impl EvolutionTab {
         list.iter().enumerate().map(|(place, name)| Choice { label: name.to_string(), kind: None, value: place + first }).collect()
     }
 
-    /// The choices for the species that a method needs.
-    fn species_choices() -> Vec<Choice> {
-        crate::species_ids().into_iter().map(|number| Choice { label: crate::species_name(number), kind: None, value: number }).collect()
-    }
 
-    /// The choices for the Pokémon that it evolves into: each species and each of its forms ("Rotom-Heat").
-    fn target_choices() -> Vec<Choice> {
-        crate::species_form_menu(crate::species_ids()).into_iter().map(|(key, label)| Choice { label, kind: None, value: key as usize }).collect()
-    }
 
     /// Draws the tab.
     /// The card of the evolutions. The Evolution tab shows it above the card of the Mega Evolutions.
@@ -178,11 +175,17 @@ impl EvolutionTab {
                 ui.set_width(TABLE_WIDTH);
                 ui.label(widget::title("Evolutions"));
                 ui.horizontal(|ui| {
-                    let add = ui.add_enabled(self.evolutions.has_room(), egui::Button::new(egui::RichText::new("+ Add an evolution").color(color::WHITE)).fill(color::ACCENT));
-                    let choices = if ui.memory(|m| m.any_popup_open()) { Self::species_choices() } else { Vec::new() };
-                    if let Some(species) = choose(ui, egui::Id::new("evolution_add"), &add, &choices, None) {
-                        self.evolutions.list.push(Evolution { method: 4, argument: default_argument(Argument::Level), species: species as u16 });
-                    }
+                    // The same menu as everywhere: the Pokémon that it evolves into, with its form.
+                    ui.add_enabled_ui(self.evolutions.has_room(), |ui| {
+                        let mut chosen = (0, 0);
+                        if crate::menus::pokemon_menu(ui, "evolution_add", &mut chosen, 280.0, None, Some("+ Add an evolution…")) && chosen.0 != 0 {
+                            let place = self.evolutions.list.len();
+                            self.evolutions.list.push(Evolution { method: 4, argument: default_argument(Argument::Level), species: chosen.0 as u16 });
+                            if let Some(form) = self.forms.get_mut(place) {
+                                *form = if chosen.1 == 0 { KEEP_FORM } else { chosen.1 as u8 };
+                            }
+                        }
+                    });
                     if !self.evolutions.list.is_empty() && widget::confirm_button(ui, "Delete all evolutions", "Click again to confirm") {
                         self.evolutions.list.clear();
                     }
@@ -236,7 +239,7 @@ impl EvolutionTab {
             if ui.rect_contains_pointer(row) {
                 ui.painter().rect_filled(row, egui::Rounding::same(8.0), color::SURFACE_STRONG.linear_multiply(0.6));
             }
-            self.species_cell(ui, row, index, &mut entry, popup_open);
+            self.species_cell(ui, row, index, &mut entry);
             self.method_cell(ui, row, index, &mut entry, popup_open);
             self.need_cell(ui, row, index, &mut entry, popup_open);
             if trash_button(ui, column(row, 3)) {
@@ -265,27 +268,16 @@ impl EvolutionTab {
     }
 
     /// The species that it evolves into: its icon, number and name. A click changes it.
-    fn species_cell(&mut self, ui: &mut egui::Ui, row: egui::Rect, index: usize, entry: &mut Evolution, popup_open: bool) {
+    fn species_cell(&mut self, ui: &mut egui::Ui, row: egui::Rect, index: usize, entry: &mut Evolution) {
         let cell = column(row, 0);
-        let id = egui::Id::new(("evolution_species", index));
-        let response = Self::click_area(ui, cell, id);
-        let species = entry.species as usize;
         let target = self.forms.get(index).copied().unwrap_or(KEEP_FORM);
-        let shown_form = if target == KEEP_FORM { 0 } else { target as usize };
-        if let Some(texture) = crate::form_icon(&mut self.form_icons, self.icon_garc.as_ref(), self.sd.as_ref(), ui.ctx(), species, shown_form) {
-            let icon = egui::Rect::from_min_size(egui::pos2(cell.left() + 4.0, cell.center().y - 15.0), egui::vec2(40.0, 30.0));
-            let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-            ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
-        }
-        ui.painter().text(egui::pos2(cell.left() + 52.0, cell.center().y), egui::Align2::LEFT_CENTER, format!("#{species:04}"), egui::FontId::proportional(12.0), color::MUTED);
-        ui.painter().text(egui::pos2(cell.left() + 104.0, cell.center().y), egui::Align2::LEFT_CENTER, crate::species_form_name(species, shown_form), egui::FontId::proportional(15.0), color::TEXT);
-        let choices = if popup_open { Self::target_choices() } else { Vec::new() };
-        if let Some(value) = choose(ui, id, &response, &choices, Some(crate::form_key(species, shown_form) as usize)) {
-            let (chosen, form) = crate::from_form_key(value as u16);
-            entry.species = chosen as u16;
+        let mut value = (entry.species as usize, if target == KEEP_FORM { 0 } else { target as usize });
+        let changed = menu_in(ui, cell, |ui| crate::menus::pokemon_menu(ui, &format!("evolution_target_{index}"), &mut value, cell.width() - 6.0, None, None));
+        if changed {
+            entry.species = value.0 as u16;
             // The first form is the rule of the game: the Pokémon keeps its form.
             if let Some(place) = self.forms.get_mut(index) {
-                *place = if form == 0 { KEEP_FORM } else { form as u8 };
+                *place = if value.1 == 0 { KEEP_FORM } else { value.1 as u8 };
             }
         }
     }
@@ -314,10 +306,30 @@ impl EvolutionTab {
         let text_at = |ui: &egui::Ui, text: &str, ink: egui::Color32| {
             ui.painter().text(egui::pos2(cell.left() + 8.0, cell.center().y), egui::Align2::LEFT_CENTER, text, egui::FontId::proportional(14.0), ink);
         };
+        // An item, a move or a species: the menus that every page uses, with the pictures and the details.
+        match kind {
+            Argument::Item => {
+                let mut value = entry.argument;
+                menu_in(ui, cell, |ui| crate::menus::item_menu(ui, &format!("evolution_item_{index}"), &mut value, cell.width() - 6.0, false));
+                entry.argument = value;
+                return;
+            }
+            Argument::Move => {
+                let mut value = entry.argument;
+                menu_in(ui, cell, |ui| crate::menus::move_menu(ui, &format!("evolution_move_{index}"), &mut value, cell.width() - 6.0));
+                entry.argument = value;
+                return;
+            }
+            Argument::Species => {
+                // The method needs a species (Mantyke with a Remoraid in the party): the first form stands for it.
+                let mut value = (entry.argument as usize, 0);
+                menu_in(ui, cell, |ui| crate::menus::pokemon_menu(ui, &format!("evolution_need_{index}"), &mut value, cell.width() - 6.0, Some(&|_, form| form == 0), None));
+                entry.argument = value.0 as u16;
+                return;
+            }
+            _ => {}
+        }
         let list: Option<(Vec<Choice>, String)> = match kind {
-            Argument::Item => Some((if popup_open { Self::names_choices(&names::ITEM, 1) } else { Vec::new() }, crate::name_from(&names::ITEM, entry.argument as usize, 1))),
-            Argument::Move => Some((if popup_open { Self::names_choices(&MOVE, 1) } else { Vec::new() }, crate::name_from(&MOVE, entry.argument as usize, 1))),
-            Argument::Species => Some((if popup_open { Self::species_choices() } else { Vec::new() }, crate::species_name(entry.argument as usize))),
             Argument::Type => Some((if popup_open { Self::names_choices(&names::TYPE, 0) } else { Vec::new() }, crate::name_from(&names::TYPE, entry.argument as usize, 0))),
             _ => None,
         };

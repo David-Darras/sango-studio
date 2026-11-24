@@ -167,7 +167,7 @@ impl Species {
         let mut delete_pack: Option<u16> = None;
         let mut change_game: Option<(usize, MegaEntry)> = None;
         let mut open_form: Option<usize> = None;
-        let mut add = false;
+        let mut add: Option<usize> = None;
 
         let game_active = self.mega_table.as_ref().map_or(0, |t| t.entry_count());
         let pack_active = pack_forms.iter().filter(|(_, condition)| condition.is_mega()).count();
@@ -179,14 +179,19 @@ impl Species {
                 ui.set_width(TABLE_WIDTH);
                 ui.label(widget::title("Mega Evolutions"));
                 ui.horizontal(|ui| {
-                    let add_btn = ui.add_enabled(
-                        session.sd.is_some() && self.data.is_some() && total_active < MAX_ENTRIES,
-                        egui::Button::new(egui::RichText::new("+ Add a Mega evolution").color(color::WHITE)).fill(color::ACCENT),
-                    );
-                    if add_btn.clicked() {
-                        add = true;
-                    }
-                    add_btn.on_hover_text("Makes a new form that starts with the data that are open now, and gives it a held item. You can change the condition after.");
+                    // The game changes the form only: a Mega Evolution is a form of the same species. A new form comes from "+ New species".
+                    let species = self.species;
+                    let megas: Vec<u16> = self.mega_table.as_ref().map(|t| t.entries.iter().filter(|e| !e.is_empty()).map(|e| e.evolved_form).collect()).unwrap_or_default();
+                    let pack_megas: Vec<u16> = pack_forms.iter().filter(|(_, c)| c.is_mega()).map(|(form, _)| *form).collect();
+                    let allowed = move |s: usize, f: usize| s == species && f > 0 && !megas.contains(&(f as u16)) && !pack_megas.contains(&(f as u16));
+                    ui.add_enabled_ui(session.sd.is_some() && self.data.is_some() && total_active < MAX_ENTRIES, |ui| {
+                        let mut chosen = (0, 0);
+                        if crate::menus::pokemon_menu(ui, "mega_add", &mut chosen, 300.0, Some(&allowed), Some("+ Add a Mega evolution…")) && chosen.0 != 0 {
+                            add = Some(chosen.1);
+                        }
+                    })
+                    .response
+                    .on_hover_text("Choose the form that the Pokémon becomes. A Mega Evolution stays in the species: the forms of the other species are greyed out. To make a new form, use \"+ New species\".");
                     ui.label(widget::hint(&format!("{total_active} of {MAX_ENTRIES} Mega forms with a condition. Restart the game after a change.")));
                 });
                 ui.add_space(8.0);
@@ -309,7 +314,7 @@ impl Species {
                                     }
                                     MegaMethod::Move => {
                                         let mut mv = if game_entry.argument == 0 { 620 } else { game_entry.argument };
-                                        crate::searchable_picker(ui, &salt, &mut mv, &crate::move_names::MOVE, 200.0);
+                                        crate::menus::move_menu(ui, &salt, &mut mv, 200.0);
                                         game_entry.argument = mv;
                                     }
                                     MegaMethod::None => {
@@ -366,7 +371,7 @@ impl Species {
                                 let salt = format!("pack_mega_number_{form}");
                                 match &mut new_condition {
                                     MegaCondition::Item(number) => crate::item_picker(ui, &salt, number),
-                                    MegaCondition::Move(number) => crate::searchable_picker(ui, &salt, number, &crate::move_names::MOVE, 200.0),
+                                    MegaCondition::Move(number) => { crate::menus::move_menu(ui, &salt, number, 200.0); }
                                     MegaCondition::Ability(number) => {
                                         let mut ability = (*number).min(255) as u8;
                                         crate::ability_picker(ui, &salt, &mut ability);
@@ -413,9 +418,25 @@ impl Species {
         if let Some(form) = open_form {
             self.form = form;
         }
-        if add {
+        if let Some(form) = add {
             let used: Vec<u16> = pack_forms.iter().filter_map(|(_, condition)| if let MegaCondition::Item(item) = condition { Some(*item) } else { None }).collect();
-            self.new_form(session, MegaCondition::Item(free_item(&used)));
+            if pack_forms.iter().any(|(f, _)| *f as usize == form) {
+                // A form of a pack gets a held item that no other form uses.
+                self.set_mega(session, form as u16, MegaCondition::Item(free_item(&used)));
+            } else {
+                // A form of the game goes in the first free place of the Mega Evolution table of the species.
+                let mut table = self.mega_table.clone().unwrap_or_else(sango_core::mega_evolution::MegaEvolutionTable::empty);
+                match table.entries.iter().position(|e| e.is_empty()) {
+                    Some(place) => {
+                        let argument = default_game_item(self.mega_garc.as_ref(), self.species, place);
+                        let entry = MegaEntry { evolved_form: form as u16, method: sango_core::mega_evolution::MegaMethod::Item, argument, argument2: 0 };
+                        table.entries[place] = entry;
+                        self.mega_table = Some(table);
+                        self.set_game_mega(session, place, entry);
+                    }
+                    None => self.status = Some((false, "The Mega Evolution table of this species is full.".into())),
+                }
+            }
         }
     }
 }

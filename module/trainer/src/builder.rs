@@ -417,26 +417,9 @@ impl Builder {
         });
         // One menu for the species and the form: each form is a Pokémon of its own ("Rotom-Heat").
         row(ui, "Species", &mut |ui| {
-            let current = sango_species::form_key(pokemon.species as usize, pokemon.form as usize);
-            let mut value = current;
-            let shown = format!("#{:04} {}", pokemon.species, sango_species::species_form_name(pokemon.species as usize, pokemon.form as usize));
-            if picker(ui, &format!("builder_species_{place}"), &shown, width, &mut value, None, || {
-                let mut groups: Vec<Group> = Vec::new();
-                for (tier, name) in gen6::TIER_NAMES.iter().enumerate() {
-                    let entries: Vec<(u16, String)> = sango_species::species_form_menu((1..=SPECIES.len()).filter(|&s| tier_of(s) == tier));
-                    let title = match *name {
-                        "Uber" => "Uber (Ubers)".to_string(),
-                        "NFE" => "NFE (not fully evolved)".to_string(),
-                        "LC" => "LC (little cup)".to_string(),
-                        "Other" => "Other".to_string(),
-                        other => other.to_string(),
-                    };
-                    groups.push(Group { title, entries });
-                }
-                groups
-            }) && value != current
-            {
-                let (species, form) = sango_species::from_form_key(value);
+            let mut value = (pokemon.species as usize, pokemon.form as usize);
+            if sango_species::menus::pokemon_menu(ui, &format!("builder_species_{place}"), &mut value, width, None, None) {
+                let (species, form) = value;
                 if species != pokemon.species as usize {
                     // The first ability of the new species, then the moves stay: the list below tells which ones it cannot learn.
                     more.ability = summary_ability(&summaries.get(species).copied().flatten(), 0);
@@ -478,15 +461,7 @@ impl Builder {
         if items_on {
             row(ui, "Item", &mut |ui| {
                 let mut value = pokemon.item;
-                let shown = if value == 0 { "(no item)".to_string() } else { entry(&ITEM_NAMES, value).1 };
-                if picker(ui, &format!("builder_item_{place}"), &shown, width, &mut value, Some("(no item)"), || {
-                    let own = used_by_sets(species, |set| vec![set.item]);
-                    let mut groups = vec![Group { title: "Used with this Pokémon".to_string(), entries: own.iter().map(|&n| entry(&ITEM_NAMES, n)).collect() }];
-                    let strategic: Vec<u16> = gen6::STRATEGIC_ITEMS.iter().copied().filter(|n| !own.contains(n)).collect();
-                    groups.push(Group { title: "Strategic items".to_string(), entries: strategic.iter().map(|&n| entry(&ITEM_NAMES, n)).collect() });
-                    groups.push(Group { title: "All the other items".to_string(), entries: (1..=ITEM_NAMES.len() as u16).filter(|n| !own.contains(n) && !strategic.contains(n) && !ITEM_NAMES[*n as usize - 1].is_empty()).map(|n| entry(&ITEM_NAMES, n)).collect() });
-                    groups
-                }) {
+                if sango_species::menus::item_menu(ui, &format!("builder_item_{place}"), &mut value, width, true) {
                     pokemon.item = value;
                 }
             });
@@ -532,20 +507,17 @@ impl Builder {
             for slot in 0..4 {
                 row(ui, if slot == 0 { "Moves" } else { "" }, &mut |ui| {
                     let mut value = pokemon.moves[slot];
-                    let current = pokemon.moves;
-                    let shown = if value == 0 { "(no move)".to_string() } else { entry(&MOVE_NAMES, value).1 };
-                    let marked = if value != 0 && learns(species, value as usize) == Some(false) { format!("✖ {shown}") } else { shown };
-                    if picker(ui, &format!("builder_move_{place}_{slot}"), &marked, width, &mut value, Some("(no move)"), || {
-                        let used = used_by_sets(species, |set| set.moves.to_vec());
-                        let can = |m: u16| learns(species, m as usize).unwrap_or(true);
-                        let mut groups = vec![Group { title: "Used with this Pokémon".to_string(), entries: used.iter().filter(|&&m| can(m)).map(|&m| entry(&MOVE_NAMES, m)).collect() }];
-                        groups.push(Group { title: "Learned by this Pokémon".to_string(), entries: (1..=MOVE_NAMES.len() as u16).filter(|m| can(*m) && !used.contains(m) && !current.contains(m)).map(|m| entry(&MOVE_NAMES, m)).collect() });
-                        if !legal {
-                            groups.push(Group { title: "Not learned in Gen 6 (not legal)".to_string(), entries: (1..=MOVE_NAMES.len() as u16).filter(|m| !can(*m) && !current.contains(m)).map(|m| entry(&MOVE_NAMES, m)).collect() });
-                        }
-                        groups
-                    }) {
+                    if sango_species::menus::move_menu(ui, &format!("builder_move_{place}_{slot}"), &mut value, width) {
                         pokemon.moves[slot] = value;
+                    }
+                    if value != 0 {
+                        if learns(species, value as usize) == Some(false) {
+                            let text = if legal { "The Pokémon does not learn this move in Gen 6: the team is not legal." } else { "The Pokémon does not learn this move in Gen 6." };
+                            ui.label(egui::RichText::new("✖").color(color::ROSE)).on_hover_text(text);
+                        }
+                        if ui.small_button("✕").on_hover_text("No move in this place.").clicked() {
+                            pokemon.moves[slot] = 0;
+                        }
                     }
                 });
             }
