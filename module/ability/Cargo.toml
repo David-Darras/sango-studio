@@ -7,6 +7,7 @@ description = "The ability editor of Sango Studio."
 [dependencies]
 sango-core.workspace = true
 sango-species-base.workspace = true
+sango-species.workspace = true
 rfd.workspace = true
 sango-ui.workspace = true
 sango-rules.workspace = true

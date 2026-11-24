@@ -8,10 +8,10 @@
 //! | --- | --- | --- |
 //! | 0 | 4 | The text `SABR`. |
 //! | 4 | 1 | The version of the layout: 1. |
-//! | 5 | 1 | The id of the ability (192 to 255). |
+//! | 5 | 1 | The id of the ability: 192 to 255 for a new ability, 1 to 191 for an ability of the game whose rules replace its code. |
 //! | 6 | 1 | The number of rules. |
 //! | 7 | 1 | Always 0. |
-//! | 8 | … | For each of the eight languages, the name then the description. A text is a 16-bit length (in UTF-16 units) and the UTF-16 units. |
+//! | 8 | … | For each of the eight languages, the name then the description. A text is a 16-bit length (in UTF-16 units) and the UTF-16 units. An ability of the game has empty texts: the game keeps its own texts. |
 //! | … | … | The rules. |
 
 pub use sango_rules::*;
@@ -21,6 +21,23 @@ pub use sango_rules::*;
 pub const FIRST_ID: u8 = 192;
 /// The last id of an ability: an ability id is one byte.
 pub const LAST_ID: u8 = 255;
+/// The list of the abilities of the game that have a file: `ability/game.bin`. The plugin cannot list a folder, so it reads this file
+/// to know which files of the abilities of the game to read. The layout: the text `SAGL`, the version 1, three bytes 0, then 32 bytes
+/// with one bit for each ability (the bit `id % 8` of the byte `id / 8`).
+pub const GAME_LIST_PATH: &str = "ability/game.bin";
+
+/// The file `ability/game.bin` for these abilities of the game.
+pub fn game_list_bytes(ids: &[u8]) -> Vec<u8> {
+    let mut out = b"SAGL".to_vec();
+    out.extend_from_slice(&[VERSION, 0, 0, 0]);
+    let mut bits = [0u8; 32];
+    for &id in ids.iter().filter(|id| **id >= 1 && **id < FIRST_ID) {
+        bits[id as usize / 8] |= 1 << (id % 8);
+    }
+    out.extend_from_slice(&bits);
+    out
+}
+
 /// The magic text of the file.
 pub const MAGIC: &[u8; 4] = b"SABR";
 /// The version of the layout of the file.
@@ -47,6 +64,17 @@ impl CustomAbility {
         CustomAbility { id, names: std::array::from_fn(|_| name.to_string()), descriptions: std::array::from_fn(|_| description.to_string()), rules: vec![Rule::new()] }
     }
 
+    /// An ability of the game whose rules replace the code of the game. Its texts are empty: the game keeps its own texts (the Text
+    /// tab changes them).
+    pub fn game(id: u8, rules: Vec<Rule>) -> CustomAbility {
+        CustomAbility { id, names: Default::default(), descriptions: Default::default(), rules }
+    }
+
+    /// True for an ability of the game (1 to 191).
+    pub fn is_game(&self) -> bool {
+        self.id < FIRST_ID
+    }
+
     /// The place of the file on the SD card.
     pub fn path(id: u8) -> String {
         format!("ability/{id}.bin")
@@ -60,10 +88,10 @@ impl CustomAbility {
     /// What is wrong with the ability, in words that the user understands. An empty list means the file can be written.
     pub fn problems(&self) -> Vec<String> {
         let mut problems = Vec::new();
-        if self.id < FIRST_ID {
-            problems.push(format!("The id must be from {FIRST_ID} to {LAST_ID}: the game has the abilities 1 to 191."));
+        if self.id == 0 {
+            problems.push("The ability 0 is \"no ability\": it has no reactions.".into());
         }
-        if self.names[ENGLISH].trim().is_empty() {
+        if !self.is_game() && self.names[ENGLISH].trim().is_empty() {
             problems.push("The English name is empty.".into());
         }
         problems.extend(sango_rules::problems(&self.rules, Context::Ability));
@@ -156,18 +184,29 @@ mod test {
     #[test]
     fn the_problems_are_found() {
         let mut ability = quick_start();
-        ability.id = 100;
         ability.names[ENGLISH] = " ".into();
         ability.rules[0].moment = 94;
         ability.rules[0].conditions.push(Condition { kind: ConditionKind::MoveTypeIs, arg: 10 });
         ability.rules[0].actions[0].b = 0;
         ability.rules.push(Rule { moment: 94, conditions: vec![], actions: vec![] });
         let problems = ability.problems().join("\n");
-        assert!(problems.contains("192 to 255"));
+        assert!(CustomAbility::game(0, vec![Rule::new()]).problems().join("").contains("no ability"));
+        assert!(CustomAbility::game(22, vec![Rule::new()]).problems().is_empty(), "a game ability has no texts");
         assert!(problems.contains("English name"));
         assert!(problems.contains("needs a moment of a move"));
         assert!(problems.contains("0 stages"));
         assert!(problems.contains("Reaction 2 does nothing"));
+    }
+
+    #[test]
+    fn the_list_of_the_game_abilities_has_one_bit_for_each() {
+        let bytes = game_list_bytes(&[1, 22, 191, 200]);
+        assert_eq!(bytes.len(), 40);
+        assert_eq!(&bytes[..8], b"SAGL   ");
+        assert_eq!(bytes[8], 0b10);
+        assert_eq!(bytes[8 + 2], 1 << 6);
+        assert_eq!(bytes[8 + 23], 1 << 7);
+        assert_eq!(bytes[8 + 25], 0, "a new ability is not in the list");
     }
 
     #[test]

@@ -13,6 +13,7 @@ mod texts;
 mod tools;
 
 use sango_core::{Dump, SdCard};
+use sango_species::SpeciesTable;
 use sango_species_base::SpeciesAbilities;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
@@ -27,7 +28,7 @@ const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
 /// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
 const CSV_TAB: usize = 3;
 
-/// The place of the tab "Reactions" in [`TABS`]: only a new ability has reactions.
+/// The place of the tab "Reactions" in [`TABS`]: the rules of a new ability, or of an ability of the game.
 const REACTIONS_TAB: usize = 1;
 
 /// The names of the three ability slots of a species.
@@ -50,16 +51,21 @@ pub struct Ability {
     /// For each ability, the species and forms that have it in each slot. Read from the data of the species.
     usage: Vec<[Vec<User>; 3]>,
     usage_ready: bool,
+    /// The list of the species that have the ability, in each slot: the same list as the other pages.
+    species_table: SpeciesTable,
     texts: texts::AbilityTexts,
     tools: tools::Tools,
     store: custom::Store,
     /// The language of the texts of a new ability.
     custom_language: usize,
+    /// The reaction of the game as rules, for the open ability of the game that has no file yet. It goes in the store at the first
+    /// change.
+    draft: Option<rules::CustomAbility>,
 }
 
 impl Default for Ability {
     fn default() -> Self {
-        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2 }
+        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, species_table: SpeciesTable::default(), texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2, draft: None }
     }
 }
 
@@ -87,6 +93,7 @@ impl Ability {
             }
             Err(message) => self.status = Some((false, message)),
         }
+        self.species_table.load(session);
         self.usage_ready = true;
     }
 
@@ -121,8 +128,9 @@ impl Ability {
         let names = self.list_names.clone().unwrap_or_default();
         let mut rows: Vec<picker::Row> = (0..=COUNT).map(|n| picker::Row { name: names.get(n).cloned().unwrap_or_default(), species: self.user_count(n), modified: false }).collect();
         let changed = self.modified_abilities(session);
+        let game_rules = self.store.game_ids();
         for (id, row) in rows.iter_mut().enumerate() {
-            row.modified = changed.contains(&id);
+            row.modified = changed.contains(&id) || game_rules.contains(&id);
         }
         // The new abilities come after the abilities of the game, at their numbers: a number between is a row without a name that the list skips.
         if let Some(last) = self.store.ids().into_iter().max() {
@@ -173,6 +181,66 @@ impl Ability {
                 self.status = Some((true, format!("The new ability {id} was deleted.")));
             }
             Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// The Reactions tab of an ability of the game. Without a file, the game runs its own code, and the tab shows the reaction of the
+    /// game as rules when the rules can do it. The first change puts the rules in the store: "Save" writes the file, and then the
+    /// plugin runs the rules in place of the code of the game.
+    fn game_reactions_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
+        let id = self.id;
+        let mut back_to_game = false;
+        let mut own_rules = false;
+        egui::ScrollArea::vertical().id_salt("ability_game_reactions").auto_shrink([false, false]).show(ui, |ui| {
+            if let Some(entry) = self.store.find_mut(id) {
+                widget::card(ui, |ui| {
+                    ui.set_min_width(700.0);
+                    ui.label(widget::title("Your rules replace the code of the game"));
+                    ui.label(widget::hint("The file ability/<number>.bin is on the SD card (or is written at the next \"Save\"): the plugin runs these rules, and not the code of the game, for this ability. Omega Ruby and Alpha Sapphire only."));
+                    ui.add_space(4.0);
+                    back_to_game = session.sd.is_some() && widget::button(ui, "Back to the code of the game");
+                });
+                ui.add_space(10.0);
+                custom::reactions_ui(ui, entry);
+                return;
+            }
+            let preset = rules::presets::game_rules(id as u8);
+            if self.draft.as_ref().map(|d| d.id as usize) != Some(id) {
+                self.draft = preset.clone().map(|rules| rules::CustomAbility::game(id as u8, rules));
+            }
+            widget::card(ui, |ui| {
+                ui.set_min_width(700.0);
+                ui.label(widget::title("The game runs its own code"));
+                if preset.is_some() {
+                    ui.label(widget::hint("Below is what the code of the game does, written as rules. Change a value: at the next \"Save\", the Studio writes the file ability/<number>.bin and the plugin runs the rules in place of the code of the game. Some values are rounded (1/8 of the HP is 12%)."));
+                } else {
+                    ui.label(widget::hint("The rules cannot do what the code of the game does for this ability (see docs/ability-reactions.md). You can replace the code with your own rules: the ability then loses its effect of the game."));
+                    ui.add_space(4.0);
+                    own_rules = session.sd.is_some() && widget::button(ui, "Replace with my own rules");
+                }
+            });
+            if let Some(draft) = &mut self.draft {
+                ui.add_space(10.0);
+                custom::reactions_ui(ui, draft);
+            }
+        });
+        if let (Some(draft), Some(preset)) = (&self.draft, rules::presets::game_rules(id as u8)) {
+            if draft.rules != preset {
+                self.store.insert(draft.clone());
+                self.draft = None;
+            }
+        }
+        if own_rules {
+            self.store.insert(rules::CustomAbility::game(id as u8, vec![rules::Rule::new()]));
+        }
+        if back_to_game {
+            if let Some(sd) = session.sd.as_ref() {
+                match self.store.delete(sd, id) {
+                    Ok(()) => self.status = Some((true, format!("The ability {id} runs the code of the game again."))),
+                    Err(message) => self.status = Some((false, message)),
+                }
+            }
+            self.draft = None;
         }
     }
 
@@ -267,7 +335,7 @@ impl Ability {
     /// The General tab: the name and the description, what an ability is and who has it.
     fn general_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
         let sd = session.sd.as_ref();
-        let (name, description) = match self.store.find(self.id) {
+        let (name, description) = match self.store.find(self.id).filter(|entry| !entry.is_game()) {
             Some(entry) => (entry.names[rules::ENGLISH].clone(), entry.descriptions[rules::ENGLISH].clone()),
             None => (self.texts.text(sd, texts::ENGLISH, 0, self.id), self.texts.text(sd, texts::ENGLISH, 1, self.id)),
         };
@@ -276,8 +344,6 @@ impl Ability {
                 ui.set_min_width(700.0);
                 ui.label(widget::title(&format!("#{:03} {name}", self.id)));
                 ui.label(&description);
-                ui.add_space(4.0);
-                ui.label(widget::hint("The text is the English one: the Text tab changes it, in every language."));
                 ui.add_space(6.0);
                 ui.horizontal_wrapped(|ui| {
                     ui.label(widget::hint("An ability has no data in a file: the game runs its effect from its code, so this page edits its texts and shows who has it."));
@@ -304,21 +370,18 @@ impl Ability {
             ui.label(widget::hint("A click on a species opens it in the Species page, where its abilities are chosen. The data of the SD card counts."));
             ui.add_space(6.0);
             for (slot, title) in SLOTS.iter().enumerate() {
-                let list = users.get(slot).cloned().unwrap_or_default();
-                ui.label(egui::RichText::new(format!("{title} ({})", list.len())).strong());
-                if list.is_empty() {
+                let mut numbers: Vec<usize> = users.get(slot).map(|list| list.iter().map(|&(species, _)| species).collect()).unwrap_or_default();
+                numbers.sort_unstable();
+                numbers.dedup();
+                ui.label(egui::RichText::new(format!("{title} ({})", numbers.len())).strong());
+                if numbers.is_empty() {
                     ui.label(widget::hint("No species."));
                 } else {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                        for (species, form) in list {
-                            let name = sango_species_base::species_name(species);
-                            let label = if form == 0 { format!("#{species:03} {name}") } else { format!("#{species:03} {name} (form {form})") };
-                            if widget::button(ui, label) {
-                                sango_species_base::open_species(ui.ctx(), species);
-                            }
-                        }
-                    });
+                    // Each slot has its own list: its widgets (the header, the scroll area) need their own ids.
+                    let clicked = ui.push_id(slot, |ui| self.species_table.show(ui, "ability_users", &numbers, 300.0)).inner;
+                    if let Some(number) = clicked {
+                        sango_species_base::open_species(ui.ctx(), number);
+                    }
                 }
                 ui.add_space(8.0);
             }
@@ -391,16 +454,19 @@ impl Module for Ability {
                 egui::ScrollArea::vertical().id_salt("ability_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
             }
             REACTIONS_TAB => {
-                let id = self.id;
-                match self.store.find_mut(id) {
-                    Some(entry) => egui::ScrollArea::vertical().id_salt("ability_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
-                    None => widget::card(ui, |ui| {
-                        ui.label(widget::hint("The abilities of the game have their reactions in the code of the game. A new ability (the button \"+ New ability\") has its own reactions here."));
-                    }),
+                if self.is_custom() {
+                    match self.store.find_mut(self.id) {
+                        Some(entry) => egui::ScrollArea::vertical().id_salt("ability_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
+                        None => widget::card(ui, |ui| {
+                            ui.label(widget::hint("This ability has no file."));
+                        }),
+                    }
+                } else {
+                    self.game_reactions_tab(ui, session);
                 }
             }
             _ => {
-                if let Some(entry) = self.store.find_mut(self.id) {
+                if let Some(entry) = self.store.find_mut(self.id).filter(|entry| !entry.is_game()) {
                     let mut language = self.custom_language;
                     egui::ScrollArea::vertical().id_salt("ability_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
                     self.custom_language = language;
@@ -487,5 +553,38 @@ mod add_test {
         other.delete_ability(&session);
         assert!(other.store.find(192).is_none() && session.sd.as_ref().unwrap().read("ability/192.bin").is_none());
         let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod game_rules_test {
+    use super::*;
+
+    fn draw(page: &mut Ability, session: &Session) {
+        let ctx = egui::Context::default();
+        for _ in 0..2 {
+            let _ = ctx.run(egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))), ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.game_reactions_tab(ui, session));
+            });
+        }
+    }
+
+    /// The reaction of the game shows as rules and changes nothing; the first change puts the rules in the list to save.
+    #[test]
+    fn a_game_reaction_goes_to_the_store_at_the_first_change() {
+        let session = Session::default();
+        let mut page = Ability { id: 22, ..Ability::default() };
+        draw(&mut page, &session);
+        assert!(!page.store.changed(), "drawing the reaction of the game changes nothing");
+        assert_eq!(page.draft.as_ref().map(|d| d.rules.clone()), rules::presets::game_rules(22));
+        page.draft.as_mut().unwrap().rules[0].actions[0].b = -2;
+        draw(&mut page, &session);
+        assert!(page.store.changed() && page.draft.is_none());
+        assert_eq!(page.store.game_ids(), vec![22]);
+        assert!(page.store.ids().is_empty(), "an ability of the game is not a new ability");
+        // An ability without rules of the game (Sturdy) shows no rules.
+        page.id = 5;
+        draw(&mut page, &session);
+        assert!(page.draft.is_none());
     }
 }

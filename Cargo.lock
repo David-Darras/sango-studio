@@ -2717,6 +2717,7 @@ dependencies = [
  "rfd",
  "sango-core",
  "sango-rules",
+ "sango-species",
  "sango-species-base",
  "sango-ui",
 ]

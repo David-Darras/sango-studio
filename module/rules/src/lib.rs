@@ -11,6 +11,7 @@
 //! and the byte of the flags (bit 0: show the banner of the ability).
 
 pub mod editor;
+pub mod presets;
 
 use sango_core::text::LANGUAGES;
 
@@ -27,7 +28,7 @@ pub struct Moment {
 }
 
 /// The moments that the editor offers.
-pub const MOMENTS: [Moment; 19] = [
+pub const MOMENTS: [Moment; 29] = [
     Moment { value: 94, label: "A Pokémon enters the battle", help: "Runs for every Pokémon that enters, yours or not. Use the condition \"It is this Pokémon\" to act only for the owner." },
     Moment { value: 148, label: "A Pokémon gets a new ability", help: "For example after Skill Swap. Add it next to \"enters the battle\" for an ability that acts on entry." },
     Moment { value: 36, label: "A move starts", help: "Before the move does anything." },
@@ -47,6 +48,16 @@ pub const MOMENTS: [Moment; 19] = [
     Moment { value: 59, label: "A critical hit is checked", help: "Use \"Raise the critical-hit stage\" (the Scope Lens, the Razor Claw)." },
     Moment { value: 83, label: "A Pokémon took damage from a move", help: "Runs for the Pokémon that was hit, after the damage (the Rocky Helmet, the Sticky Barb). Use the condition \"This Pokémon is the target of the move\"." },
     Moment { value: 128, label: "The end of the turn ends", help: "At the end of the end-of-turn checks (the Leftovers, the Black Sludge)." },
+    Moment { value: 17, label: "The priority of a move is calculated", help: "Before the turn order is set. Use \"Raise the priority of the move\" (Prankster, Gale Wings)." },
+    Moment { value: 40, label: "The data of a move is read", help: "Before the move starts. Use \"Change the type of the move\" (Refrigerate, Pixilate)." },
+    Moment { value: 49, label: "A move is checked against its target", help: "Before the move hits a target. Use \"Block the move\" (Volt Absorb, Soundproof) with the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 100, label: "A stat stage is about to change", help: "Before a stat stage goes up or down. Use \"Block a stat drop\" (Clear Body, Hyper Cutter) with the condition \"It is this Pokémon\"." },
+    Moment { value: 110, label: "A status condition is about to be given", help: "Before a Pokémon gets a status condition. Use \"Block a status condition\" (Limber, Insomnia) with the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 118, label: "A flinch is checked", help: "Before a Pokémon flinches. Use \"Block the flinch\" (Inner Focus) with the condition \"This Pokémon is the target of the move\"." },
+    Moment { value: 109, label: "The chance of a status effect is calculated", help: "The chance that a move gives its status condition. Use \"Multiply the chance of the effect\" (Serene Grace)." },
+    Moment { value: 90, label: "The chance of a stat effect is calculated", help: "The chance that a move changes a stat of its target. Use \"Multiply the chance of the effect\" (Serene Grace)." },
+    Moment { value: 181, label: "The chance of a special effect is calculated", help: "The chance of the other secondary effects of a move. Use \"Multiply the chance of the effect\" (Serene Grace)." },
+    Moment { value: 117, label: "The chance of a flinch is calculated", help: "The chance that a move makes its target flinch. Use \"Multiply the chance of the effect\": the game knows x2 only (Serene Grace), so 200 or more doubles the chance and less does nothing." },
 ];
 
 /// The kinds of condition.
@@ -79,23 +90,65 @@ pub enum ConditionKind {
     HpNotFull = 12,
     /// The move makes contact.
     MoveMakesContact = 13,
+    /// The Pokémon of the moment is on the other side of the battle (a foe of the owner).
+    PokemonIsFoe = 14,
+    /// Another Pokémon than the owner uses the move or causes the change.
+    CausedByOther = 15,
+    /// The owner has a status condition (argument: the status condition, 0 for any of paralysis, sleep, freeze, burn and poison).
+    OwnerHasStatus = 16,
+    /// The other Pokémon of the move has a status condition (argument: as for `OwnerHasStatus`).
+    OtherHasStatus = 17,
+    /// The other Pokémon of the move has an ability (argument: the number of the ability).
+    OtherHasAbility = 18,
+    /// The power of the move is at most a value (argument: the power).
+    PowerAtMost = 19,
+    /// The move has a type of the Pokémon that uses it (the same-type attack bonus).
+    MoveIsStab = 20,
+    /// The move is a critical hit.
+    CriticalHit = 21,
+    /// The move has a property of its data (argument: the number of the bit, see [`MOVE_FLAGS`]).
+    MoveHasFlag = 22,
+    /// The move is in a group of the game (argument: see [`MOVE_GROUPS`]).
+    MoveInGroup = 23,
+    /// A random chance (argument: the percent).
+    Chance = 24,
+    /// The move is not very effective against its target.
+    NotVeryEffective = 25,
+    /// The HP of the owner are full.
+    HpFull = 26,
+    /// The action "Change the type of the move" of this ability changed the type of this move.
+    MoveTypeWasChanged = 27,
 }
 
 impl ConditionKind {
-    pub const ALL: [ConditionKind; 13] = [
+    pub const ALL: [ConditionKind; 27] = [
         ConditionKind::PokemonIsOwner,
+        ConditionKind::PokemonIsFoe,
         ConditionKind::MoveUserIsOwner,
         ConditionKind::DefenderIsOwner,
+        ConditionKind::CausedByOther,
         ConditionKind::MoveTypeIs,
         ConditionKind::MoveCategoryIs,
         ConditionKind::MoveMakesContact,
+        ConditionKind::MoveHasFlag,
+        ConditionKind::MoveInGroup,
+        ConditionKind::PowerAtMost,
+        ConditionKind::MoveIsStab,
+        ConditionKind::MoveTypeWasChanged,
         ConditionKind::SuperEffective,
+        ConditionKind::NotVeryEffective,
+        ConditionKind::CriticalHit,
         ConditionKind::NoSubstitute,
         ConditionKind::WeatherIs,
         ConditionKind::TargetFainted,
+        ConditionKind::OwnerHasStatus,
+        ConditionKind::OtherHasStatus,
+        ConditionKind::OtherHasAbility,
         ConditionKind::OnlyOnce,
+        ConditionKind::Chance,
         ConditionKind::HpBelow,
         ConditionKind::HpNotFull,
+        ConditionKind::HpFull,
     ];
 
     pub fn from_byte(byte: u8) -> Option<ConditionKind> {
@@ -117,6 +170,20 @@ impl ConditionKind {
             ConditionKind::NoSubstitute => "The target has no substitute",
             ConditionKind::HpNotFull => "The HP are not full",
             ConditionKind::MoveMakesContact => "The move makes contact",
+            ConditionKind::PokemonIsFoe => "The Pokémon is a foe",
+            ConditionKind::CausedByOther => "Another Pokémon causes it",
+            ConditionKind::OwnerHasStatus => "This Pokémon has the status",
+            ConditionKind::OtherHasStatus => "The other Pokémon has the status",
+            ConditionKind::OtherHasAbility => "The other Pokémon has the ability",
+            ConditionKind::PowerAtMost => "The power of the move is at most",
+            ConditionKind::MoveIsStab => "The move has a type of its user",
+            ConditionKind::CriticalHit => "The move is a critical hit",
+            ConditionKind::MoveHasFlag => "The move has the property",
+            ConditionKind::MoveInGroup => "The move is a",
+            ConditionKind::Chance => "A random chance of",
+            ConditionKind::NotVeryEffective => "The move is not very effective",
+            ConditionKind::HpFull => "The HP are full",
+            ConditionKind::MoveTypeWasChanged => "This ability changed the type of the move",
         }
     }
 
@@ -135,6 +202,20 @@ impl ConditionKind {
             ConditionKind::NoSubstitute => "The move did not hit a substitute.",
             ConditionKind::HpNotFull => "The owner has lost some HP.",
             ConditionKind::MoveMakesContact => "The move touches its target (the property Contact of the move).",
+            ConditionKind::PokemonIsFoe => "The Pokémon of the moment is on the other side of the battle. For example, a foe that enters the battle.",
+            ConditionKind::CausedByOther => "The Pokémon that uses the move, or that causes the stat change or the status condition, is not this Pokémon (Clear Body blocks the drops that other Pokémon cause).",
+            ConditionKind::OwnerHasStatus => "The Pokémon that has the ability has this status condition. \"Any\" is paralysis, sleep, freeze, burn or poison (Guts, Quick Feet).",
+            ConditionKind::OtherHasStatus => "The other Pokémon of the move has this status condition: the target when this Pokémon uses the move, the user when this Pokémon is hit.",
+            ConditionKind::OtherHasAbility => "The other Pokémon of the move has this ability: the target when this Pokémon uses the move, the user when this Pokémon is hit.",
+            ConditionKind::PowerAtMost => "The power of the move is this value or less (Technician: 60).",
+            ConditionKind::MoveIsStab => "The type of the move is a type of the Pokémon that uses it (Adaptability).",
+            ConditionKind::CriticalHit => "The move landed a critical hit (Sniper, Anger Point).",
+            ConditionKind::MoveHasFlag => "Tests a property of the data of the move: contact, punching (Iron Fist), sound (Soundproof)...",
+            ConditionKind::MoveInGroup => "The game keeps lists of moves: the biting moves (Strong Jaw), the aura and pulse moves (Mega Launcher), the ball and bomb moves (Bulletproof), the powder moves (Overcoat).",
+            ConditionKind::Chance => "The rule runs only some of the time (Poison Point: 30%).",
+            ConditionKind::NotVeryEffective => "The type of the move is weak against the target (x0.5 or less, Tinted Lens).",
+            ConditionKind::HpFull => "The owner has all its HP (Multiscale).",
+            ConditionKind::MoveTypeWasChanged => "Goes with the action \"Change the type of the move\": the power boost of Refrigerate is only for the moves whose type it changed.",
         }
     }
 
@@ -145,8 +226,53 @@ impl ConditionKind {
             ConditionKind::WeatherIs => Argument::Weather,
             ConditionKind::HpBelow => Argument::Percent,
             ConditionKind::MoveCategoryIs => Argument::DamageKind,
+            ConditionKind::OwnerHasStatus | ConditionKind::OtherHasStatus => Argument::StatusOrAny,
+            ConditionKind::OtherHasAbility => Argument::Ability,
+            ConditionKind::PowerAtMost => Argument::Power,
+            ConditionKind::MoveHasFlag => Argument::MoveFlag,
+            ConditionKind::MoveInGroup => Argument::MoveGroup,
+            ConditionKind::Chance => Argument::Chance,
             _ => Argument::None,
         }
+    }
+
+    /// The argument that the editor gives to a new condition of this kind.
+    pub fn default_argument(self) -> i16 {
+        match self {
+            ConditionKind::WeatherIs => 2,
+            ConditionKind::HpBelow => 50,
+            ConditionKind::MoveCategoryIs => 1,
+            ConditionKind::OtherHasAbility => 1,
+            ConditionKind::PowerAtMost => 60,
+            ConditionKind::MoveInGroup => 1,
+            ConditionKind::Chance => 30,
+            _ => 0,
+        }
+    }
+
+    /// True when the condition reads the move of the moment: the rule needs a moment of a move.
+    pub fn needs_move(self) -> bool {
+        matches!(
+            self,
+            ConditionKind::MoveUserIsOwner
+                | ConditionKind::MoveTypeIs
+                | ConditionKind::TargetFainted
+                | ConditionKind::DefenderIsOwner
+                | ConditionKind::MoveCategoryIs
+                | ConditionKind::SuperEffective
+                | ConditionKind::NoSubstitute
+                | ConditionKind::MoveMakesContact
+                | ConditionKind::CausedByOther
+                | ConditionKind::OtherHasStatus
+                | ConditionKind::OtherHasAbility
+                | ConditionKind::PowerAtMost
+                | ConditionKind::MoveIsStab
+                | ConditionKind::CriticalHit
+                | ConditionKind::MoveHasFlag
+                | ConditionKind::MoveInGroup
+                | ConditionKind::NotVeryEffective
+                | ConditionKind::MoveTypeWasChanged
+        )
     }
 }
 
@@ -176,12 +302,39 @@ pub enum ActionKind {
     ConsumeItem = 10,
     /// Adds stages to the critical hit stage (a: the number of stages).
     RaiseCritical = 11,
+    /// Stops a stat stage from going down (a: the statistic, 0 for all of them).
+    BlockStatDrop = 12,
+    /// Stops a status condition (a: the status condition, 0 for any of paralysis, sleep, freeze, burn and poison).
+    BlockStatus = 13,
+    /// The move has no effect on its target. The next actions run only when the move is blocked.
+    BlockMove = 14,
+    /// Stops a flinch.
+    BlockFlinch = 15,
+    /// Stops a critical hit.
+    BlockCritical = 16,
+    /// Changes the type of the move (a: the number of the type).
+    ChangeMoveType = 17,
+    /// Raises the priority of the move (a: the number of steps).
+    RaisePriority = 18,
+    /// Multiplies the chance of the secondary effect (b: the multiplier in percent, 200 is x2).
+    MultiplyEffectChance = 19,
+    /// The move is always a critical hit.
+    ForceCritical = 20,
 }
 
 impl ActionKind {
-    pub const ALL: [ActionKind; 11] = [
+    pub const ALL: [ActionKind; 20] = [
         ActionKind::MultiplyValue,
         ActionKind::RaiseCritical,
+        ActionKind::ForceCritical,
+        ActionKind::BlockCritical,
+        ActionKind::BlockMove,
+        ActionKind::BlockStatDrop,
+        ActionKind::BlockStatus,
+        ActionKind::BlockFlinch,
+        ActionKind::ChangeMoveType,
+        ActionKind::RaisePriority,
+        ActionKind::MultiplyEffectChance,
         ActionKind::Heal,
         ActionKind::DamageHp,
         ActionKind::ChangeStat,
@@ -210,6 +363,15 @@ impl ActionKind {
             ActionKind::DamageHp => "Remove HP",
             ActionKind::ConsumeItem => "Use up the item",
             ActionKind::RaiseCritical => "Raise the critical-hit stage",
+            ActionKind::BlockStatDrop => "Block a stat drop",
+            ActionKind::BlockStatus => "Block a status condition",
+            ActionKind::BlockMove => "Block the move",
+            ActionKind::BlockFlinch => "Block the flinch",
+            ActionKind::BlockCritical => "Block critical hits",
+            ActionKind::ChangeMoveType => "Change the type of the move",
+            ActionKind::RaisePriority => "Raise the priority of the move",
+            ActionKind::MultiplyEffectChance => "Multiply the chance of the effect",
+            ActionKind::ForceCritical => "Make it a critical hit",
         }
     }
 
@@ -226,6 +388,15 @@ impl ActionKind {
             ActionKind::DamageHp => "Removes a part of the maximum HP (the recoil of the Life Orb, the Rocky Helmet).",
             ActionKind::ConsumeItem => "The held item is used up, like a berry.",
             ActionKind::RaiseCritical => "Adds stages to the critical-hit stage of the move. Choose the moment \"A critical hit is checked\".",
+            ActionKind::BlockStatDrop => "The stat stage does not go down. Choose the moment \"A stat stage is about to change\". The banner does not show.",
+            ActionKind::BlockStatus => "The Pokémon does not get the status condition. Choose the moment \"A status condition is about to be given\". The banner does not show.",
+            ActionKind::BlockMove => "The move has no effect on the target. Choose the moment \"A move is checked against its target\". The next actions of the reaction run only when the move is blocked (Volt Absorb: then heal).",
+            ActionKind::BlockFlinch => "The Pokémon does not flinch. Choose the moment \"A flinch is checked\". The banner does not show.",
+            ActionKind::BlockCritical => "The move is not a critical hit. Choose the moment \"A critical hit is checked\" and the condition \"This Pokémon is the target of the move\".",
+            ActionKind::ChangeMoveType => "The move gets this type. Choose the moment \"The data of a move is read\". The banner does not show.",
+            ActionKind::RaisePriority => "The move gets this number of priority steps more. Choose the moment \"The priority of a move is calculated\".",
+            ActionKind::MultiplyEffectChance => "Multiplies the chance of the secondary effect of the move (200 is x2). Choose one of the moments \"The chance of ... effect is calculated\".",
+            ActionKind::ForceCritical => "The move is always a critical hit. Choose the moment \"A critical hit is checked\".",
         }
     }
 
@@ -241,7 +412,17 @@ impl ActionKind {
             ActionKind::UseMove => Argument::Move,
             ActionKind::DamageHp => Argument::Percent,
             ActionKind::RaiseCritical => Argument::CritStages,
-            ActionKind::MultiplyValue | ActionKind::ConsumeItem => Argument::None,
+            ActionKind::BlockStatDrop => Argument::StatOrAll,
+            ActionKind::BlockStatus => Argument::StatusOrAny,
+            ActionKind::ChangeMoveType => Argument::Type,
+            ActionKind::RaisePriority => Argument::Priority,
+            ActionKind::MultiplyValue
+            | ActionKind::ConsumeItem
+            | ActionKind::BlockMove
+            | ActionKind::BlockFlinch
+            | ActionKind::BlockCritical
+            | ActionKind::MultiplyEffectChance
+            | ActionKind::ForceCritical => Argument::None,
         }
     }
 
@@ -250,8 +431,24 @@ impl ActionKind {
         match self {
             ActionKind::ChangeStat => Argument::Stages,
             ActionKind::SetWeather => Argument::Forever,
-            ActionKind::MultiplyValue => Argument::Multiplier,
+            ActionKind::MultiplyValue | ActionKind::MultiplyEffectChance => Argument::Multiplier,
             _ => Argument::None,
+        }
+    }
+
+    /// The moments where the action works, or an empty list for every moment.
+    pub fn moments(self) -> &'static [u16] {
+        match self {
+            ActionKind::MultiplyValue => &[61, 64, 65, 79, 19, 57],
+            ActionKind::RaiseCritical | ActionKind::ForceCritical | ActionKind::BlockCritical => &[59],
+            ActionKind::BlockStatDrop => &[100],
+            ActionKind::BlockStatus => &[110],
+            ActionKind::BlockMove => &[49],
+            ActionKind::BlockFlinch => &[118],
+            ActionKind::ChangeMoveType => &[40],
+            ActionKind::RaisePriority => &[17],
+            ActionKind::MultiplyEffectChance => &[109, 90, 181, 117],
+            _ => &[],
         }
     }
 
@@ -280,10 +477,32 @@ pub enum Argument {
     DamageKind,
     /// The stages of the critical-hit stage.
     CritStages,
+    /// A statistic, or 0 for all of them.
+    StatOrAll,
+    /// A status condition, or 0 for any of the five main ones.
+    StatusOrAny,
+    /// The number of an ability.
+    Ability,
+    /// The power of a move.
+    Power,
+    /// A property of the data of a move: [`MOVE_FLAGS`].
+    MoveFlag,
+    /// A group of moves of the game: [`MOVE_GROUPS`].
+    MoveGroup,
+    /// A chance in percent.
+    Chance,
+    /// Priority steps.
+    Priority,
 }
 
 /// The kinds of damage of a move. The value is the number of the engine.
 pub const DAMAGE_KINDS: [(i16, &str); 3] = [(1, "physical"), (2, "special"), (0, "a status move")];
+
+/// The properties of the data of a move that a condition can test. The value is the number of the bit in the flags of the move.
+pub const MOVE_FLAGS: [(i16, &str); 5] = [(0, "contact"), (7, "punching"), (8, "sound"), (3, "blocked by Protect"), (4, "reflected by Magic Coat")];
+
+/// The groups of moves that the game keeps in its code. The plugin has the same lists.
+pub const MOVE_GROUPS: [(i16, &str); 4] = [(1, "biting move"), (2, "aura or pulse move"), (3, "ball or bomb move"), (4, "powder move")];
 
 /// The moments where the engine calculates a value that a rule can multiply: the power, the attack, the defense, the damage, the speed and the
 /// accuracy.
@@ -301,7 +520,7 @@ pub const WEATHERS: [(i16, &str); 7] = [(1, "Harsh sunlight"), (2, "Rain"), (3, 
 pub const TERRAINS: [(i16, &str); 3] = [(1, "Grassy Terrain"), (2, "Misty Terrain"), (3, "Electric Terrain")];
 
 /// The status conditions that make sense for a rule. The value is the number of the engine (`StatusCondition`).
-pub const STATUSES: [(i16, &str); 12] = [
+pub const STATUSES: [(i16, &str); 13] = [
     (1, "Paralysis"),
     (2, "Sleep"),
     (3, "Freeze"),
@@ -311,17 +530,32 @@ pub const STATUSES: [(i16, &str); 12] = [
     (7, "Infatuation"),
     (11, "Taunt"),
     (12, "Torment"),
+    (14, "Drowsiness (Yawn)"),
     (15, "Heal Block"),
     (18, "Leech Seed"),
     (19, "Embargo"),
 ];
 
+/// The status conditions with the value 0: any of paralysis, sleep, freeze, burn and poison.
+pub fn statuses_or_any() -> Vec<(i16, &'static str)> {
+    std::iter::once((0, "Any main status")).chain(STATUSES.iter().copied()).collect()
+}
+
+/// The statistics with the value 0: all of them.
+pub fn stats_or_all() -> Vec<(i16, &'static str)> {
+    std::iter::once((0, "Every stat")).chain(STATS.iter().copied().filter(|(v, _)| *v != 9)).collect()
+}
+
+/// The target "every foe next to this Pokémon".
+pub const TARGET_FOES: u8 = 4;
+
 /// Who an action is for. The value is stored in the file.
-pub const TARGETS: [(u8, &str, &str); 4] = [
+pub const TARGETS: [(u8, &str, &str); 5] = [
     (0, "this Pokémon", "The Pokémon that has the ability."),
     (1, "the Pokémon of the moment", "The Pokémon that the moment is about: the one that enters, or the one that is hit."),
     (2, "the Pokémon that used the move", "Only for the moments of a move."),
     (3, "the first target of the move", "Only for the moments of a move."),
+    (TARGET_FOES, "every foe next to this Pokémon", "The foes on the field that this Pokémon faces (Intimidate). Omega Ruby and Alpha Sapphire only."),
 ];
 
 /// A test of a rule.
@@ -357,6 +591,12 @@ impl Action {
             ActionKind::DamageHp => (10, 0),
             ActionKind::ConsumeItem => (0, 0),
             ActionKind::RaiseCritical => (1, 0),
+            ActionKind::BlockStatDrop => (0, 0),
+            ActionKind::BlockStatus => (1, 0),
+            ActionKind::BlockMove | ActionKind::BlockFlinch | ActionKind::BlockCritical | ActionKind::ForceCritical => (0, 0),
+            ActionKind::ChangeMoveType => (14, 0),
+            ActionKind::RaisePriority => (1, 0),
+            ActionKind::MultiplyEffectChance => (0, 200),
         };
         Action { kind, target: 0, a, b, banner: true }
     }
@@ -525,7 +765,7 @@ pub fn moments(context: Context) -> &'static [Moment] {
 
 /// True for a moment of a move: the values of the situation that tell the move and its targets exist.
 pub fn is_move_moment(moment: u16) -> bool {
-    matches!(moment, 36 | 85 | 140 | 146 | 176 | 61 | 64 | 65 | 79 | 57 | 59 | 83)
+    matches!(moment, 36 | 85 | 140 | 146 | 176 | 61 | 64 | 65 | 79 | 57 | 59 | 83 | 17 | 40 | 49 | 100 | 110 | 118 | 109 | 90 | 181 | 117)
 }
 
 /// What is wrong with the rules, in words that the user understands. An empty list means the file can be written.
@@ -544,36 +784,24 @@ pub fn problems(rules: &[Rule], context: Context) -> Vec<String> {
         }
         let move_moment = context == Context::Move || is_move_moment(rule.moment);
         for condition in &rule.conditions {
-            let needs_move = matches!(
-                condition.kind,
-                ConditionKind::MoveUserIsOwner
-                    | ConditionKind::MoveTypeIs
-                    | ConditionKind::TargetFainted
-                    | ConditionKind::DefenderIsOwner
-                    | ConditionKind::MoveCategoryIs
-                    | ConditionKind::SuperEffective
-                    | ConditionKind::NoSubstitute
-                    | ConditionKind::MoveMakesContact
-            );
-            if !move_moment && needs_move {
+            if !move_moment && condition.kind.needs_move() {
                 problems.push(format!("{at}: \"{}\" needs a moment of a move.", condition.kind.label()));
             }
         }
         for action in &rule.actions {
-            if !move_moment && matches!(action.target, 2 | 3) {
+            if !move_moment && matches!(action.target, 2 | 3) && action.kind.has_target() {
                 problems.push(format!("{at}: \"{}\" needs a moment of a move.", target_label(action.target)));
             }
             if action.kind == ActionKind::ChangeStat && action.b == 0 {
                 problems.push(format!("{at}: a stat change of 0 stages does nothing."));
             }
-            if action.kind == ActionKind::MultiplyValue && !is_value_moment(rule.moment) {
-                problems.push(format!("{at}: \"{}\" needs a moment that calculates a value (the power, the attack, the defense, the damage, the speed or the accuracy).", action.kind.label()));
+            let places = action.kind.moments();
+            if !places.is_empty() && !places.contains(&rule.moment) {
+                let names: Vec<String> = places.iter().map(|m| format!("\"{}\"", moment_label(*m))).collect();
+                problems.push(format!("{at}: \"{}\" needs the moment {}.", action.kind.label(), names.join(" or ")));
             }
-            if action.kind == ActionKind::MultiplyValue && action.b <= 0 {
+            if matches!(action.kind, ActionKind::MultiplyValue | ActionKind::MultiplyEffectChance) && action.b <= 0 {
                 problems.push(format!("{at}: the multiplier must be more than 0."));
-            }
-            if action.kind == ActionKind::RaiseCritical && rule.moment != 59 {
-                problems.push(format!("{at}: \"{}\" needs the moment \"A critical hit is checked\".", action.kind.label()));
             }
         }
     }
@@ -621,6 +849,29 @@ pub fn condition_sentence(condition: &Condition) -> String {
         ConditionKind::NoSubstitute => "the target has no substitute".into(),
         ConditionKind::HpNotFull => "its HP are not full".into(),
         ConditionKind::MoveMakesContact => "the move makes contact".into(),
+        ConditionKind::PokemonIsFoe => "the Pokémon is a foe".into(),
+        ConditionKind::CausedByOther => "another Pokémon causes it".into(),
+        ConditionKind::OwnerHasStatus => format!("this Pokémon has {}", status_or_any_name(condition.arg)),
+        ConditionKind::OtherHasStatus => format!("the other Pokémon has {}", status_or_any_name(condition.arg)),
+        ConditionKind::OtherHasAbility => format!("the other Pokémon has the ability {}", condition.arg),
+        ConditionKind::PowerAtMost => format!("the power of the move is {} or less", condition.arg),
+        ConditionKind::MoveIsStab => "the move has a type of its user".into(),
+        ConditionKind::CriticalHit => "the move is a critical hit".into(),
+        ConditionKind::MoveHasFlag => format!("the move is a {} move", find(&MOVE_FLAGS, condition.arg)),
+        ConditionKind::MoveInGroup => format!("the move is a {}", find(&MOVE_GROUPS, condition.arg)),
+        ConditionKind::Chance => format!("a chance of {}% succeeds", condition.arg),
+        ConditionKind::NotVeryEffective => "the move is not very effective".into(),
+        ConditionKind::HpFull => "its HP are full".into(),
+        ConditionKind::MoveTypeWasChanged => "this ability changed the type of the move".into(),
+    }
+}
+
+/// The name of a status condition, or "a main status" for 0.
+fn status_or_any_name(value: i16) -> String {
+    if value == 0 {
+        "a main status condition".into()
+    } else {
+        find(&STATUSES, value).to_lowercase()
     }
 }
 
@@ -646,6 +897,21 @@ pub fn action_sentence(action: &Action) -> String {
         ActionKind::DamageHp => format!("{who} loses {}% of its maximum HP", action.a),
         ActionKind::ConsumeItem => "use up the item".into(),
         ActionKind::RaiseCritical => format!("raise the critical-hit stage by {}", action.a),
+        ActionKind::BlockStatDrop => {
+            if action.a == 0 {
+                "block the stat drops".into()
+            } else {
+                format!("block the drops of the {}", find(&STATS, action.a))
+            }
+        }
+        ActionKind::BlockStatus => format!("block {}", status_or_any_name(action.a)),
+        ActionKind::BlockMove => "block the move".into(),
+        ActionKind::BlockFlinch => "block the flinch".into(),
+        ActionKind::BlockCritical => "block the critical hit".into(),
+        ActionKind::ChangeMoveType => format!("the move becomes a {} move", type_name(action.a)),
+        ActionKind::RaisePriority => format!("raise the priority of the move by {}", action.a),
+        ActionKind::MultiplyEffectChance => format!("multiply the chance of the effect by {}", action.b as f32 / 100.0),
+        ActionKind::ForceCritical => "make it a critical hit".into(),
     };
     if action.banner {
         format!("{text} (the banner shows)")

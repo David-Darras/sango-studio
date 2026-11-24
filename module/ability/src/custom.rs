@@ -48,9 +48,21 @@ impl Store {
         self.loaded = true;
     }
 
-    /// The numbers of the new abilities.
+    /// The numbers of the new abilities (not the abilities of the game that have a file).
     pub fn ids(&self) -> Vec<usize> {
-        self.list.iter().map(|a| a.id as usize).collect()
+        self.list.iter().filter(|a| !a.is_game()).map(|a| a.id as usize).collect()
+    }
+
+    /// The abilities of the game whose rules replace the code of the game.
+    pub fn game_ids(&self) -> Vec<usize> {
+        self.list.iter().filter(|a| a.is_game()).map(|a| a.id as usize).collect()
+    }
+
+    /// Puts the rules of an ability of the game in the list: they are saved with the next "Save".
+    pub fn insert(&mut self, ability: CustomAbility) {
+        self.list.retain(|a| a.id != ability.id);
+        self.list.push(ability);
+        self.list.sort_by_key(|a| a.id);
     }
 
     pub fn find(&self, id: usize) -> Option<&CustomAbility> {
@@ -70,10 +82,10 @@ impl Store {
     /// that is open), or with the texts "New ability" and one reaction that raises the Speed of the Pokémon when it enters the
     /// battle. Gives its number.
     pub fn add(&mut self, template: Option<usize>) -> Result<usize, String> {
-        if self.list.len() >= rules::MAX_ABILITIES {
+        if self.ids().len() >= rules::MAX_ABILITIES {
             return Err(format!("The plugin keeps {} new abilities at most: delete one first.", rules::MAX_ABILITIES));
         }
-        let used: Vec<u8> = self.list.iter().map(|a| a.id).collect();
+        let used: Vec<u8> = self.list.iter().filter(|a| !a.is_game()).map(|a| a.id).collect();
         let id = CustomAbility::free_id(&used).ok_or("All the ids from 192 to 255 are used.")?;
         let mut ability = CustomAbility::new(id, "New ability", "");
         if let Some(from) = template.and_then(|t| self.find(t)) {
@@ -100,17 +112,39 @@ impl Store {
             sd.write(&path, &ability.to_bytes()).and_then(|_| sd.mark_changed(&path))?;
             written += 1;
         }
+        let had_game = self.saved.iter().filter(|a| a.is_game()).map(|a| a.id).collect::<Vec<u8>>();
         self.saved = self.list.clone();
+        if written > 0 || had_game != self.game_list() {
+            self.write_game_list(sd)?;
+        }
         Ok(written)
     }
 
-    /// Deletes a new ability: its file too.
+    /// The abilities of the game that have a file, as saved.
+    fn game_list(&self) -> Vec<u8> {
+        self.saved.iter().filter(|a| a.is_game()).map(|a| a.id).collect()
+    }
+
+    /// Writes `ability/game.bin`: the plugin reads the files of the abilities of the game that it lists.
+    fn write_game_list(&self, sd: &SdCard) -> Result<(), String> {
+        let ids = self.game_list();
+        if ids.is_empty() {
+            sd.remove(rules::GAME_LIST_PATH).and_then(|_| sd.mark_changed(rules::GAME_LIST_PATH))
+        } else {
+            sd.write(rules::GAME_LIST_PATH, &rules::game_list_bytes(&ids)).and_then(|_| sd.mark_changed(rules::GAME_LIST_PATH))
+        }
+    }
+
+    /// Deletes a new ability, or the rules of an ability of the game (the game runs its own code again): its file too.
     pub fn delete(&mut self, sd: &SdCard, id: usize) -> Result<(), String> {
         let id8 = id as u8;
         let path = CustomAbility::path(id8);
         sd.remove(&path).and_then(|_| sd.mark_changed(&path))?;
         self.list.retain(|a| a.id != id8);
         self.saved.retain(|a| a.id != id8);
+        if id8 < rules::FIRST_ID {
+            self.write_game_list(sd)?;
+        }
         Ok(())
     }
 }
@@ -200,6 +234,25 @@ mod test {
         other.delete(&sd, 192).unwrap();
         assert_eq!(other.ids(), vec![193]);
         assert!(sd.read("ability/192.bin").is_none());
+        let _ = std::fs::remove_dir_all(&path);
+    }
+
+    /// The rules of an ability of the game go in their file and in the list `ability/game.bin`, which the plugin reads.
+    #[test]
+    fn the_rules_of_a_game_ability_are_listed_for_the_plugin() {
+        let path = folder("game");
+        let sd = SdCard::open(path.to_str().unwrap()).unwrap();
+        let mut store = Store::default();
+        store.ensure(Some(&sd));
+        store.insert(CustomAbility::game(22, crate::rules::presets::game_rules(22).unwrap()));
+        store.save(&sd).unwrap();
+        assert_eq!(sd.read(rules::GAME_LIST_PATH).unwrap(), rules::game_list_bytes(&[22]));
+        let mut other = Store::default();
+        other.ensure(Some(&sd));
+        assert_eq!(other.game_ids(), vec![22]);
+        assert!(other.ids().is_empty());
+        other.delete(&sd, 22).unwrap();
+        assert!(sd.read("ability/22.bin").is_none() && sd.read(rules::GAME_LIST_PATH).is_none());
         let _ = std::fs::remove_dir_all(&path);
     }
 

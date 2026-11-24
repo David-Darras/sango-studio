@@ -2,7 +2,7 @@
 //! three of them.
 
 use crate::{moments, rule_sentence, ActionKind, Argument, Condition, ConditionKind, Context, Rule, Action};
-use crate::{moment_label, target_label, DAMAGE_KINDS, MAX_ACTIONS, MAX_CONDITIONS, MAX_RULES, STATS, STATUSES, TARGETS, TERRAINS, WEATHERS};
+use crate::{moment_label, stats_or_all, statuses_or_any, target_label, DAMAGE_KINDS, MAX_ACTIONS, MAX_CONDITIONS, MAX_RULES, MOVE_FLAGS, MOVE_GROUPS, STATS, STATUSES, TARGETS, TERRAINS, WEATHERS};
 use sango_species_base::battle_icons;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -56,7 +56,7 @@ fn argument_ui(ui: &mut egui::Ui, salt: String, argument: Argument, value: &mut 
             ui.add(egui::DragValue::new(value).range(1..=1000).prefix("move number "));
         }
         Argument::Stages => {
-            ui.add(egui::DragValue::new(value).range(-6..=6).suffix(" stages"));
+            ui.add(egui::DragValue::new(value).range(-12..=12).suffix(" stages"));
         }
         Argument::Multiplier => {
             ui.add(egui::DragValue::new(value).range(10..=1000).speed(5).suffix("% (150 is x1.5)"));
@@ -66,6 +66,30 @@ fn argument_ui(ui: &mut egui::Ui, salt: String, argument: Argument, value: &mut 
         }
         Argument::CritStages => {
             ui.add(egui::DragValue::new(value).range(1..=3).suffix(" stages"));
+        }
+        Argument::StatOrAll => {
+            pick(ui, salt, value, &stats_or_all());
+        }
+        Argument::StatusOrAny => {
+            pick(ui, salt, value, &statuses_or_any());
+        }
+        Argument::Ability => {
+            ui.add(egui::DragValue::new(value).range(1..=255).prefix("ability number "));
+        }
+        Argument::Power => {
+            ui.add(egui::DragValue::new(value).range(1..=250).prefix("power "));
+        }
+        Argument::MoveFlag => {
+            pick(ui, salt, value, &MOVE_FLAGS);
+        }
+        Argument::MoveGroup => {
+            pick(ui, salt, value, &MOVE_GROUPS);
+        }
+        Argument::Chance => {
+            ui.add(egui::DragValue::new(value).range(1..=100).suffix("%"));
+        }
+        Argument::Priority => {
+            ui.add(egui::DragValue::new(value).range(1..=5).suffix(" steps"));
         }
         Argument::Forever => {
             let mut forever = *value != 0;
@@ -102,13 +126,7 @@ fn rule_ui(ui: &mut egui::Ui, id: &str, number: usize, rule: &mut Rule, context:
                 }
             });
             if kind != condition.kind {
-                let arg = match kind {
-                    ConditionKind::WeatherIs => 2,
-                    ConditionKind::HpBelow => 50,
-                    ConditionKind::MoveCategoryIs => 1,
-                    _ => 0,
-                };
-                *condition = Condition { kind, arg };
+                *condition = Condition { kind, arg: kind.default_argument() };
             }
             argument_ui(ui, salt("condition_arg", i), condition.kind.argument(), &mut condition.arg);
             if widget::button(ui, "Remove") {
@@ -178,7 +196,7 @@ pub fn rules_editor(ui: &mut egui::Ui, id: &str, rules: &mut Vec<Rule>, context:
         egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(10.0)).inner_margin(egui::Margin::same(10.0)).show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(format!("Reaction {}", number + 1)).strong());
-                if widget::button(ui, "Remove the reaction") {
+                if widget::button_styled(ui, egui::RichText::new("Remove the reaction").color(color::WHITE), Some(color::ROSE)) {
                     remove_rule = Some(number);
                 }
             });
