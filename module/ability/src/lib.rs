@@ -373,7 +373,8 @@ impl Ability {
             ui.label(widget::hint("A click on a species opens it in the Species page, where its abilities are chosen. The data of the SD card counts."));
             ui.add_space(6.0);
             for (slot, title) in SLOTS.iter().enumerate() {
-                let mut numbers: Vec<usize> = users.get(slot).map(|list| list.iter().map(|&(species, _)| species).collect()).unwrap_or_default();
+                // Each form is a Pokémon of its own: Rotom-Heat is not Rotom.
+                let mut numbers: Vec<(usize, usize)> = users.get(slot).cloned().unwrap_or_default();
                 numbers.sort_unstable();
                 numbers.dedup();
                 ui.label(egui::RichText::new(format!("{title} ({})", numbers.len())).strong());
@@ -382,8 +383,8 @@ impl Ability {
                 } else {
                     // Each slot has its own list: its widgets (the header, the scroll area) need their own ids.
                     let clicked = ui.push_id(slot, |ui| self.species_table.show(ui, "ability_users", &numbers, 300.0)).inner;
-                    if let Some(number) = clicked {
-                        sango_species_base::open_species(ui.ctx(), number);
+                    if let Some((species, form)) = clicked {
+                        sango_species_base::open_species_form(ui.ctx(), species, form);
                     }
                 }
                 ui.add_space(8.0);

@@ -92,7 +92,6 @@ pub fn tab_part(tab: usize) -> Option<Part> {
         0 => Some(Part::Data),
         2 => Some(Part::Moves),
         3 => Some(Part::Evolutions),
-        5 => Some(Part::Texts),
         _ => None,
     }
 }

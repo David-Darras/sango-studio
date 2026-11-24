@@ -144,6 +144,8 @@ pub struct LevelingRate {
     from_card: Vec<usize>,
     /// The Leveling rate of each species, from the species 1 on.
     rates: Vec<Option<u8>>,
+    /// The rate of each species and form, for the list of the Pokémon of a rate.
+    form_rates: Vec<(usize, usize, u8)>,
     /// The list of species of the right side.
     species_table: SpeciesTable,
     /// The time of the last frame, to know when the page comes back after another page.
@@ -178,6 +180,7 @@ impl Default for LevelingRate {
             romfs: None,
             from_card: Vec::new(),
             rates: Vec::new(),
+            form_rates: Vec::new(),
             species_table: SpeciesTable::default(),
             last_seen: f64::NEG_INFINITY,
             error: None,
@@ -195,8 +198,9 @@ impl Default for LevelingRate {
 }
 
 /// The numbers of the species that use a Leveling rate, in the order of their numbers.
-fn species_of_rate(rates: &[Option<u8>], rate: usize) -> Vec<usize> {
-    rates.iter().enumerate().filter(|(_, r)| **r == Some(rate as u8)).map(|(place, _)| place + 1).collect()
+/// The species and the forms that use a rate: each form is a Pokémon of its own (Rotom-Heat).
+fn species_of_rate(rates: &[(usize, usize, u8)], rate: usize) -> Vec<(usize, usize)> {
+    rates.iter().filter(|(_, _, r)| *r as usize == rate).map(|&(species, form, _)| (species, form)).collect()
 }
 
 /// The number with thousands separators: 1059860 gives "1,059,860".
@@ -296,6 +300,7 @@ impl LevelingRate {
                 self.error = Some(message);
             }
         }
+        self.form_rates = sango_species::form_leveling_rates(session).unwrap_or_default();
         self.species_table.load(session);
     }
 
@@ -651,15 +656,15 @@ impl LevelingRate {
 
     /// The Pokémon that use the chosen rate. A click opens the Species page on that Pokémon.
     fn species_list(&mut self, ui: &mut egui::Ui) {
-        let list = species_of_rate(&self.rates, self.rate);
+        let list = species_of_rate(&self.form_rates, self.rate);
         widget::card(ui, |ui| {
             ui.set_width(SpeciesTable::WIDTH);
             ui.label(widget::title(&format!("Pokémon with this rate ({})", list.len())));
             ui.add_space(4.0);
             if list.is_empty() {
                 ui.label(widget::hint("No Pokémon uses this rate."));
-            } else if let Some(number) = self.species_table.show(ui, "leveling_rate_species", &list, 560.0) {
-                sango_species::open_species(ui.ctx(), number);
+            } else if let Some((species, form)) = self.species_table.show(ui, "leveling_rate_species", &list, 560.0) {
+                sango_species::open_species_form(ui.ctx(), species, form);
             }
         });
     }
@@ -890,9 +895,9 @@ mod test {
 
     #[test]
     fn species_of_a_rate_are_found_by_number() {
-        let rates = [Some(3), Some(0), None, Some(3)];
-        assert_eq!(species_of_rate(&rates, 3), [1, 4]);
-        assert_eq!(species_of_rate(&rates, 0), [2]);
+        let rates = [(1, 0, 3), (2, 0, 0), (4, 0, 3), (4, 1, 0)];
+        assert_eq!(species_of_rate(&rates, 3), [(1, 0), (4, 0)]);
+        assert_eq!(species_of_rate(&rates, 0), [(2, 0), (4, 1)], "a form is a Pokémon of its own");
         assert!(species_of_rate(&rates, 5).is_empty());
     }
 
@@ -956,7 +961,7 @@ mod test {
     #[test]
     fn the_list_of_pokemon_shows_many_rows_beside_the_graph() {
         let mut page = LevelingRate::default();
-        page.rates = vec![Some(0); 721];
+        page.form_rates = (1..=721).map(|species| (species, 0, 0)).collect();
         let ctx = egui::Context::default();
         let mut height = 0.0;
         for _ in 0..3 {
@@ -995,8 +1000,8 @@ mod test {
         page.load_species(&session);
         assert!(page.error.is_none(), "{:?}", page.error);
         assert_eq!(page.rates.len(), 721);
-        let counted: usize = (0..8).map(|rate| species_of_rate(&page.rates, rate).len()).sum();
-        assert_eq!(counted, 721);
+        let counted: usize = (0..8).map(|rate| species_of_rate(&page.form_rates, rate).len()).sum();
+        assert!(counted > 721, "the forms are counted too");
         // Bulbapedia: Bulbasaur is Medium Slow (3), Pikachu Medium Fast (0), Magikarp Slow (5), Blissey Fast (4).
         let rate_of = |number: usize| page.rates[number - 1];
         assert_eq!((rate_of(1), rate_of(25), rate_of(129), rate_of(242)), (Some(3), Some(0), Some(5), Some(4)));

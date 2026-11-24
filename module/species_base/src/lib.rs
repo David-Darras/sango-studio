@@ -34,8 +34,53 @@ pub const OPEN_SPECIES: &str = "sango_open_species";
 
 /// Asks the Species page to show a species (its form 0) and switches to that page.
 pub fn open_species(ctx: &egui::Context, species: usize) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OPEN_SPECIES), species));
+    open_species_form(ctx, species, 0);
+}
+
+/// Asks the Species page to show a species and one of its forms, and switches to that page.
+pub fn open_species_form(ctx: &egui::Context, species: usize, form: usize) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::new(OPEN_SPECIES), (species, form)));
     widget::open_page(ctx, "Species");
+}
+
+/// The name of a species and a form, as Pokémon Showdown writes it: the name of the species for the first form, else the species,
+/// "-" and the form ("Rotom-Heat", "Charizard-Mega-X"). A form is a Pokémon of its own in the lists: it has its own types and stats.
+pub fn species_form_name(species: usize, form: usize) -> String {
+    if form == 0 {
+        return species_name(species);
+    }
+    // A form of the game has a name of the list ("Mega X" gives "Mega-X"); another form keeps its label ("Form 3").
+    let label = match form_names::game_form_name(species, form) {
+        Some(name) => name.replace(' ', "-"),
+        None => form_names::form_label(species, form, extras::pack_forms(species).iter().any(|f| f.form as usize == form && f.mega.is_mega())),
+    };
+    format!("{}-{label}", species_name(species))
+}
+
+/// The number of forms that a menu offers for a species: the named forms of the game and the forms of the packs (at least one).
+pub fn menu_form_count(species: usize) -> usize {
+    extras::form_count(species, form_names::names_of(species).len())
+}
+
+/// The most forms that [`form_key`] holds.
+pub const KEY_FORMS: usize = 32;
+
+/// One number for a species and a form, for the menus that keep a number: `species * 32 + form`.
+pub fn form_key(species: usize, form: usize) -> u16 {
+    (species * KEY_FORMS + form.min(KEY_FORMS - 1)) as u16
+}
+
+/// The species and the form of a number of [`form_key`].
+pub fn from_form_key(key: u16) -> (usize, usize) {
+    (key as usize / KEY_FORMS, key as usize % KEY_FORMS)
+}
+
+/// The entries of a menu of Pokémon: each species and each of its forms, as `(form_key, "#0479 Rotom-Heat")`.
+pub fn species_form_menu(species: impl IntoIterator<Item = usize>) -> Vec<(u16, String)> {
+    species
+        .into_iter()
+        .flat_map(|number| (0..menu_form_count(number)).map(move |form| (form_key(number, form), format!("#{number:04} {}", species_form_name(number, form)))))
+        .collect()
 }
 
 /// The abilities of a species or of a form.
@@ -140,6 +185,24 @@ pub fn leveling_rates(session: &Session) -> Result<Vec<Option<u8>>, String> {
             on_card.or_else(|| game_data(&garc, species, 0)).map(|d| d.leveling_rate)
         })
         .collect())
+}
+
+/// The Leveling rate of each species and of each of its forms: `(species, form, rate)`. The SD card comes first, then the romfs.
+pub fn form_leveling_rates(session: &Session) -> Result<Vec<(usize, usize, u8)>, String> {
+    let dump = session.dump.as_ref().ok_or("The dump is not open.")?;
+    let garc = Garc::open(&dump.archive(ARCHIVE))?;
+    extras::refresh(session.sd.as_ref());
+    let mut rates = Vec::new();
+    for species in extras::species_ids() {
+        let game_forms = garc.first_file(species).filter(|_| species <= SPECIES_COUNT).and_then(|b| SpeciesData::from_bytes(b).ok()).map_or(1, |b| (b.total_form_count as usize).max(1));
+        for form in 0..extras::form_count(species, game_forms) {
+            let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, form))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+            if let Some(data) = on_card.or_else(|| game_data(&garc, species, form)) {
+                rates.push((species, form, data.leveling_rate));
+            }
+        }
+    }
+    Ok(rates)
 }
 
 /// The place in the archive of the file of a species and a form.

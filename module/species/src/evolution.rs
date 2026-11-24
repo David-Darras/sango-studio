@@ -126,11 +126,13 @@ impl EvolutionTab {
     }
 
     /// Draws the tab.
+    /// The card of the evolutions. The Evolution tab shows it above the card of the Mega Evolutions.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().id_salt("evolution_tab").auto_shrink([false, false]).show(ui, |ui| {
+        {
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
+                ui.label(widget::title("Evolutions"));
                 ui.horizontal(|ui| {
                     let add = ui.add_enabled(self.evolutions.has_room(), egui::Button::new(egui::RichText::new("+ Add an evolution").color(color::WHITE)).fill(color::ACCENT));
                     let choices = if ui.memory(|m| m.any_popup_open()) { Self::species_choices() } else { Vec::new() };
@@ -146,7 +148,7 @@ impl EvolutionTab {
                 self.header(ui);
                 self.rows(ui);
             });
-        });
+        }
     }
 
     /// The archives and the SD card that the CSV functions read.

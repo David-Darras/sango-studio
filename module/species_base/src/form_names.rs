@@ -116,6 +116,17 @@ mod test {
     use super::*;
 
     #[test]
+    fn a_form_has_a_name_and_a_key_of_its_own() {
+        assert_eq!(crate::species_form_name(479, 0), "Rotom");
+        assert_eq!(crate::species_form_name(479, 1), "Rotom-Heat");
+        assert_eq!(crate::species_form_name(6, 1), "Charizard-Mega-X");
+        assert_eq!(crate::from_form_key(crate::form_key(479, 5)), (479, 5));
+        let menu = crate::species_form_menu([479]);
+        assert_eq!(menu.len(), 6);
+        assert_eq!(menu[1], (crate::form_key(479, 1), "#0479 Rotom-Heat".to_string()));
+    }
+
+    #[test]
     fn the_forms_have_the_names_of_the_list() {
         assert_eq!(game_form_name(6, 1), Some("Mega X"));
         assert_eq!(game_form_name(6, 2), Some("Mega Y"));

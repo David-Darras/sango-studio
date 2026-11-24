@@ -1,4 +1,5 @@
-//! The Text tab: the texts of a species or a form, in each of the eight languages of the game.
+//! The texts of a species or a form, in each of the eight languages of the game. The General tab shows them in a compact card (see
+//! [`TextTab::compact_ui`]); the CSV tab imports and exports all of them.
 //!
 //! | Field | File of texts | Line |
 //! | --- | --- | --- |
@@ -18,6 +19,9 @@ use sango_ui::theme::color;
 use sango_ui::{egui, widget, Session};
 use std::collections::{HashMap, HashSet};
 
+/// The place of English in `LANGUAGES`: the language that the card shows first.
+const ENGLISH: usize = 2;
+
 /// Which line of a file a field uses.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Line {
@@ -35,7 +39,7 @@ pub(crate) struct Field {
     /// The number of the file of texts.
     pub(crate) file: usize,
     pub(crate) line: Line,
-    /// The number of lines that the text box shows.
+    /// The number of lines of the text: 1 for a line, more for a text box.
     rows: usize,
     hint: &'static str,
 }
@@ -43,7 +47,7 @@ pub(crate) struct Field {
 pub(crate) const FIELDS: [Field; 6] = [
     Field { label: "Name", key: "name", file: 98, line: Line::Species, rows: 1, hint: "" },
     Field { label: "Category", key: "category", file: 2, line: Line::Species, rows: 1, hint: "The Pokédex shows it with the word Pokémon, as in Seed Pokémon." },
-    Field { label: "Pokédex entry", key: "entry", file: 6, line: Line::Species, rows: 5, hint: "The text that Alpha Sapphire shows. A line break is a line break of the text." },
+    Field { label: "Description", key: "entry", file: 6, line: Line::Species, rows: 5, hint: "The text that Alpha Sapphire shows. A line break is a line break of the text." },
     Field { label: "Form name", key: "form_name", file: 5, line: Line::Place, rows: 1, hint: "The name that the Pokédex gives to this form. The first form has none." },
     Field { label: "Height", key: "height", file: 4, line: Line::Place, rows: 1, hint: "The height as the Pokédex writes it. It does not change with the height of the data." },
     Field { label: "Weight", key: "weight", file: 1, line: Line::Place, rows: 1, hint: "The weight as the Pokédex writes it. It does not change with the weight of the data." },
@@ -79,6 +83,7 @@ impl TextTab {
         self.buffers.clear();
         self.errors.clear();
         self.current = None;
+        self.language = ENGLISH;
     }
 
     /// Reads a file of texts if it is not read yet: the SD card first, then the romfs.
@@ -145,50 +150,50 @@ impl TextTab {
         self.errors.clear();
     }
 
-    /// Draws the tab. `place` is the place of the form in the Pokédex tables.
-    pub fn ui(&mut self, ui: &mut egui::Ui, session: &Session, species: usize, form: usize, place: usize) {
+    /// The compact card of the General tab: a menu of the language, then the name of the species, the category and the Pokédex
+    /// entry. `place` is the place of the form in the Pokédex tables.
+    pub fn compact_ui(&mut self, ui: &mut egui::Ui, session: &Session, species: usize, form: usize, place: usize) {
         if self.current != Some((species, form)) {
             self.current = Some((species, form));
             self.buffers.clear();
             self.errors.clear();
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for (index, language) in LANGUAGES.iter().enumerate() {
-                self.language = tab(ui, index, language.name, self.language);
-            }
-        });
-        ui.add_space(8.0);
-        egui::ScrollArea::vertical().id_salt("text_tab").auto_shrink([false, false]).show(ui, |ui| {
-            widget::card(ui, |ui| {
-                ui.set_width(760.0);
-                for field in &FIELDS {
-                    self.field(ui, session.sd.as_ref(), field, species, place);
-                    ui.add_space(10.0);
+        let sd = session.sd.as_ref();
+        // The name of the species, for every form: the form name stays in the CSV files.
+        let fields = [&FIELDS[0], &FIELDS[1], &FIELDS[2]];
+        widget::card(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(widget::title("Texts"));
+                if self.changed() {
+                    widget::badge(ui, "Not saved", color::AMBER);
+                }
+            });
+            egui::Grid::new("species_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
+                ui.label("Language");
+                let chosen = LANGUAGES.get(self.language).map_or("?", |l| l.name);
+                egui::ComboBox::from_id_salt("species_text_language").selected_text(chosen).show_ui(ui, |ui| {
+                    // English first, then the other languages in the order of the game.
+                    let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
+                    for (index, language) in order.map(|i| (i, &LANGUAGES[i])) {
+                        ui.selectable_value(&mut self.language, index, language.name);
+                    }
+                });
+                ui.end_row();
+                for field in fields {
+                    ui.label(field.label).on_hover_text(field.hint);
+                    ui.vertical(|ui| self.edit(ui, sd, field, species, place));
+                    ui.end_row();
                 }
             });
         });
     }
 
-    /// One field: its name, its text box, and what is wrong with the text.
-    fn field(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, field: &Field, species: usize, place: usize) {
+    /// The text box of a field in the chosen language, and what is wrong with the text.
+    fn edit(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, field: &Field, species: usize, place: usize) {
         let language = self.language;
         let line = Self::line_of(field, species, place);
         self.load(sd, language, field.file);
         let key = (language, field.file, line);
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(field.label).strong());
-            let edited = match (self.files.get(&(language, field.file)), self.saved.get(&(language, field.file))) {
-                (Some(now), Some(before)) => now.text(line) != before.text(line),
-                _ => false,
-            };
-            if edited {
-                widget::badge(ui, "Not saved", color::AMBER);
-            }
-        });
-        if !field.hint.is_empty() {
-            ui.label(widget::hint(field.hint));
-        }
         let Some(file) = self.files.get_mut(&(language, field.file)) else {
             ui.label(widget::hint("This text is not in the files that were read."));
             return;
@@ -198,8 +203,8 @@ impl TextTab {
             return;
         };
         let buffer = self.buffers.entry(key).or_insert(original);
-        let edit = if field.rows == 1 { egui::TextEdit::singleline(buffer) } else { egui::TextEdit::multiline(buffer).desired_rows(field.rows) };
-        let response = ui.add(edit.id_salt(key).desired_width(f32::INFINITY));
+        let edit = if field.rows == 1 { egui::TextEdit::singleline(buffer) } else { egui::TextEdit::multiline(buffer).desired_rows(3) };
+        let response = ui.add(edit.id_salt(key).desired_width(300.0));
         if response.changed() {
             match file.set_text(line, buffer) {
                 Ok(()) => {
@@ -214,23 +219,6 @@ impl TextTab {
             ui.label(egui::RichText::new(format!("{message} The change is not kept until the text is right.")).color(color::ROSE).size(13.0));
         }
     }
-}
-
-/// A tab button of the languages. Returns the chosen place.
-fn tab(ui: &mut egui::Ui, place: usize, text: &str, chosen: usize) -> usize {
-    let id = egui::Id::new(("text_language", place));
-    let mut chosen = chosen;
-    let active = widget::is_active(ui, id);
-    if active && chosen != place {
-        chosen = place;
-    }
-    let response = widget::tab_button(ui, text, chosen == place, active && widget::page_has_focus(ui));
-    widget::register_focusable(ui, id, response.rect);
-    if response.clicked() {
-        chosen = place;
-        widget::set_active_id(ui, id);
-    }
-    chosen
 }
 
 #[cfg(test)]
@@ -255,8 +243,7 @@ mod test {
             let mut input = egui::RawInput::default();
             input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 1000.0)));
             let _ = ctx.run(input, |ctx| {
-                ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_active_widget"), egui::Id::new(("text_language", tab.language))));
-                egui::CentralPanel::default().show(ctx, |ui| tab.ui(ui, &session, species, form, place));
+                egui::CentralPanel::default().show(ctx, |ui| tab.compact_ui(ui, &session, species, form, place));
             });
         };
         // Every language draws, and the names of Bulbapedia are in the files.
@@ -269,10 +256,11 @@ mod test {
         assert!(tab.files[&(2, 6)].text(1).unwrap().starts_with("Bulbasaur can be seen napping"));
         assert!(!tab.changed() && !tab.from_card());
 
-        // The form name of Hoopa Unbound (place 912) is in the file 5.
+        // A form shows the name of its species: Hoopa Unbound shows "Hoopa", and its form name (place 912, file 5) stays for the CSV.
         tab.language = 2;
         frame(&mut tab, 720, 1, 912);
-        assert_eq!(tab.files[&(2, 5)].text(912).as_deref(), Some("Hoopa Unbound"));
+        assert_eq!(tab.files[&(2, 98)].text(720).as_deref(), Some("Hoopa"));
+        assert!(!tab.files.contains_key(&(2, 5)), "the card does not read the form names");
 
         // A text is changed through its box: the buffer is typed in, the file follows.
         frame(&mut tab, 1, 0, 1);

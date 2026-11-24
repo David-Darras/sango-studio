@@ -9,7 +9,7 @@
 
 use crate::create_model::{self as model, Block, Compare, Condition, Event, COUNT, FIRST_SCRIPT, MAX_STEPS};
 use sango_core::SdCard;
-use sango_species_base::{extras, ITEM_NAMES};
+use sango_species_base::{extras, form_key, from_form_key, species_form_menu, species_form_name, ITEM_NAMES};
 use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -211,12 +211,15 @@ fn item_field(ui: &mut egui::Ui, value: &mut u32) {
     }
 }
 
-/// A picker of the species of the game and of the packs.
-fn species_field(ui: &mut egui::Ui, value: &mut u32) {
-    let mut number = (*value).min(u32::from(u16::MAX)) as u16;
-    let shown = format!("{} (#{number})", extras::species_name(number as usize));
-    if picker(ui, "species", &shown, 240.0, &mut number, None, || vec![Group { title: String::new(), entries: extras::species_ids().into_iter().map(|id| (id as u16, extras::species_name(id))).collect() }]) {
-        *value = u32::from(number);
+/// A picker of the species of the game and of the packs, and of their forms: each form is a Pokémon of its own ("Rotom-Heat").
+fn species_field(ui: &mut egui::Ui, species: &mut u32, form: &mut u32) {
+    let current = form_key(*species as usize, *form as usize);
+    let mut key = current;
+    let shown = format!("#{:04} {}", species, species_form_name(*species as usize, *form as usize));
+    if picker(ui, "species", &shown, 240.0, &mut key, None, || vec![Group { title: String::new(), entries: species_form_menu(extras::species_ids()) }]) && key != current {
+        let (number, chosen) = from_form_key(key);
+        *species = number as u32;
+        *form = chosen as u32;
     }
 }
 
@@ -300,9 +303,8 @@ fn fields(ui: &mut egui::Ui, block: &mut Block) {
         Block::Wait { frames } => number_field(ui, "Frames (60 is one second)", frames, 3600),
         Block::RunScript { script } => number_field(ui, "Script number", script, 65535),
         Block::GivePokemon { species, level, form } | Block::WildBattle { species, level, form } => {
-            species_field(ui, species);
+            species_field(ui, species, form);
             number_field(ui, "level", level, 100);
-            number_field(ui, "form", form, 255);
         }
         Block::TrainerBattle { trainer } => number_field(ui, "Trainer number", trainer, 65535),
         Block::Warp { map, x, z } => {

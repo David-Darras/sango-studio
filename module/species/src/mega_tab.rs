@@ -158,7 +158,7 @@ impl Species {
         });
     }
 
-    /// The tab.
+    /// The card of the Mega Evolutions, under the card of the evolutions in the Evolution tab.
     pub(crate) fn mega_tab(&mut self, ui: &mut egui::Ui, session: &sango_core::Session) {
         if self.mega_table.is_none() {
             self.load_mega_table(session);
@@ -174,10 +174,11 @@ impl Species {
         let pack_active = pack_forms.iter().filter(|(_, condition)| condition.is_mega()).count();
         let total_active = game_active + pack_active;
 
-        egui::ScrollArea::vertical().id_salt("species_mega_tab").auto_shrink([false, false]).show(ui, |ui| {
+        ui.vertical(|ui| {
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(TABLE_WIDTH);
+                ui.label(widget::title("Mega Evolutions"));
                 ui.horizontal(|ui| {
                     let add_btn = ui.add_enabled(
                         session.sd.is_some() && self.data.is_some() && total_active < MAX_ENTRIES,

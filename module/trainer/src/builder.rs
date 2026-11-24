@@ -415,13 +415,15 @@ impl Builder {
                 more.nickname = nickname;
             }
         });
+        // One menu for the species and the form: each form is a Pokémon of its own ("Rotom-Heat").
         row(ui, "Species", &mut |ui| {
-            let mut value = pokemon.species;
-            let shown = format!("#{:03} {}", value, SPECIES.get((value as usize).wrapping_sub(1)).copied().unwrap_or("?"));
+            let current = sango_species::form_key(pokemon.species as usize, pokemon.form as usize);
+            let mut value = current;
+            let shown = format!("#{:04} {}", pokemon.species, sango_species::species_form_name(pokemon.species as usize, pokemon.form as usize));
             if picker(ui, &format!("builder_species_{place}"), &shown, width, &mut value, None, || {
                 let mut groups: Vec<Group> = Vec::new();
                 for (tier, name) in gen6::TIER_NAMES.iter().enumerate() {
-                    let entries: Vec<(u16, String)> = (1..=SPECIES.len()).filter(|&s| tier_of(s) == tier).map(|s| (s as u16, format!("#{:03} {}", s, SPECIES[s - 1]))).collect();
+                    let entries: Vec<(u16, String)> = sango_species::species_form_menu((1..=SPECIES.len()).filter(|&s| tier_of(s) == tier));
                     let title = match *name {
                         "Uber" => "Uber (Ubers)".to_string(),
                         "NFE" => "NFE (not fully evolved)".to_string(),
@@ -432,26 +434,20 @@ impl Builder {
                     groups.push(Group { title, entries });
                 }
                 groups
-            }) && value != pokemon.species
+            }) && value != current
             {
-                pokemon.species = value;
-                pokemon.form = 0;
-                // The first ability of the new species, then the moves stay: the list below tells which ones it cannot learn.
-                more.ability = summary_ability(&summaries.get(value as usize).copied().flatten(), 0);
-                pokemon.ability = 1;
+                let (species, form) = sango_species::from_form_key(value);
+                if species != pokemon.species as usize {
+                    // The first ability of the new species, then the moves stay: the list below tells which ones it cannot learn.
+                    more.ability = summary_ability(&summaries.get(species).copied().flatten(), 0);
+                    pokemon.ability = 1;
+                }
+                pokemon.species = species as u16;
+                pokemon.form = form as _;
             }
         });
         row(ui, "Level", &mut |ui| {
             widget::spin(ui, &mut pokemon.level, 1.0, 100.0);
-            ui.label(widget::hint("Form"));
-            let forms = sango_species::form_choices(pokemon.species as usize);
-            let mut form = pokemon.form;
-            let shown = forms.get(form as usize).cloned().unwrap_or_else(|| format!("Form {form}"));
-            if picker(ui, &format!("builder_form_{place}"), &shown, 150.0, &mut form, None, || {
-                vec![Group { title: "Forms".to_string(), entries: forms.iter().enumerate().map(|(at, name)| (at as u16, name.clone())).collect() }]
-            }) {
-                pokemon.form = form;
-            }
         });
         row(ui, "Gender", &mut |ui| match summary.map(|s| s.gender_ratio) {
             Some(0) => {

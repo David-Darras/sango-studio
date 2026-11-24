@@ -34,7 +34,7 @@ pub use names::ITEM as ITEM_NAMES;
 pub use names::TYPE as TYPE_NAMES;
 
 pub use sango_species_base::{battle_icons, data, extras, form_names, icons, move_names, names};
-pub use sango_species_base::{form_choices, game_type_menu, leveling_rates, open_species, searchable_picker, species_abilities, summaries, type_menu, SpeciesAbilities, SpeciesIcons, Summary};
+pub use sango_species_base::{form_choices, form_key, form_leveling_rates, from_form_key, menu_form_count, species_form_menu, species_form_name, game_type_menu, leveling_rates, open_species, open_species_form, searchable_picker, species_abilities, summaries, type_menu, SpeciesAbilities, SpeciesIcons, Summary};
 use sango_species_base::{file_index, game_data, icon_texture, menu, name_from, sd_path, OPEN_SPECIES, SPECIES_COUNT};
 use data::SpeciesData;
 use examples::{Examples, Field};
@@ -63,7 +63,7 @@ pub fn glb_of_bch(bytes: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 /// The tabs of the page. Only the first one works for now.
-const TABS: [&str; 7] = ["General", "Model", "Learnset", "Evolution", "Mega", "Text", "CSV"];
+const TABS: [&str; 5] = ["General", "Model", "Learnset", "Evolution", "CSV"];
 
 /// The data and the shape of all the species of the romfs, form 0: the source of the examples in the help.
 fn build_index(garc: &Garc, pokedex: &PokedexData) -> examples::Index {
@@ -124,7 +124,7 @@ pub struct Species {
     /// The form icon textures: decoded at the first display, then kept.
     form_icon_textures: HashMap<(usize, usize), Option<egui::TextureHandle>>,
     /// The types and the base stats of all the species, for the species list.
-    list_rows: Option<Vec<ListRow>>,
+    list_rows: Option<Vec<ListEntry>>,
     /// The column that sorts the species list.
     sort_column: SortColumn,
     /// True when the species list goes from the largest value to the smallest one.
@@ -212,6 +212,128 @@ impl ListRow {
     }
 }
 
+/// One line of the list of the page: a species, or one of its forms. A form is a Pokémon of its own in the list ("Rotom-Heat"), as in
+/// Pokémon Showdown: it has its own types and stats.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ListEntry {
+    species: usize,
+    form: usize,
+    /// The name in the list: see [`entry_name`].
+    name: String,
+    row: ListRow,
+}
+
+/// The texture of the icon of a species and a form (the SD card first, then the romfs): decoded at the first display, then kept in
+/// `textures`.
+pub(crate) fn form_icon<'a>(
+    textures: &'a mut HashMap<(usize, usize), Option<egui::TextureHandle>>,
+    icon_garc: Option<&Garc>,
+    sd: Option<&sango_core::SdCard>,
+    ctx: &egui::Context,
+    species: usize,
+    form: usize,
+) -> Option<&'a egui::TextureHandle> {
+    let file = crate::icon_tab::icon_file(species, form, false).or_else(|| crate::icon_tab::icon_file(species, 0, false))?;
+    textures
+        .entry((species, form))
+        .or_insert_with(|| {
+            let on_card = sd.and_then(|sd| sd.read(&crate::icon_tab::sd_path(file)));
+            let bytes = on_card.or_else(|| icon_garc?.first_file(file).map(|b| b.to_vec()))?;
+            let rgba = sango_core::clim::decode_sized(&bytes, 40, 30).ok()?;
+            let pixels = egui::ColorImage::from_rgba_unmultiplied([40, 30], &rgba);
+            Some(sango_ui::textures::load(ctx, format!("form_icon_{species}_{form}"), pixels, egui::TextureOptions::NEAREST))
+        })
+        .as_ref()
+}
+
+/// The name of a species and a form in the list ("Rotom-Heat").
+fn entry_name(species: usize, form: usize) -> String {
+    sango_species_base::species_form_name(species, form)
+}
+
+/// The number of forms of a species (at least one): the forms of the game and the forms of the packs.
+fn form_count_of(garc: Option<&Garc>, species: usize) -> usize {
+    let base = garc.filter(|_| species <= SPECIES_COUNT).and_then(|g| g.first_file(species)).and_then(|b| SpeciesData::from_bytes(b).ok());
+    extras::form_count(species, base.map_or(1, |b| (b.total_form_count as usize).max(1)))
+}
+
+/// The species and the form before or after another one in the order of the numbers: the forms of a species, then the next species.
+fn step_entry(garc: Option<&Garc>, species: usize, form: usize, step: isize) -> (usize, usize) {
+    let ids = extras::species_ids();
+    let place = ids.iter().position(|&n| n == species).unwrap_or(0);
+    if step > 0 {
+        if form + 1 < form_count_of(garc, species) {
+            return (species, form + 1);
+        }
+        return ids.get(place + 1).map_or((species, form), |&next| (next, 0));
+    }
+    if form > 0 {
+        return (species, form - 1);
+    }
+    match place.checked_sub(1).and_then(|p| ids.get(p)) {
+        Some(&previous) => (previous, form_count_of(garc, previous) - 1),
+        None => (species, form),
+    }
+}
+
+/// Reads the list of the page: each species and each of its forms, with its data (the SD card first, then the romfs).
+fn read_list_entries(garc: Option<&Garc>, session: &Session) -> Vec<ListEntry> {
+    let changed = modified_species(garc, session);
+    let mut entries = Vec::new();
+    for species in extras::species_ids() {
+        for form in 0..form_count_of(garc, species) {
+            let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, form))).and_then(|b| SpeciesData::from_bytes(&b).ok());
+            let data = on_card.or_else(|| garc.and_then(|g| game_data(g, species, form))).or_else(|| extras::data(species, form));
+            let row = match data {
+                Some(d) => ListRow {
+                    types: [d.type_1, d.type_2],
+                    stats: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
+                    total: d.base_total() as u16,
+                    modified: false,
+                },
+                None => ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false },
+            };
+            entries.push(ListEntry { species, form, name: entry_name(species, form), row: row.with_modified(changed.contains(&species)) });
+        }
+    }
+    entries
+}
+
+/// The places in `entries` that match a search: the species that [`match_species`] finds, with all their forms, then the forms whose
+/// name has the search ("heat" finds Rotom-Heat, "mega" finds the Mega forms).
+fn match_entries(entries: &[ListEntry], query: &str) -> Vec<usize> {
+    if query.trim().is_empty() {
+        return (0..entries.len()).collect();
+    }
+    let species = match_species(query);
+    let mut found: Vec<usize> = Vec::new();
+    for number in &species {
+        found.extend(entries.iter().enumerate().filter(|(_, e)| e.species == *number).map(|(place, _)| place));
+    }
+    let clean = |s: &str| s.to_lowercase().replace(['é', 'è'], "e");
+    let query = clean(query.trim());
+    found.extend(entries.iter().enumerate().filter(|(_, e)| e.form > 0 && !species.contains(&e.species) && clean(&e.name).contains(&query)).map(|(place, _)| place));
+    found
+}
+
+/// Sorts the places of the list on one column. Equal lines stay in the order of the numbers and of the forms.
+fn sort_entries(list: &mut [usize], entries: &[ListEntry], column: SortColumn, descending: bool) {
+    let type_name = |t: u8| names::TYPE.get(t as usize).copied().unwrap_or("-");
+    list.sort_by(|&a, &b| {
+        let (x, y) = (&entries[a], &entries[b]);
+        let order = match column {
+            SortColumn::Number => (x.species, x.form).cmp(&(y.species, y.form)),
+            SortColumn::Name => x.name.cmp(&y.name),
+            SortColumn::Type1 => type_name(x.row.types[0]).cmp(type_name(y.row.types[0])),
+            SortColumn::Type2 => second_type(&x.row).cmp(second_type(&y.row)),
+            SortColumn::Stat(place) => x.row.stats[place].cmp(&y.row.stats[place]),
+            SortColumn::Total => x.row.total.cmp(&y.row.total),
+        };
+        let order = if descending { order.reverse() } else { order };
+        order.then(a.cmp(&b))
+    });
+}
+
 /// A column of the species list. A click on its header sorts the list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SortColumn {
@@ -260,26 +382,6 @@ fn second_type(row: &ListRow) -> &'static str {
     }
 }
 
-/// Sorts the species of the list on one column. Equal species stay in the order of their numbers.
-fn sort_species(list: &mut [usize], rows: &[ListRow], column: SortColumn, descending: bool) {
-    let first_type = |n: usize| rows.get(n - 1).map_or("-", |r| names::TYPE.get(r.types[0] as usize).copied().unwrap_or("-"));
-    let second = |n: usize| rows.get(n - 1).map_or("-", second_type);
-    let stat = |n: usize, place: usize| rows.get(n - 1).map_or(0, |r| r.stats[place]);
-    let total = |n: usize| rows.get(n - 1).map_or(0, |r| r.total);
-    list.sort_by(|&a, &b| {
-        let order = match column {
-            SortColumn::Number => a.cmp(&b),
-            SortColumn::Name => species_name(a).cmp(&species_name(b)),
-            SortColumn::Type1 => first_type(a).cmp(&first_type(b)),
-            SortColumn::Type2 => second(a).cmp(&second(b)),
-            SortColumn::Stat(place) => stat(a, place).cmp(&stat(b, place)),
-            SortColumn::Total => total(a).cmp(&total(b)),
-        };
-        let order = if descending { order.reverse() } else { order };
-        order.then(a.cmp(&b))
-    });
-}
-
 /// The species that have a file on the SD card (data, moves or evolutions) that is not the same as the file of the game.
 fn modified_species(garc: Option<&Garc>, session: &Session) -> std::collections::HashSet<usize> {
     let (Some(sd), Some(dump), Some(garc)) = (session.sd.as_ref(), session.dump.as_ref(), garc) else { return Default::default() };
@@ -307,31 +409,6 @@ fn modified_species(garc: Option<&Garc>, session: &Session) -> std::collections:
         note(names.iter().filter_map(|name| name.parse::<usize>().ok().map(|species| species.to_string())).collect());
     }
     found
-}
-
-/// Reads the list data of all the species: the SD card first, then the romfs.
-fn read_list_rows(garc: Option<&Garc>, session: &Session) -> Vec<ListRow> {
-    let changed = modified_species(garc, session);
-    (1..=extras::max_species())
-        .map(|species| {
-            // The numbers between the species of the game and the species of the packs are not species: an empty row.
-            if !extras::is_species(species) {
-                return ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false };
-            }
-            let on_card = session.sd.as_ref().and_then(|sd| sd.read(&sd_path(species, 0))).and_then(|b| SpeciesData::from_bytes(&b).ok());
-            let data = on_card.or_else(|| garc.and_then(|g| game_data(g, species, 0)));
-            match data {
-                Some(d) => ListRow {
-                    types: [d.type_1, d.type_2],
-                    stats: [d.base_hp, d.base_attack, d.base_defense, d.base_special_attack, d.base_special_defense, d.base_speed],
-                    total: d.base_total() as u16,
-                    modified: false,
-                },
-                None => ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false },
-            }
-            .with_modified(changed.contains(&species))
-        })
-        .collect()
 }
 
 /// The header of a species list: a click on a column name sorts the list on that column.
@@ -376,8 +453,8 @@ fn list_header(ui: &mut egui::Ui, sort_column: &mut SortColumn, sort_descending:
     }
 }
 
-/// Paints one row of a species list in `rect` (`LIST_WIDTH` wide): icon, number, name, types, base stats and total.
-fn paint_list_row(ui: &egui::Ui, rect: egui::Rect, number: usize, row: Option<&ListRow>, icon: Option<&egui::TextureHandle>) {
+/// Paints one row of a list with a name of its own (a species and a form, "Rotom-Heat").
+fn paint_named_row(ui: &egui::Ui, rect: egui::Rect, number: usize, name: &str, row: Option<&ListRow>, icon: Option<&egui::TextureHandle>) {
     if let Some(texture) = icon {
         let target = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.center().y - 15.0), egui::vec2(40.0, 30.0));
         let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
@@ -387,7 +464,7 @@ fn paint_list_row(ui: &egui::Ui, rect: egui::Rect, number: usize, row: Option<&L
     let left = rect.left();
     ui.painter().text(egui::pos2(left + 46.0, y), egui::Align2::LEFT_CENTER, format!("#{:04}", number), egui::FontId::proportional(12.0), color::MUTED);
     let modified = row.is_some_and(|row| row.modified);
-    let name_rect = ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, species_name(number), egui::FontId::proportional(13.5), if modified { color::ACCENT } else { color::TEXT });
+    let name_rect = ui.painter().text(egui::pos2(left + 96.0, y), egui::Align2::LEFT_CENTER, name, egui::FontId::proportional(13.5), if modified { color::ACCENT } else { color::TEXT });
     if modified {
         ui.painter().circle_filled(egui::pos2(name_rect.right() + 8.0, y), 3.0, color::ACCENT);
     }
@@ -510,15 +587,14 @@ impl Species {
         });
     }
 
-    /// Reads the list data of all the species: the SD card first, then the romfs.
-    fn build_list_rows(&self, session: &Session) -> Vec<ListRow> {
-        read_list_rows(self.garc.as_ref(), session)
+    /// Reads the list of the page: each species and each of its forms.
+    fn build_list_rows(&self, session: &Session) -> Vec<ListEntry> {
+        read_list_entries(self.garc.as_ref(), session)
     }
 
     /// The number of forms of the chosen species (at least one).
     fn total_form_count(&self) -> usize {
-        let base = self.garc.as_ref().filter(|_| self.species <= SPECIES_COUNT).and_then(|g| g.first_file(self.species)).and_then(|b| SpeciesData::from_bytes(b).ok());
-        extras::form_count(self.species, base.map_or(1, |b| (b.total_form_count as usize).max(1)))
+        form_count_of(self.garc.as_ref(), self.species)
     }
 
     /// The menus, the two buttons and the state.
@@ -530,7 +606,7 @@ impl Species {
         let before = (self.species, self.form);
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                let species_text = format!("#{:04} {}", self.species, species_name(self.species));
+                let species_text = format!("#{:04} {}", self.species, entry_name(self.species, self.form));
                 let species_id = ui.make_persistent_id("species_menu");
                 let popup_id = species_id.with("popup");
                 let is_popup_open = ui.memory(|m| m.is_popup_open(popup_id));
@@ -554,7 +630,8 @@ impl Species {
                     );
                     // The icon of the chosen species, before its name.
                     let mut icon_width = 0.0;
-                    if let Some(texture) = icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), self.species) {
+                    let (species, form) = (self.species, self.form);
+                    if let Some(texture) = self.form_icon_texture(ui.ctx(), session, species, form) {
                         let icon = egui::Rect::from_min_size(egui::pos2(rect.left() + 6.0, rect.center().y - 15.0), egui::vec2(40.0, 30.0));
                         let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                         ui.painter().image(texture.id(), icon, full, egui::Color32::WHITE);
@@ -625,15 +702,15 @@ impl Species {
                         });
                         ui.separator();
 
-                        let query = self.species_search.trim();
-                        let mut matches = match_species(query);
+                        // The list leaves the page while it is drawn: the icons of the forms need the page.
+                        let entries = self.list_rows.take().unwrap_or_default();
+                        let query = self.species_search.trim().to_string();
+                        let mut matches = match_entries(&entries, &query);
 
                         // The header: a click sorts the list on that column.
                         list_header(ui, &mut self.sort_column, &mut self.sort_descending);
                         ui.separator();
-
-                        let rows: &[ListRow] = self.list_rows.as_deref().unwrap_or(&[]);
-                        sort_species(&mut matches, rows, self.sort_column, self.sort_descending);
+                        sort_entries(&mut matches, &entries, self.sort_column, self.sort_descending);
 
                         if matches.is_empty() {
                             ui.add_space(4.0);
@@ -643,30 +720,31 @@ impl Species {
                             let up = ui.input(|i| i.key_pressed(egui::Key::ArrowUp));
                             let down = ui.input(|i| i.key_pressed(egui::Key::ArrowDown));
                             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                            let key_of = |place: usize| (entries[place].species, entries[place].form);
+                            let current = matches.iter().position(|&place| key_of(place) == (self.species, self.form));
 
-                            if let Some(pos) = matches.iter().position(|&n| n == self.species) {
+                            if let Some(pos) = current {
                                 if down && pos + 1 < matches.len() {
-                                    self.species = matches[pos + 1];
+                                    (self.species, self.form) = key_of(matches[pos + 1]);
                                 }
                                 if up && pos > 0 {
-                                    self.species = matches[pos - 1];
+                                    (self.species, self.form) = key_of(matches[pos - 1]);
                                 }
-                            } else if (up || down) && !matches.is_empty() {
-                                self.species = matches[0];
+                            } else if up || down {
+                                (self.species, self.form) = key_of(matches[0]);
                             }
 
-                            if enter && !matches.is_empty() {
-                                if !matches.contains(&self.species) {
-                                    self.species = matches[0];
+                            if enter {
+                                if !matches.iter().any(|&place| key_of(place) == (self.species, self.form)) {
+                                    (self.species, self.form) = key_of(matches[0]);
                                 }
                                 ui.memory_mut(|m| m.close_popup());
                             }
 
                             let nav_key = up || down;
-                            let highlighted = if matches.contains(&self.species) { self.species } else { matches[0] };
-                            let highlighted_place = matches.iter().position(|&n| n == highlighted);
-                            // The list shows the highlighted species at the middle after a key, and at the opening.
-                            let centre = highlighted_place.filter(|_| nav_key || (query.is_empty() && (self.scroll_list || !self.list_shown)));
+                            let highlighted_place = matches.iter().position(|&place| key_of(place) == (self.species, self.form)).unwrap_or(0);
+                            // The list shows the highlighted line at the middle after a key, and at the opening.
+                            let centre = Some(highlighted_place).filter(|_| nav_key || (query.is_empty() && (self.scroll_list || !self.list_shown)));
 
                             ui.spacing_mut().item_spacing.y = 0.0;
                             let mut area = egui::ScrollArea::vertical().max_height(360.0);
@@ -674,13 +752,13 @@ impl Species {
                                 area = area.vertical_scroll_offset(((place as f32 + 0.5) * LIST_ROW_HEIGHT - 180.0).max(0.0));
                             }
                             area.show_rows(ui, LIST_ROW_HEIGHT, matches.len(), |ui, range| {
-                                for place in range {
-                                    let number = matches[place];
+                                for row_place in range {
+                                    let entry = &entries[matches[row_place]];
                                     let (rect, response) = ui.allocate_exact_size(egui::vec2(LIST_WIDTH, LIST_ROW_HEIGHT), egui::Sense::click());
                                     if !ui.is_rect_visible(rect) {
                                         continue;
                                     }
-                                    if number == highlighted {
+                                    if row_place == highlighted_place {
                                         ui.painter().rect_filled(rect, egui::Rounding::same(6.0), color::ACCENT_SOFT);
                                         widget::glow(ui, rect, 6.0);
                                     } else if response.hovered() {
@@ -689,15 +767,16 @@ impl Species {
                                     if response.hovered() {
                                         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                     }
-                                    let icon = icon_texture(&mut self.icon_textures, self.icon_garc.as_ref(), ui.ctx(), number);
-                                    paint_list_row(ui, rect, number, rows.get(number - 1), icon);
+                                    let icon = self.form_icon_texture(ui.ctx(), session, entry.species, entry.form);
+                                    paint_named_row(ui, rect, entry.species, &entry.name, Some(&entry.row), icon);
                                     if response.clicked() {
-                                        self.species = number;
+                                        (self.species, self.form) = (entry.species, entry.form);
                                         ui.memory_mut(|m| m.close_popup());
                                     }
                                 }
                             });
                         }
+                        self.list_rows = Some(entries);
                         self.list_shown = true;
                         self.scroll_list = false;
                     },
@@ -728,47 +807,13 @@ impl Species {
                         let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
                             - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
                         if step != 0 {
-                            // The next species in the list: the numbers between the species of the game and of the packs are skipped.
-                            let ids = extras::species_ids();
-                            let place = ids.iter().position(|&n| n == self.species).unwrap_or(0) as isize;
-                            self.species = ids[(place + step).clamp(0, ids.len() as isize - 1) as usize];
+                            // The next form, or the next species: the numbers between the species of the game and of the packs are skipped.
+                            (self.species, self.form) = step_entry(self.garc.as_ref(), self.species, self.form, step);
                         }
                     });
                 }
                 let forms = self.total_form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
-                let species_number = self.species;
-                let items: Vec<usize> = extras::pack_forms(species_number).iter().filter(|f| f.mega.is_mega()).map(|f| f.form as usize).collect();
-                let form_text = |form: usize| form_names::form_label(species_number, form, items.contains(&form));
-                let form_combo = egui::ComboBox::from_id_salt("form_menu").selected_text(form_text(self.form)).width(150.0).show_ui(ui, |ui| {
-                    for form in 0..forms {
-                        let chosen = self.form == form;
-                        let row = ui.selectable_label(chosen, form_text(form));
-                        widget::scroll_to_chosen(ui, &row, chosen);
-                        if chosen {
-                            widget::glow(ui, row.rect, 5.0);
-                        }
-                        if row.clicked() {
-                            self.form = form;
-                        }
-                    }
-                });
-                let form_id = form_combo.response.id;
-                widget::register_focusable(ui, form_id, form_combo.response.rect);
-                if form_combo.response.clicked() {
-                    widget::set_active_id(ui, form_id);
-                }
-                if widget::is_active(ui, form_id) && widget::page_has_focus(ui) {
-                    widget::glow(ui, form_combo.response.rect, 6.0);
-                    widget::scroll_active_into_view(ui, &form_combo.response);
-                    ui.input_mut(|i| {
-                        let step = i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as isize
-                            - i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as isize;
-                        if step != 0 && forms > 0 {
-                            self.form = (self.form as isize + step).clamp(0, forms as isize - 1) as usize;
-                        }
-                    });
-                }
                 let has_card = session.sd.is_some() && self.garc.is_some();
                 ui.add_enabled_ui(has_card && self.data.is_some(), |ui| {
                     add_form = widget::button_styled(ui, egui::RichText::new("+ New form").color(color::WHITE), Some(color::ACCENT));
@@ -903,19 +948,7 @@ impl Species {
         species: usize,
         form: usize,
     ) -> Option<&'a egui::TextureHandle> {
-        let file = crate::icon_tab::icon_file(species, form, false)
-            .or_else(|| crate::icon_tab::icon_file(species, 0, false))?;
-        if !self.form_icon_textures.contains_key(&(species, form)) {
-            let texture = (|| {
-                let on_card = session.sd.as_ref().and_then(|sd| sd.read(&crate::icon_tab::sd_path(file)));
-                let bytes = on_card.or_else(|| self.icon_garc.as_ref()?.first_file(file).map(|b| b.to_vec()))?;
-                let rgba = sango_core::clim::decode_sized(&bytes, 40, 30).ok()?;
-                let pixels = egui::ColorImage::from_rgba_unmultiplied([40, 30], &rgba);
-                Some(sango_ui::textures::load(ctx, format!("form_icon_{species}_{form}"), pixels, egui::TextureOptions::NEAREST))
-            })();
-            self.form_icon_textures.insert((species, form), texture);
-        }
-        self.form_icon_textures.get(&(species, form)).and_then(|t| t.as_ref())
+        form_icon(&mut self.form_icon_textures, self.icon_garc.as_ref(), session.sd.as_ref(), ctx, species, form)
     }
 
     /// Writes the file on the SD card and tells the plugin.
@@ -1976,7 +2009,7 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, side: imp
                 });
                 ui.add_space(10.0);
             }
-            // The icon and the cry, under each other, next to the characteristics.
+            // The texts, the icon and the cry, under each other, next to the characteristics.
             ui.vertical(|ui| side(ui));
         });
     });
@@ -2008,9 +2041,9 @@ impl Module for Species {
         self.model_tab.set_sd_folder(models_folder, packs_changed);
         self.model_tab.set_sd_root(session.sd.as_ref().map(|sd| sd.root().to_string_lossy().to_string()));
         // Another page asked for a species.
-        if let Some(species) = ui.ctx().data_mut(|d| d.remove_temp::<usize>(egui::Id::new(OPEN_SPECIES))) {
+        if let Some((species, form)) = ui.ctx().data_mut(|d| d.remove_temp::<(usize, usize)>(egui::Id::new(OPEN_SPECIES))) {
             self.species = if extras::is_species(species) { species } else { species.clamp(1, SPECIES_COUNT) };
-            self.form = 0;
+            self.form = form;
             self.tab = 0;
             self.loaded = None;
         }
@@ -2136,7 +2169,10 @@ impl Module for Species {
                 // The data leaves the page while the tab is drawn: the icon card can read the files again.
                 if let Some(mut data) = self.data.take() {
                     let mut shape = self.shape;
+                    let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
                     general_tab(ui, &mut data, &mut shape, |ui| {
+                        self.text.compact_ui(ui, session, self.species, self.form, place);
+                        ui.add_space(8.0);
                         self.icon_tab.ui(ui, session, self.species, self.form);
                         ui.add_space(8.0);
                         self.cry_tab.ui(ui, session, self.species, self.form);
@@ -2149,15 +2185,16 @@ impl Module for Species {
             }
             (2, Some(data)) => self.learnset.ui(ui, data),
             (1, Some(_)) => self.model_tab.ui(ui, self.species, self.form),
-            (6, Some(_)) => {
+            (4, Some(_)) => {
                 egui::ScrollArea::vertical().id_salt("species_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
             }
-            (4, Some(_)) => self.mega_tab(ui, session),
-            (5, Some(_)) => {
-                let place = self.pokedex.as_ref().map_or(self.species, |pokedex| pokedex.place(self.species, self.form));
-                self.text.ui(ui, session, self.species, self.form, place);
+            // The evolutions, then the Mega Evolutions: both change what the species becomes.
+            (3, Some(_)) => {
+                egui::ScrollArea::vertical().id_salt("evolution_tab").auto_shrink([false, false]).show(ui, |ui| {
+                    self.evolution.ui(ui);
+                    self.mega_tab(ui, session);
+                });
             }
-            (3, Some(_)) => self.evolution.ui(ui),
             (0, None) => {}
             _ => {
                 ui.label(widget::hint("..."));
@@ -2205,6 +2242,23 @@ mod test {
         assert_eq!(gender_text(255), "no gender");
         assert_eq!(gender_text(31), "12.5 % female, 87.5 % male");
         assert_eq!(gender_text(127), "50 % female, 50 % male");
+    }
+
+    #[test]
+    fn a_form_is_a_pokemon_of_its_own_in_the_list() {
+        assert_eq!(entry_name(479, 0), "Rotom");
+        assert_eq!(entry_name(479, 1), "Rotom-Heat");
+        assert_eq!(entry_name(6, 1), "Charizard-Mega-X");
+        let row = ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false };
+        let entry = |species, form| ListEntry { species, form, name: entry_name(species, form), row: row.clone() };
+        let entries = vec![entry(478, 0), entry(479, 0), entry(479, 1), entry(479, 2), entry(480, 0)];
+        assert_eq!(match_entries(&entries, "rotom"), vec![1, 2, 3], "a species comes with all its forms");
+        assert_eq!(match_entries(&entries, "heat"), vec![2], "a form is found by the name of the form");
+        assert_eq!(match_entries(&entries, "").len(), 5);
+        // Without the archive, a species of the game has one form: the steps go from species to species.
+        assert_eq!(step_entry(None, 1, 0, 1), (2, 0));
+        assert_eq!(step_entry(None, 2, 0, -1), (1, 0));
+        assert_eq!(step_entry(None, 1, 0, -1), (1, 0));
     }
 
     #[test]
@@ -2315,9 +2369,11 @@ mod test {
         assert_eq!(species_name(724), "Rowlet");
         let ids = species_ids();
         assert!(ids.contains(&724) && ids.contains(&725) && !ids.contains(&722));
-        let rows = read_list_rows(page.garc.as_ref(), &session);
-        assert_eq!(rows.len(), 725, "the rows go to the last species of the packs");
-        assert_eq!((rows[723].stats[0], rows[722].total), (68, 0));
+        let entries = read_list_entries(page.garc.as_ref(), &session);
+        let rowlet = entries.iter().find(|e| (e.species, e.form) == (724, 0)).expect("the species of the pack is in the list");
+        assert_eq!(rowlet.row.stats[0], 68);
+        assert!(!entries.iter().any(|e| e.species == 722), "the numbers between are not species");
+        assert!(entries.iter().any(|e| (e.species, e.form) == (3, 2)), "the form of the pack is a line of its own");
         assert_eq!(match_species("row")[0], 724, "a species of a pack is found by its name, first when its name starts like that");
         // The data and the forms of the page.
         page.species = 724;
@@ -2409,29 +2465,28 @@ mod test {
 
     #[test]
     fn the_species_list_sorts_on_each_column() {
-        let mut rows = vec![ListRow { types: [0, 0], stats: [0; 6], total: 0, modified: false }; 3];
-        rows[0] = ListRow { types: [0, 1], stats: [10, 0, 0, 0, 0, 0], total: 10, modified: false }; // Bulbasaur
-        rows[1] = ListRow { types: [2, 2], stats: [30, 0, 0, 0, 0, 0], total: 30, modified: false }; // Ivysaur
-        rows[2] = ListRow { types: [1, 0], stats: [30, 5, 0, 0, 0, 0], total: 35, modified: false }; // Venusaur
+        let row = |types: [u8; 2], hp: u8, attack: u8| ListRow { types, stats: [hp, attack, 0, 0, 0, 0], total: hp as u16 + attack as u16, modified: false };
+        let entry = |species: usize, row: ListRow| ListEntry { species, form: 0, name: entry_name(species, 0), row };
+        let entries = vec![entry(1, row([0, 1], 10, 0)), entry(2, row([2, 2], 30, 0)), entry(3, row([1, 0], 30, 5))];
 
-        let mut list = vec![1, 2, 3];
-        // Equal HP: the species number decides.
-        sort_species(&mut list, &rows, SortColumn::Stat(0), true);
-        assert_eq!(list, [2, 3, 1]);
-        sort_species(&mut list, &rows, SortColumn::Total, false);
-        assert_eq!(list, [1, 2, 3]);
-        sort_species(&mut list, &rows, SortColumn::Name, true);
-        assert_eq!(list, [3, 2, 1]);
-        sort_species(&mut list, &rows, SortColumn::Number, false);
-        assert_eq!(list, [1, 2, 3]);
+        let mut list = vec![0, 1, 2];
+        // Equal HP: the order of the list decides.
+        sort_entries(&mut list, &entries, SortColumn::Stat(0), true);
+        assert_eq!(list, [1, 2, 0]);
+        sort_entries(&mut list, &entries, SortColumn::Total, false);
+        assert_eq!(list, [0, 1, 2]);
+        sort_entries(&mut list, &entries, SortColumn::Name, true);
+        assert_eq!(list, [2, 1, 0]);
+        sort_entries(&mut list, &entries, SortColumn::Number, false);
+        assert_eq!(list, [0, 1, 2]);
         // The names of the types: "Fighting" comes before "Flying", which comes before "Normal".
-        sort_species(&mut list, &rows, SortColumn::Type1, false);
-        assert_eq!(list, [3, 2, 1]);
+        sort_entries(&mut list, &entries, SortColumn::Type1, false);
+        assert_eq!(list, [2, 1, 0]);
         // A second type that is the first one again shows "-", which comes before the names.
-        sort_species(&mut list, &rows, SortColumn::Type2, false);
-        assert_eq!(list, [2, 1, 3]);
-        assert_eq!(second_type(&rows[1]), "-");
-        assert_eq!(second_type(&rows[0]), "Fighting");
+        sort_entries(&mut list, &entries, SortColumn::Type2, false);
+        assert_eq!(list, [1, 0, 2]);
+        assert_eq!(second_type(&entries[1].row), "-");
+        assert_eq!(second_type(&entries[0].row), "Fighting");
     }
 
     /// With the dump of the game: each species and form points to a file of the archive

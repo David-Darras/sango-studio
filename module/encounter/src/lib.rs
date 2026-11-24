@@ -12,7 +12,7 @@ mod navi_view;
 
 use data::{Encounter, RateKind, Slot, Zones, METHODS};
 use sango_overworld::names::MAP_NAMES;
-use sango_species_base::{form_choices, SpeciesIcons, SPECIES};
+use sango_species_base::{form_key, from_form_key, species_form_menu, species_form_name, SpeciesIcons, SPECIES};
 use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
@@ -46,6 +46,7 @@ pub struct EncounterPage {
     status: Option<(bool, String)>,
     icons: SpeciesIcons,
     /// The Pokémon for the button "Fill the table".
+    /// The Pokémon of "Fill every place with": a species and a form (see `form_key`).
     fill_species: u16,
     fill_levels: (u8, u8),
     /// The map to open when the user agrees to lose the changes.
@@ -70,7 +71,7 @@ impl Default for EncounterPage {
             undo: Vec::new(),
             status: None,
             icons: SpeciesIcons::default(),
-            fill_species: 1,
+            fill_species: form_key(1, 0),
             fill_levels: (5, 5),
             pending: None,
             navi: navi_view::NaviView::default(),
@@ -100,10 +101,11 @@ fn map_names(count: usize) -> Vec<String> {
         .collect()
 }
 
-fn species_label(species: u16) -> String {
+/// The name of a species and a form in the menus ("#0479 Rotom-Heat").
+fn pokemon_label(species: u16, form: u8) -> String {
     match species {
         0 => "No Pokémon".to_string(),
-        n => format!("#{:03} {}", n, SPECIES.get(n as usize - 1).copied().unwrap_or("Unknown")),
+        n => format!("#{:04} {}", n, species_form_name(n as usize, form as usize)),
     }
 }
 
@@ -376,27 +378,22 @@ impl EncounterPage {
                         ui.add_space(44.0);
                     }
                 }
-                let mut value = edited.species;
-                if picker(ui, &format!("encounter_species_{place}_{at}"), &species_label(value), 220.0, &mut value, Some("No Pokémon"), || {
-                    vec![Group { title: "Pokémon".to_string(), entries: (1..=SPECIES.len()).map(|s| (s as u16, species_label(s as u16))).collect() }]
-                }) && value != edited.species
+                // One menu for the species and the form: each form is a Pokémon of its own ("Rotom-Heat").
+                let current = if edited.species == 0 { 0 } else { form_key(edited.species as usize, edited.form as usize) };
+                let mut value = current;
+                if picker(ui, &format!("encounter_species_{place}_{at}"), &pokemon_label(edited.species, edited.form), 220.0, &mut value, Some("No Pokémon"), || {
+                    vec![Group { title: "Pokémon".to_string(), entries: species_form_menu(1..=SPECIES.len()) }]
+                }) && value != current
                 {
-                    edited.species = value;
-                    edited.form = 0;
-                    if value != 0 && edited.min_level == 0 {
+                    let (species, form) = from_form_key(value);
+                    if species != edited.species as usize && species != 0 && edited.min_level == 0 {
                         edited.min_level = 5;
                         edited.max_level = 5;
                     }
+                    edited.species = species as u16;
+                    edited.form = form as u8;
                 }
                 if edited.species != 0 {
-                    let forms = form_choices(edited.species as usize);
-                    let mut form = edited.form as u16;
-                    let shown = forms.get(form as usize).cloned().unwrap_or_else(|| format!("Form {form}"));
-                    if picker(ui, &format!("encounter_form_{place}_{at}"), &shown, 150.0, &mut form, None, || {
-                        vec![Group { title: "Forms".to_string(), entries: forms.iter().enumerate().map(|(i, n)| (i as u16, n.clone())).collect() }]
-                    }) {
-                        edited.form = form.min(31) as u8;
-                    }
                     ui.label(widget::hint("Level"));
                     widget::spin(ui, &mut edited.min_level, 1.0, 100.0);
                     ui.label(widget::hint("to"));
@@ -431,8 +428,9 @@ impl EncounterPage {
         ui.separator();
         ui.horizontal_wrapped(|ui| {
             ui.label(widget::hint("Fill every place with"));
-            picker(ui, &format!("encounter_fill_{place}"), &species_label(self.fill_species), 220.0, &mut self.fill_species, None, || {
-                vec![Group { title: "Pokémon".to_string(), entries: (1..=SPECIES.len()).map(|s| (s as u16, species_label(s as u16))).collect() }]
+            let (fill_species, fill_form) = from_form_key(self.fill_species);
+            picker(ui, &format!("encounter_fill_{place}"), &pokemon_label(fill_species as u16, fill_form as u8), 220.0, &mut self.fill_species, None, || {
+                vec![Group { title: "Pokémon".to_string(), entries: species_form_menu(1..=SPECIES.len()) }]
             });
             ui.label(widget::hint("level"));
             widget::spin(ui, &mut self.fill_levels.0, 1.0, 100.0);
@@ -442,10 +440,10 @@ impl EncounterPage {
                 self.fill_levels.1 = self.fill_levels.0;
             }
             if widget::button(ui, "Fill") {
-                let (species, (low, high)) = (self.fill_species, self.fill_levels);
+                let ((species, form), (low, high)) = (from_form_key(self.fill_species), self.fill_levels);
                 self.change(|t| {
                     for slot in t.places_mut(&method) {
-                        *slot = Slot { species, form: 0, min_level: low, max_level: high };
+                        *slot = Slot { species: species as u16, form: form as _, min_level: low, max_level: high };
                     }
                 });
             }
@@ -477,9 +475,7 @@ impl EncounterPage {
             };
             ui.label(egui::RichText::new(format!("{} ({active})", method.name)).strong());
             for (species, form, chance) in found {
-                let forms = form_choices(species as usize);
-                let form_name = if form == 0 { String::new() } else { format!(" — {}", forms.get(form as usize).cloned().unwrap_or_else(|| format!("form {form}"))) };
-                ui.label(format!("   {}{form_name}: {chance} %", species_label(species)));
+                ui.label(format!("   {}: {chance} %", pokemon_label(species, form as u8)));
             }
         }
     }
