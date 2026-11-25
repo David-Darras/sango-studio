@@ -106,6 +106,8 @@ enum Drag {
 
 /// The Layout page.
 pub struct LayoutPage {
+    /// The window of the button Reset….
+    reset_open: bool,
     scanned_for: Option<PathBuf>,
     scan: Option<Receiver<Vec<Entry>>>,
     entries: Vec<Entry>,
@@ -127,6 +129,7 @@ pub struct LayoutPage {
 impl Default for LayoutPage {
     fn default() -> Self {
         LayoutPage {
+            reset_open: false,
             scanned_for: None,
             scan: None,
             entries: Vec::new(),
@@ -517,36 +520,59 @@ impl Module for LayoutPage {
         });
 
         // ---- The toolbar and the screen (center) ----
+        let mut reset_asked = false;
         ui.horizontal_wrapped(|ui| {
-            if ui.add_enabled(!open.undo.is_empty(), egui::Button::new("↶ Undo")).clicked() {
-                action = Some(Action::Undo);
+            let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(open.replaced), save: Some(open.dirty), ..Default::default() });
+            if clicks.export {
+                open.commit();
+                let name = format!("layout_{}_{}.bin", open.entry.archive, open.entry.file);
+                self.status = export_bytes("Export the layout file", &name, ("Layout file", &["bin"]), &open.bundle.to_bytes()).or(self.status.take());
             }
-            if ui.add_enabled(!open.redo.is_empty(), egui::Button::new("↷ Redo")).clicked() {
-                action = Some(Action::Redo);
+            if clicks.import {
+                match import_bytes("Import a layout file", ("Layout file", &["bin"])).map(|r| r.and_then(|bytes| Bundle::parse(&bytes))) {
+                    Some(Ok(bundle)) => match bundle.darc.find(&open.entry.layout).ok_or_else(|| format!("This file has no layout {}.", open.entry.layout)).and_then(|f| Bclyt::parse(&f.data)) {
+                        Ok(layout) => {
+                            open.bundle = bundle;
+                            open.layout = layout;
+                            open.selected = None;
+                            open.undo.clear();
+                            open.redo.clear();
+                            open.forget_textures(None);
+                            open.dirty = true;
+                            self.status = Some((true, "Imported. Save to keep it.".to_string()));
+                        }
+                        Err(message) => self.status = Some((false, message)),
+                    },
+                    Some(Err(message)) => self.status = Some((false, message)),
+                    None => {}
+                }
+            }
+            if clicks.save {
+                action = Some(Action::Save);
+            }
+            reset_asked = clicks.reset;
+            if open.dirty {
+                widget::badge(ui, "Not saved", color::AMBER);
+            } else if open.replaced {
+                widget::badge(ui, "From the SD card", color::TEAL);
+            } else {
+                widget::badge(ui, "From the romfs", color::GREEN);
             }
             ui.separator();
             ui.label("Zoom");
             ui.add(egui::Slider::new(&mut self.zoom, 0.5..=4.0).show_value(false));
             ui.checkbox(&mut self.show_hidden, "Show hidden panes");
             ui.checkbox(&mut self.show_text, "Show texts");
-            ui.separator();
-            if ui.add_enabled(open.dirty, egui::Button::new("Save for the game")).clicked() {
-                action = Some(Action::Save);
-            }
-            if ui.add_enabled(open.replaced, egui::Button::new("Back to the game layout")).clicked() {
-                action = Some(Action::Reset);
-            }
         });
+        self.reset_open |= reset_asked;
+        if widget::reset_window(&ctx, &mut self.reset_open, &format!("The layout {}", open.entry.layout), &mut []) {
+            action = Some(Action::Reset);
+        }
         if let Some((ok, text)) = &self.status {
             ui.colored_label(if *ok { color::GREEN } else { color::ROSE }, text);
         }
-        ui.label(widget::hint(&format!(
-            "{} · {} · {}{}. Drag a pane to move it, drag a handle to resize. Arrow keys move by 1 (Shift: 8). Delete removes. Restart the game to see a saved layout.",
-            open.entry.path(),
-            open.entry.layout,
-            if open.dirty { "changed" } else { "as in the game" },
-            if open.replaced { ", on the SD card" } else { "" }
-        )));
+        ui.label(widget::hint(&format!("{} · {}", open.entry.path(), open.entry.layout)))
+            .on_hover_text("Drag a pane to move it, drag a handle to resize. Arrow keys move by 1 (Shift: 8). Delete removes. Ctrl+Z goes back, Ctrl+Y goes forward.");
 
         canvas(ui, open, self.zoom, self.show_hidden, self.show_text, &mut self.drag, &mut action);
 
@@ -577,8 +603,6 @@ fn zone(ui: &egui::Ui, name: &str, rect: egui::Rect) -> bool {
 }
 
 enum Action {
-    Undo,
-    Redo,
     Save,
     Reset,
     Select(Option<usize>),
@@ -590,8 +614,6 @@ enum Action {
 
 fn apply_action(ctx: &egui::Context, open: &mut Open, action: Action, session: &mut Session, status: &mut Option<(bool, String)>, confirm: &mut bool) {
     match action {
-        Action::Undo => open.undo(),
-        Action::Redo => open.redo(),
         Action::Select(block) => {
             open.selected = block;
             *confirm = false;
@@ -1342,4 +1364,19 @@ mod preview {
             render(&bundle, &name, &format!("{out}/{archive}_{file}_{}.png", name.trim_end_matches(".bclyt")));
         }
     }
+}
+
+/// Writes bytes in a file that the user chooses. Gives what happened, or `None` when the user closed the window.
+fn export_bytes(title: &str, name: &str, filter: (&str, &[&str]), bytes: &[u8]) -> Option<(bool, String)> {
+    let path = rfd::FileDialog::new().set_title(title).set_file_name(name).add_filter(filter.0, filter.1).save_file()?;
+    Some(match std::fs::write(&path, bytes) {
+        Ok(()) => (true, format!("Exported to {}.", path.display())),
+        Err(e) => (false, format!("{}: {e}", path.display())),
+    })
+}
+
+/// Reads a file that the user chooses (a layout file stays as it is: the bundle knows when it is compressed).
+fn import_bytes(title: &str, filter: (&str, &[&str])) -> Option<Result<Vec<u8>, String>> {
+    let path = rfd::FileDialog::new().set_title(title).add_filter(filter.0, filter.1).pick_file()?;
+    Some(std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display())))
 }

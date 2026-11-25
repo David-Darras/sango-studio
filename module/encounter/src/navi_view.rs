@@ -24,6 +24,8 @@ const MAP_PICTURE: u32 = 0;
 
 /// The DexNav tab.
 pub struct NaviView {
+    /// The window of the button Reset….
+    reset_open: bool,
     navi: Option<Navi>,
     error: Option<String>,
     opened_for: Option<PathBuf>,
@@ -46,7 +48,7 @@ pub struct NaviView {
 
 impl Default for NaviView {
     fn default() -> Self {
-        NaviView { navi: None, error: None, opened_for: None, tab: 0, chosen: 0, textures: HashMap::new(), smooth: HashMap::new(), status: None, part: 20, map_types: Vec::new(), view_type: None, drag: None }
+        NaviView { reset_open: false, navi: None, error: None, opened_for: None, tab: 0, chosen: 0, textures: HashMap::new(), smooth: HashMap::new(), status: None, part: 20, map_types: Vec::new(), view_type: None, drag: None }
     }
 }
 
@@ -138,43 +140,11 @@ impl NaviView {
 
     fn tool_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let Some(navi) = self.navi.as_mut() else { return };
-        let (unsaved, from_card) = (navi.unsaved(), navi.from_sd);
-        let mut message = None;
+        let (unsaved, from_card, changed) = (navi.unsaved(), navi.from_sd, navi.changed());
+        let mut clicks = widget::ActionClicks::default();
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("The DexNav is the screen where the player looks for the Pokémon of the map."));
-                ui.add_enabled_ui(unsaved, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("Save the DexNav").color(color::WHITE), Some(color::ACCENT)) {
-                        message = Some(match navi.save() {
-                            Ok(size) => {
-                                if let Some(sd) = session.sd.as_ref() {
-                                    let _ = sd.mark_changed("dexnav/0.bin");
-                                }
-                                (true, if size == 0 { "The DexNav of the game is back.".to_string() } else { format!("Saved ({size} bytes). Restart the game to see the change.") })
-                            }
-                            Err(e) => (false, e),
-                        });
-                    }
-                })
-                .response
-                .on_disabled_hover_text("Nothing to save.");
-                ui.add_enabled_ui(unsaved, |ui| {
-                    if widget::confirm_button(ui, "Discard the changes", "Click again to discard") {
-                        navi.discard();
-                        message = Some((true, "The changes are gone.".to_string()));
-                    }
-                });
-                if (from_card || navi.changed()) && widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                    message = Some(match navi.reset() {
-                        Ok(()) => {
-                            if let Some(sd) = session.sd.as_ref() {
-                                let _ = sd.mark_changed("dexnav/0.bin");
-                            }
-                            (true, "The DexNav of the game is back.".to_string())
-                        }
-                        Err(e) => (false, e),
-                    });
-                }
+                clicks = widget::action_bar(ui, widget::ActionBar { reset: Some(from_card || changed), save: Some(unsaved), ..Default::default() });
                 if unsaved {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if from_card {
@@ -187,6 +157,34 @@ impl NaviView {
                 ui.label(egui::RichText::new(text).color(if *good { color::GREEN } else { color::ROSE }));
             }
         });
+        let mut message = None;
+        if clicks.save {
+            if let Some(navi) = self.navi.as_mut() {
+                message = Some(match navi.save() {
+                    Ok(size) => {
+                        if let Some(sd) = session.sd.as_ref() {
+                            let _ = sd.mark_changed("dexnav/0.bin");
+                        }
+                        (true, if size == 0 { "The DexNav of the game is back.".to_string() } else { format!("Saved ({size} bytes). Restart the game to see the change.") })
+                    }
+                    Err(e) => (false, e),
+                });
+            }
+        }
+        self.reset_open |= clicks.reset;
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, "The DexNav", &mut []) {
+            if let Some(navi) = self.navi.as_mut() {
+                message = Some(match navi.reset() {
+                    Ok(()) => {
+                        if let Some(sd) = session.sd.as_ref() {
+                            let _ = sd.mark_changed("dexnav/0.bin");
+                        }
+                        (true, "The DexNav of the game is back.".to_string())
+                    }
+                    Err(e) => (false, e),
+                });
+            }
+        }
         if message.is_some() {
             self.textures.clear();
             self.smooth.clear();

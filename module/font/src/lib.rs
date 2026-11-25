@@ -59,6 +59,10 @@ struct Open {
 
 /// The Font page.
 pub struct FontPage {
+    /// The windows of the buttons Export…, Import… and Reset….
+    export_open: bool,
+    import_open: bool,
+    reset_open: bool,
     opened_for: Option<(PathBuf, u32)>,
     entries: Vec<Entry>,
     open: Option<Open>,
@@ -78,7 +82,7 @@ pub struct FontPage {
 
 impl Default for FontPage {
     fn default() -> Self {
-        FontPage { opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 2, system: None, pc_filter: String::new(), pc_choice: None, pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
+        FontPage { export_open: false, import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 2, system: None, pc_filter: String::new(), pc_choice: None, pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
     }
 }
 
@@ -279,30 +283,60 @@ impl FontPage {
         let Some(open) = self.open.as_ref() else { return };
         let single = self.entries.iter().find(|e| (e.id, e.language) == (open.id, open.language)).is_some_and(|e| e.variants == 1);
         let (id, language, replaced, dirty) = (open.id, open.language, open.replaced, open.dirty);
+        let mut clicks = widget::ActionClicks::default();
         widget::card(ui, |ui| {
-            ui.label(egui::RichText::new("Sheet of glyphs").strong());
-            ui.label(widget::hint(
-                "Export a PNG sheet (and a .csv file with the widths), draw over it with any picture editor, then import it again. Keep the size of the sheet \
-                 and of the cells: the font keeps its layout, only the pictures and the widths change.",
-            ));
             ui.horizontal_wrapped(|ui| {
-                if widget::button(ui, "Export the sheet (PNG + CSV)") {
-                    self.status = Some(self.export_sheet(id));
+                clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(replaced), save: Some(dirty && single), ..Default::default() });
+                if dirty {
+                    widget::badge(ui, "Not saved", color::AMBER);
+                } else if replaced {
+                    widget::badge(ui, "From the SD card", color::TEAL);
+                } else {
+                    widget::badge(ui, "From the romfs", color::GREEN);
                 }
-                if widget::button(ui, "Import a sheet") {
+            });
+            if !single {
+                ui.label(widget::hint(&format!("This number has a file for each language (this is language {language}): it cannot be saved for the game yet. You can still export it.")));
+            }
+            if let Some((ok, message)) = &self.status {
+                if !message.is_empty() {
+                    ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }));
+                }
+            }
+        });
+        if clicks.save {
+            self.status = Some(self.save(sd, id));
+            *reload = true;
+        }
+        self.export_open |= clicks.export;
+        self.import_open |= clicks.import;
+        self.reset_open |= clicks.reset;
+        // Export… and Import…: the sheet of the glyphs (a PNG and a CSV file of the widths) or the font file.
+        for import in [false, true] {
+            let shown = if import { self.import_open } else { self.export_open };
+            if !shown {
+                continue;
+            }
+            let (mut open_window, mut sheet, mut file, mut close) = (true, false, false, false);
+            egui::Window::new(if import { "Import" } else { "Export" }).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open_window).show(ui.ctx(), |ui| {
+                ui.set_max_width(460.0);
+                ui.label(widget::hint("The sheet: a PNG picture of the glyphs and a CSV file of their widths. Draw over the PNG and keep its size."));
+                ui.horizontal(|ui| {
+                    sheet = widget::button(ui, "Sheet (PNG + CSV)");
+                    file = widget::button(ui, "Font file (.bcfnt)");
+                    close = widget::button(ui, "Cancel");
+                });
+            });
+            if sheet {
+                if import {
                     let ctx = ui.ctx().clone();
                     self.status = Some(self.import_sheet(&ctx));
+                } else {
+                    self.status = Some(self.export_sheet(id));
                 }
-                if widget::button(ui, "Export .bcfnt") {
-                    if let Some(path) = rfd::FileDialog::new().set_title("Export the font").set_file_name(format!("font_{id}.bcfnt")).add_filter("Font", &["bcfnt"]).save_file() {
-                        let bytes = self.open.as_ref().map(|o| o.font.bytes().to_vec()).unwrap_or_default();
-                        self.status = Some(match std::fs::write(&path, bytes) {
-                            Ok(()) => (true, format!("Exported to {}.", path.display())),
-                            Err(e) => (false, format!("{}: {e}", path.display())),
-                        });
-                    }
-                }
-                if widget::button(ui, "Use a .bcfnt file") {
+            }
+            if file {
+                if import {
                     if let Some(path) = rfd::FileDialog::new().set_title("Font to use").add_filter("Font", &["bcfnt", "bin"]).pick_file() {
                         match std::fs::read(&path).map_err(|e| e.to_string()).and_then(Font::parse) {
                             Ok(font) => {
@@ -313,46 +347,29 @@ impl FontPage {
                             Err(e) => self.status = Some((false, format!("This file is not a font that the game can use: {e}"))),
                         }
                     }
-                }
-            });
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.add_enabled_ui(dirty && single, |ui| {
-                    if widget::button(ui, "Save for the game") {
-                        self.status = Some(self.save(sd, id));
-                        *reload = true;
-                    }
-                });
-                ui.add_enabled_ui(dirty, |ui| {
-                    if widget::button(ui, "Undo") {
-                        *reload = true;
-                        self.status = None;
-                    }
-                });
-                if replaced && widget::confirm_button(ui, "Back to the game font", "Click again to remove") {
-                    self.status = Some(match sd.remove(&file_name(id)).and_then(|_| sd.mark_changed(&file_name(id))) {
-                        Ok(_) => (true, "The font of the game is used again. Restart the game.".to_string()),
-                        Err(e) => (false, e),
+                } else if let Some(path) = rfd::FileDialog::new().set_title("Export the font").set_file_name(format!("font_{id}.bcfnt")).add_filter("Font", &["bcfnt"]).save_file() {
+                    let bytes = self.open.as_ref().map(|o| o.font.bytes().to_vec()).unwrap_or_default();
+                    self.status = Some(match std::fs::write(&path, bytes) {
+                        Ok(()) => (true, format!("Exported to {}.", path.display())),
+                        Err(e) => (false, format!("{}: {e}", path.display())),
                     });
-                    *reload = true;
-                }
-                if dirty {
-                    widget::badge(ui, "Not saved", color::AMBER);
-                } else if replaced {
-                    widget::badge(ui, "From the SD card", color::ACCENT);
-                } else {
-                    widget::badge(ui, "From the game", color::GREEN);
-                }
-                if !single {
-                    ui.label(widget::hint(&format!("This number has a file for each language (this is language {language}): the plugin replaces a file by its number, so this font cannot be saved for the game yet. You can still export it.")));
-                }
-            });
-            if let Some((ok, message)) = &self.status {
-                if !message.is_empty() {
-                    ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }));
                 }
             }
-        });
+            if sheet || file || close || !open_window {
+                if import {
+                    self.import_open = false;
+                } else {
+                    self.export_open = false;
+                }
+            }
+        }
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, &format!("The font {id}"), &mut []) {
+            self.status = Some(match sd.remove(&file_name(id)).and_then(|_| sd.mark_changed(&file_name(id))) {
+                Ok(_) => (true, "The font of the game is used again. Restart the game.".to_string()),
+                Err(e) => (false, e),
+            });
+            *reload = true;
+        }
         ui.add_space(6.0);
         self.generator_card(ui);
     }

@@ -21,6 +21,8 @@ const NAME_SIZE: usize = 16;
 
 /// The Nature page.
 pub struct Nature {
+    /// The window of the button Reset….
+    reset_open: bool,
     opened_for: Option<PathBuf>,
     table: NatureTable,
     saved: NatureTable,
@@ -32,7 +34,7 @@ pub struct Nature {
 
 impl Default for Nature {
     fn default() -> Self {
-        Nature { opened_for: None, table: NatureTable::game(), saved: NatureTable::game(), from_card: false, status: None, language: 0 }
+        Nature { opened_for: None, reset_open: false, table: NatureTable::game(), saved: NatureTable::game(), from_card: false, status: None, language: 0 }
     }
 }
 
@@ -100,8 +102,10 @@ impl Nature {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let full = self.table.natures.len() >= MAX_COUNT;
-                ui.add_enabled_ui(!full, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("+ New nature").color(color::WHITE), Some(color::ACCENT)) {
+                let changed = self.table != self.saved;
+                let clicks = widget::action_bar(ui, widget::ActionBar { new: Some(("+ New nature", !full)), export: Some(true), import: Some(true), reset: Some(!self.table.is_game()), save: Some(changed && sd.is_some()), ..Default::default() });
+                {
+                    if clicks.new {
                         let number = self.table.natures.len() + 1;
                         self.table.natures.push(Row {
                             name: format!("Nature {number}"),
@@ -110,34 +114,26 @@ impl Nature {
                             color: NatureColor::Blue,
                         });
                     }
-                });
-                if widget::button(ui, "Export") {
+                }
+                if clicks.export {
                     self.export_csv();
                 }
-                if widget::button(ui, "Import") {
+                if clicks.import {
                     self.import_csv();
                 }
-                ui.add_enabled_ui(!self.table.is_game(), |ui| {
-                    if widget::confirm_button(ui, "Reset", "Click again to reset") {
-                        self.table = NatureTable::game();
-                        self.status = Some((true, "Reset all natures to default.".to_string()));
+                self.reset_open |= clicks.reset;
+                if clicks.save {
+                    if let Some(sd) = sd {
+                        self.save(sd);
                     }
-                });
-                let changed = self.table != self.saved;
-                ui.add_enabled_ui(changed && sd.is_some(), |ui| {
-                    if widget::save_button(ui, self.unsaved()) {
-                        if let Some(sd) = sd {
-                            self.save(sd);
-                        }
-                    }
-                });
+                }
                 if full {
                     ui.label(widget::hint("The table has the most natures that the game can use."));
                 }
                 if changed {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_card {
-                    widget::badge(ui, "From the SD card", color::ACCENT);
+                    widget::badge(ui, "From the SD card", color::TEAL);
                 } else {
                     widget::badge(ui, "From the game", color::GREEN);
                 }
@@ -285,6 +281,10 @@ impl Module for Nature {
         }
         let sd = session.sd.clone();
         self.tool_bar(ui, sd.as_ref());
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, "All the natures", &mut []) {
+            self.table = NatureTable::game();
+            self.status = Some((true, "The natures of the game are back. Save to keep them.".to_string()));
+        }
         ui.add_space(6.0);
         egui::ScrollArea::both().id_salt("nature_scroll").auto_shrink([false, false]).show(ui, |ui| {
             self.table_card(ui);

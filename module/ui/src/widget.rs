@@ -1358,3 +1358,80 @@ pub fn unsaved_window(ctx: &egui::Context, what: &str) -> Option<Unsaved> {
     }
     answer
 }
+
+/// The buttons of the top bar of a page, in the same order and with the same look on every page: `+ New …` (blue), `Delete` (two clicks),
+/// `Export…`, `Import…`, `Reset…`, then `Save` (blue when something changed, grey when there is nothing to save). A button that is `None` is
+/// not shown; `Some(false)` shows it greyed out.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ActionBar<'a> {
+    /// The text of the button that adds an entry (`+ New trainer`), and true when it can be used.
+    pub new: Option<(&'a str, bool)>,
+    pub delete: Option<bool>,
+    pub export: Option<bool>,
+    pub import: Option<bool>,
+    pub reset: Option<bool>,
+    /// True when something changed: the button Save is blue.
+    pub save: Option<bool>,
+}
+
+/// The buttons of [`ActionBar`] that were clicked.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ActionClicks {
+    pub new: bool,
+    pub delete: bool,
+    pub export: bool,
+    pub import: bool,
+    pub reset: bool,
+    pub save: bool,
+}
+
+/// Draws the buttons of the top bar (see [`ActionBar`]) in the current row. Gives the buttons that were clicked.
+pub fn action_bar(ui: &mut egui::Ui, bar: ActionBar) -> ActionClicks {
+    let mut clicks = ActionClicks::default();
+    if let Some((text, enabled)) = bar.new {
+        ui.add_enabled_ui(enabled, |ui| clicks.new = button_styled(ui, egui::RichText::new(text).color(color::WHITE), Some(color::ACCENT)));
+    }
+    if let Some(enabled) = bar.delete {
+        ui.add_enabled_ui(enabled, |ui| clicks.delete = confirm_button(ui, "Delete", "Click again to delete"));
+    }
+    if let Some(enabled) = bar.export {
+        ui.add_enabled_ui(enabled, |ui| clicks.export = button(ui, "Export…"));
+    }
+    if let Some(enabled) = bar.import {
+        ui.add_enabled_ui(enabled, |ui| clicks.import = button(ui, "Import…"));
+    }
+    if let Some(enabled) = bar.reset {
+        ui.add_enabled_ui(enabled, |ui| clicks.reset = button(ui, "Reset…"));
+    }
+    if let Some(changed) = bar.save {
+        clicks.save = save_button(ui, changed);
+    }
+    clicks
+}
+
+/// The window of the button `Reset…` of a page: what is reset, check boxes for the parts when there are some, and the buttons Reset and
+/// Cancel. `open` is set to false when the window closes. Gives true when the user clicks Reset.
+pub fn reset_window(ctx: &egui::Context, open: &mut bool, what: &str, parts: &mut [(&str, &mut bool)]) -> bool {
+    if !*open {
+        return false;
+    }
+    let (mut shown, mut run, mut close) = (true, false, false);
+    egui::Window::new("Reset to the romfs").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut shown).show(ctx, |ui| {
+        ui.set_max_width(460.0);
+        ui.label(egui::RichText::new(what).strong());
+        for (label, on) in parts.iter_mut() {
+            ui.checkbox(on, *label);
+        }
+        ui.label(hint("The changes that are not saved are lost."));
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            let any = parts.is_empty() || parts.iter().any(|(_, on)| **on);
+            ui.add_enabled_ui(any, |ui| run = button_styled(ui, egui::RichText::new("Reset").color(color::WHITE), Some(color::ROSE)));
+            close = button(ui, "Cancel");
+        });
+    });
+    if run || close || !shown {
+        *open = false;
+    }
+    run
+}

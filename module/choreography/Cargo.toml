@@ -8,3 +8,4 @@ description = "The choreography editor of Sango Studio: the steps of the choreog
 sango-core.workspace = true
 sango-species-base.workspace = true
 sango-ui.workspace = true
+rfd.workspace = true

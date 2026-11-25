@@ -124,7 +124,9 @@ impl Creator {
         widget::card(ui, |ui| {
             let number = self.chosen;
             ui.horizontal_wrapped(|ui| {
-                if widget::button(ui, "New script") {
+                let changed = self.events[number] != self.saved[number];
+                let clicks = widget::action_bar(ui, widget::ActionBar { new: Some(("+ New script", true)), delete: Some(!self.saved[number].is_empty()), save: Some(changed), ..Default::default() });
+                if clicks.new {
                     if let Some(free) = (0..COUNT).find(|&n| self.events[n].is_empty() && self.saved[n].is_empty() && n != self.chosen) {
                         self.chosen = free;
                         self.status = None;
@@ -132,17 +134,10 @@ impl Creator {
                         self.status = Some((false, "All the scripts are used.".to_string()));
                     }
                 }
-                let changed = self.events[number] != self.saved[number];
-                ui.add_enabled_ui(changed, |ui| {
-                    if widget::save_button(ui, self.unsaved()) {
-                        self.save(sd, number);
-                    }
-                    if widget::button(ui, "Undo") {
-                        self.events[number] = self.saved[number].clone();
-                        self.status = None;
-                    }
-                });
-                if !self.saved[number].is_empty() && widget::confirm_button(ui, "Delete the script", "Click again to delete") {
+                if clicks.save {
+                    self.save(sd, number);
+                }
+                if clicks.delete {
                     self.events[number] = Event::default();
                     self.save(sd, number);
                 }

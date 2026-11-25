@@ -19,6 +19,8 @@ const FOLDER: &str = "effect";
 
 /// The page.
 pub struct EffectPage {
+    /// The window of the button Reset….
+    reset_open: bool,
     /// The file that the user chose while the open effect had changes that were not saved: the window asks first.
     pending_file: Option<usize>,
     garc: Option<Garc>,
@@ -40,7 +42,7 @@ pub struct EffectPage {
 
 impl Default for EffectPage {
     fn default() -> Self {
-        EffectPage { garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), pending_file: None }
+        EffectPage { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), pending_file: None }
     }
 }
 
@@ -304,7 +306,6 @@ impl EffectPage {
         let from_card = session.sd.as_ref().is_some_and(|sd| sd.read(&path(self.file)).is_some());
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Effect"));
                 let mut file = self.file;
                 let names: Vec<&str> = self.names.iter().map(String::as_str).collect();
                 sango_species_base::searchable_picker(ui, "effect_file", &mut file, &names, 320.0);
@@ -317,22 +318,31 @@ impl EffectPage {
                         self.load(session.sd.as_ref());
                     }
                 }
-                if let Some(sd) = session.sd.as_ref() {
-                    ui.add_enabled_ui(dirty, |ui| {
-                        if widget::save_button(ui, self.unsaved()) {
-                            self.save(sd);
-                        }
-                    })
-                    .response
-                    .on_disabled_hover_text("Nothing to save: no change since the last save.");
-                    ui.add_enabled_ui(dirty, |ui| {
-                        if widget::confirm_button(ui, "Discard the changes", "Click again to discard") {
-                            self.load(Some(sd));
-                        }
-                    });
-                    if from_card && widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                        self.reset(sd);
+                let has_card = session.sd.is_some();
+                let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(self.effect.is_some()), import: Some(true), reset: Some(has_card && from_card), save: Some(has_card && dirty), ..Default::default() });
+                if clicks.export {
+                    if let Some(effect) = self.effect.as_ref() {
+                        self.status = export_bytes("Export the effect", &format!("effect_{}.bin", self.file), ("Effect", &["bin"]), effect.bytes()).or(self.status.take());
                     }
+                }
+                if clicks.import {
+                    match import_bytes("Import an effect", ("Effect", &["bin"])) {
+                        Some(Ok(bytes)) => match Effect::parse(&bytes) {
+                            Ok(effect) => {
+                                self.effect = Some(effect);
+                                self.layer = 0;
+                                self.forget_textures();
+                                self.status = Some((true, "Imported. Save to keep it.".to_string()));
+                            }
+                            Err(message) => self.status = Some((false, format!("This file is not an effect: {message}"))),
+                        },
+                        Some(Err(message)) => self.status = Some((false, message)),
+                        None => {}
+                    }
+                }
+                self.reset_open |= clicks.reset;
+                if let (true, Some(sd)) = (clicks.save, session.sd.as_ref()) {
+                    self.save(sd);
                 }
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -349,6 +359,11 @@ impl EffectPage {
                 ui.label(egui::RichText::new(message).color(if *good { color::GREEN } else { color::ROSE }));
             }
         });
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, &format!("The effect {}", self.file), &mut []) {
+            if let Some(sd) = session.sd.as_ref() {
+                self.reset(sd);
+            }
+        }
     }
 
     /// The layers of the effect, as buttons, and the cards of the open layer.
@@ -796,4 +811,19 @@ mod test {
         assert_ne!(page.effect.as_ref().unwrap().emission(0), emission);
         let _ = std::fs::remove_dir_all(&folder);
     }
+}
+
+/// Writes bytes in a file that the user chooses. Gives what happened, or `None` when the user closed the window.
+fn export_bytes(title: &str, name: &str, filter: (&str, &[&str]), bytes: &[u8]) -> Option<(bool, String)> {
+    let path = rfd::FileDialog::new().set_title(title).set_file_name(name).add_filter(filter.0, filter.1).save_file()?;
+    Some(match std::fs::write(&path, bytes) {
+        Ok(()) => (true, format!("Exported to {}.", path.display())),
+        Err(e) => (false, format!("{}: {e}", path.display())),
+    })
+}
+
+/// Reads a file that the user chooses (decompressed when it is compressed like the files of the game).
+fn import_bytes(title: &str, filter: (&str, &[&str])) -> Option<Result<Vec<u8>, String>> {
+    let path = rfd::FileDialog::new().set_title(title).add_filter(filter.0, filter.1).pick_file()?;
+    Some(std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display())).map(|b| if sango_core::lz::is_compressed(&b) { sango_core::lz::decompress(&b).unwrap_or(b) } else { b }))
 }

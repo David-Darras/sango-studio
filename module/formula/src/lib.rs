@@ -23,6 +23,8 @@ const TABS: [&str; 2] = ["Statistics", "Shiny"];
 
 /// The Formula page.
 pub struct Formula {
+    /// The window of the button Reset….
+    reset_open: bool,
     opened_for: Option<PathBuf>,
     formulas: Formulas,
     saved: Formulas,
@@ -34,6 +36,7 @@ pub struct Formula {
 impl Default for Formula {
     fn default() -> Self {
         Formula {
+            reset_open: false,
             opened_for: None,
             formulas: Formulas::game(),
             saved: Formulas::game(),
@@ -115,32 +118,26 @@ impl Formula {
     fn tool_bar(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>) {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if widget::button(ui, "Export") {
+                let changed = self.formulas != self.saved;
+                let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(!self.formulas.is_game()), save: Some(changed && sd.is_some()), ..Default::default() });
+                if clicks.export {
                     self.export_file();
                 }
-                if widget::button(ui, "Import") {
+                if clicks.import {
                     self.import_file();
                 }
-                ui.add_enabled_ui(!self.formulas.is_game(), |ui| {
-                    if widget::confirm_button(ui, "Reset", "Click again to reset") {
-                        self.formulas = Formulas::game();
-                        self.status = Some((true, "Reset all formulas to default.".to_string()));
+                self.reset_open |= clicks.reset;
+                if clicks.save {
+                    if let Some(sd) = sd {
+                        self.save(sd);
                     }
-                });
-                let changed = self.formulas != self.saved;
-                ui.add_enabled_ui(changed && sd.is_some(), |ui| {
-                    if widget::save_button(ui, self.unsaved()) {
-                        if let Some(sd) = sd {
-                            self.save(sd);
-                        }
-                    }
-                });
+                }
                 if changed {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_card {
-                    widget::badge(ui, "From the SD card", color::ACCENT);
+                    widget::badge(ui, "From the SD card", color::TEAL);
                 } else {
-                    widget::badge(ui, "From the game", color::GREEN);
+                    widget::badge(ui, "From the romfs", color::GREEN);
                 }
             });
             if let Some((ok, message)) = &self.status {
@@ -260,6 +257,10 @@ impl Module for Formula {
         }
         let sd = session.sd.clone();
         self.tool_bar(ui, sd.as_ref());
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, "All the formulas", &mut []) {
+            self.formulas = Formulas::game();
+            self.status = Some((true, "The formulas of the game are back. Save to keep them.".to_string()));
+        }
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             for (place, name) in TABS.iter().enumerate() {

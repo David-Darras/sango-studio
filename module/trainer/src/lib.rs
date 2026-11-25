@@ -27,7 +27,7 @@ mod model_view;
 mod gen6;
 mod showdown;
 
-const TABS: [&str; 5] = ["General", "Team", "Class", "Messages", "CSV"];
+const TABS: [&str; 4] = ["General", "Team", "Class", "Messages"];
 
 
 /// A line of the list of the trainers.
@@ -78,7 +78,12 @@ pub struct Trainer {
     saved: Option<Open>,
     status: Option<(bool, String)>,
     item_list: Arc<Mutex<sango_ui::item_menu::ItemList>>,
-    csv: csv::Card,
+    /// The windows of the buttons Export…, Import… and Reset…, and the parts of a reset: the data and the team, the class.
+    export_open: bool,
+    import_open: bool,
+    reset_open: bool,
+    reset_trainer: bool,
+    reset_class: bool,
     /// The pictures of the classes, as textures.
     pictures: HashMap<usize, Option<egui::TextureHandle>>,
     retired: Retired,
@@ -108,7 +113,11 @@ impl Default for Trainer {
             saved: None,
             status: None,
             item_list: Default::default(),
-            csv: csv::Card::default(),
+            export_open: false,
+            import_open: false,
+            reset_open: false,
+            reset_trainer: true,
+            reset_class: false,
             pictures: HashMap::new(),
             retired: Retired::default(),
             picture_users: Vec::new(),
@@ -352,7 +361,7 @@ impl Trainer {
         });
     }
 
-    /// Gives back the data of the game for the open trainer: its data, its team and its names.
+    /// Gives back the data of the game for the open trainer: its data and its team, and its class, as the window of the reset chose.
     fn reset(&mut self, sd: &SdCard) {
         let (id, class) = match self.open.as_ref() {
             Some(open) => (open.id, open.trainer.class as usize),
@@ -360,8 +369,12 @@ impl Trainer {
         };
         let Some(store) = self.store.as_mut() else { return };
         let result = (|| -> Result<(), String> {
-            store.reset_trainer(sd, id)?;
-            store.reset_class(sd, class)?;
+            if self.reset_trainer {
+                store.reset_trainer(sd, id)?;
+            }
+            if self.reset_class {
+                store.reset_class(sd, class)?;
+            }
             Ok(())
         })();
         if let Err(message) = result {
@@ -371,7 +384,7 @@ impl Trainer {
         store.forget_texts();
         self.rows_dirty = true;
         self.load(Some(sd));
-        self.status = Some((true, "The data, the team and the class of the game are back. The names stay as they are: change them in the General tab.".to_string()));
+        self.status = Some((true, "The data of the game is back. The names stay as they are.".to_string()));
     }
 
     /// Makes a new trainer in a place that the game does not use (a trainer without name), with the data and the team that are open.
@@ -406,15 +419,11 @@ impl Trainer {
     fn trainer_picker(&mut self, ui: &mut egui::Ui) {
         let labels: Vec<String> = self.rows.iter().map(|row| format!("{}{}  ·  {}", if self.changed.contains(&row.id) { "● " } else { "" }, if row.name.is_empty() { "(no name)" } else { row.name.as_str() }, row.class)).collect();
         let names: Vec<&str> = labels.iter().map(String::as_str).collect();
-        ui.horizontal(|ui| {
-            ui.label(widget::hint("Trainer"));
-            let mut id = self.trainer;
-            searchable_picker(ui, "trainer_choice", &mut id, &names, 420.0);
-            if id != self.trainer && id >= 1 && id <= names.len() {
-                self.trainer = id;
-            }
-            ui.label(widget::hint(&format!("{} trainers. Search a name, a class or a number.", names.len())));
-        });
+        let mut id = self.trainer;
+        searchable_picker(ui, "trainer_choice", &mut id, &names, 420.0);
+        if id != self.trainer && id >= 1 && id <= names.len() {
+            self.trainer = id;
+        }
     }
 
     /// The General tab.
@@ -721,35 +730,18 @@ impl Trainer {
         });
     }
 
-    /// The tool bar of the open trainer.
-    fn tool_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
+    /// The top bar: the menu of the trainers, then the buttons of every page (see `widget::action_bar`) and the state.
+    fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let dirty = self.dirty();
-        let Some(sd) = session.sd.as_ref() else {
-            widget::card(ui, |ui| {
-                ui.label(egui::RichText::new("The SD card is not chosen: you can look at the trainers, but nothing can be saved.").color(color::AMBER));
-                ui.label(widget::hint("Choose the SD card on the Home page."));
-            });
-            return;
-        };
+        let has_card = session.sd.is_some();
+        let mut clicks = widget::ActionClicks::default();
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if let Some(open) = &self.open {
-                    let name = if open.names[2].is_empty() { "(no name)".to_string() } else { open.names[2].clone() };
-                    ui.label(egui::RichText::new(format!("#{:03}  {name}", open.id)).strong().size(17.0));
-                }
-                ui.add_enabled_ui(dirty, |ui| {
-                    if widget::save_button(ui, self.unsaved()) {
-                        self.save(sd);
-                    }
-                })
-                .response
-                .on_disabled_hover_text("Nothing to save: no change since the last save.");
-                if widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                    self.reset(sd);
-                }
-                if widget::button(ui, "+ New trainer") {
-                    self.new_trainer(sd);
-                }
+                self.trainer_picker(ui);
+                clicks = widget::action_bar(
+                    ui,
+                    widget::ActionBar { new: Some(("+ New trainer", has_card && self.open.is_some())), export: Some(true), import: Some(has_card), reset: Some(has_card && self.open.is_some()), save: Some(has_card && dirty), ..Default::default() },
+                );
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.changed.contains(&self.trainer) {
@@ -758,11 +750,103 @@ impl Trainer {
                     widget::badge(ui, "From the romfs", color::GREEN);
                 }
             });
+            if !has_card {
+                ui.label(widget::hint("Choose the SD card on the Home page to save."));
+            }
             if let Some((ok, message)) = &self.status {
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }));
             }
         });
+        let Some(sd) = session.sd.as_ref() else { return };
+        if clicks.new {
+            self.new_trainer(sd);
+        }
+        if clicks.save {
+            self.save(sd);
+        }
+        self.export_open |= clicks.export;
+        self.import_open |= clicks.import;
+        self.reset_open |= clicks.reset;
+    }
+
+    /// The windows of the buttons Export…, Import… and Reset….
+    fn windows(&mut self, ctx: &egui::Context, session: &Session) {
+        let Some(sd) = session.sd.clone() else {
+            self.export_open = false;
+            self.import_open = false;
+            self.reset_open = false;
+            return;
+        };
+        for import in [false, true] {
+            let shown = if import { self.import_open } else { self.export_open };
+            if !shown {
+                continue;
+            }
+            let (mut open, mut run, mut close) = (true, false, false);
+            egui::Window::new(if import { "Import CSV files" } else { "Export CSV files" }).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(widget::hint("For all the trainers, not only the one that is open."));
+                ui.label(format!("{} (the data and the English name of each trainer) and {} (one line for each Pokémon).", csv::TRAINERS_FILE, csv::TEAMS_FILE));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    run = widget::button_styled(ui, egui::RichText::new(if import { "Import" } else { "Export" }).color(color::WHITE), Some(color::ACCENT));
+                    close = widget::button(ui, "Cancel");
+                });
+            });
+            if run {
+                if let Some(store) = self.store.as_mut() {
+                    if import {
+                        match csv::import_files(store, &sd) {
+                            Ok(Some(count)) => {
+                                self.rows_dirty = true;
+                                self.open = None;
+                                self.status = Some((true, format!("Imported {count} trainers. Restart the game to see the change.")));
+                            }
+                            Ok(None) => {}
+                            Err(message) => self.status = Some((false, message)),
+                        }
+                    } else {
+                        self.status = match csv::export_files(store, &sd) {
+                            Ok(Some(path)) => Some((true, format!("Wrote {} and {} in {path}.", csv::TRAINERS_FILE, csv::TEAMS_FILE))),
+                            Ok(None) => None,
+                            Err(message) => Some((false, message)),
+                        };
+                    }
+                }
+            }
+            if run || close || !open {
+                if import {
+                    self.import_open = false;
+                } else {
+                    self.export_open = false;
+                }
+            }
+        }
+        if self.reset_open {
+            let (mut open, mut run, mut close) = (true, false, false);
+            let name = self.open.as_ref().map(|o| o.names[2].clone()).unwrap_or_default();
+            egui::Window::new("Reset to the romfs").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(egui::RichText::new(format!("#{:03} {name}", self.trainer)).strong());
+                ui.checkbox(&mut self.reset_trainer, "The data and the team of the trainer");
+                ui.checkbox(&mut self.reset_class, "Its class (for every trainer of this class)");
+                ui.label(widget::hint("The names stay as they are. The changes that are not saved are lost."));
+                ui.add_space(6.0);
+                ui.horizontal(|ui| {
+                    ui.add_enabled_ui(self.reset_trainer || self.reset_class, |ui| {
+                        run = widget::button_styled(ui, egui::RichText::new("Reset").color(color::WHITE), Some(color::ROSE));
+                    });
+                    close = widget::button(ui, "Cancel");
+                });
+            });
+            if run {
+                self.reset(&sd);
+            }
+            if run || close || !open {
+                self.reset_open = false;
+            }
+        }
     }
 }
 
@@ -817,9 +901,8 @@ impl Module for Trainer {
         let users = self.open.as_ref().map_or(0, |open| self.rows.iter().filter(|row| row.class == self.class_menu.get((open.trainer.class as usize).wrapping_sub(1)).cloned().unwrap_or_default()).count());
         {
             ui.vertical(|ui| {
-                self.trainer_picker(ui);
-                ui.add_space(8.0);
-                self.tool_bar(ui, session);
+                self.top_bar(ui, session);
+                self.windows(ui.ctx(), session);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     for (place, name) in TABS.iter().enumerate() {
@@ -833,15 +916,7 @@ impl Module for Trainer {
                     0 => self.general_tab(ui),
                     1 => self.team_tab(ui),
                     2 => self.class_tab(ui, users, session),
-                    3 => self.messages_tab(ui),
-                    _ => {
-                        if let (Some(store), Some(sd)) = (self.store.as_mut(), session.sd.as_ref()) {
-                            if self.csv.ui(ui, store, sd) {
-                                self.rows_dirty = true;
-                                self.open = None;
-                            }
-                        }
-                    }
+                    _ => self.messages_tab(ui),
                 });
             });
         }

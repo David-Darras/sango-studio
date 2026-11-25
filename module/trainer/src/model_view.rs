@@ -125,23 +125,26 @@ impl ModelView {
         if let Some(message) = &self.error {
             painter.text(rect.center(), egui::Align2::CENTER_CENTER, message, egui::FontId::proportional(14.0), color::ROSE);
         }
-        ui.label(widget::hint("Drag to turn the model, scroll to zoom."));
         ui.horizontal_wrapped(|ui| {
-            if self.source.is_some() && widget::button(ui, "Export the model (GLB)…") {
-                self.export(number);
-            }
-            if can_write && widget::button(ui, "Import a model (GLB)…") {
-                if let Some(file) = rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file() {
-                    action = Some(Action::Import(file, f64::from(self.scale)));
+            ui.add_enabled_ui(self.source.is_some(), |ui| {
+                if widget::button(ui, "Export") {
+                    self.export(number);
                 }
-            }
-            if changed && widget::confirm_button(ui, "Back to the model of the game", "Click again to go back") {
+            });
+            ui.add_enabled_ui(can_write, |ui| {
+                if widget::button(ui, "Import") {
+                    if let Some(file) = rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file() {
+                        action = Some(Action::Import(file, f64::from(self.scale)));
+                    }
+                }
+            });
+            let reset = ui.add_enabled_ui(changed, |ui| widget::confirm_button(ui, "Reset", "Click again to reset")).inner;
+            if reset {
                 action = Some(Action::Reset);
             }
             ui.label(widget::hint("Scale"));
-            ui.add(egui::DragValue::new(&mut self.scale).speed(0.01).range(0.05..=20.0));
+            ui.add(egui::DragValue::new(&mut self.scale).speed(0.01).range(0.05..=20.0)).on_hover_text("The size of an imported model");
         });
-        ui.label(widget::hint(if changed { "This model is from a file that you imported. Restart the game after a change." } else { "The animations of the game are kept: the skeleton of a new model should keep the names of the joints of the exported model. Restart the game after a change." }));
         if let Some((good, message)) = &self.status {
             ui.label(egui::RichText::new(message).color(if *good { color::GREEN } else { color::ROSE }));
         }

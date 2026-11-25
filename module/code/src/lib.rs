@@ -249,7 +249,7 @@ impl Code {
         self.choose(sd, &name);
     }
 
-    /// Removes the function that is open. Undo gives it back.
+    /// Removes the function that is open.
     fn delete(&mut self, sd: &SdCard) {
         let Some(name) = self.chosen.clone() else { return };
         let backup = Backup::snapshot(sd, &["code"], &[], format!("Delete the function {name}"));
@@ -265,13 +265,14 @@ impl Code {
                 self.saved.clear();
                 self.output = None;
                 self.list(sd);
-                self.status = Some((true, format!("Deleted {name}. Undo gives it back.")));
+                self.status = Some((true, format!("Deleted {name}.")));
             }
             Err(message) => self.status = Some((false, message)),
         }
     }
 
     /// Gives back the last deleted function.
+    #[cfg(test)]
     fn undo(&mut self, sd: &SdCard) {
         let Some(backup) = self.history.pop() else { return };
         self.status = Some(match backup.restore(sd) {
@@ -538,29 +539,39 @@ impl Code {
         let mut save = false;
         let mut compile = false;
         let mut delete = false;
-        let mut undo = false;
         ui.horizontal_wrapped(|ui| {
             if let Some(name) = &self.chosen {
                 ui.label(widget::title(name));
             }
-            let response = ui.add_enabled(self.chosen.is_some(), egui::Button::new("Save"));
-            self.anchor = Some(response.id);
-            widget::register_focusable(ui, response.id, response.rect);
-            save = response.clicked();
-            ui.add_enabled_ui(self.chosen.is_some() && can_compile, |ui| {
-                compile = widget::button_styled(ui, egui::RichText::new("Compile").color(color::WHITE), Some(color::ACCENT));
+            let chosen = self.chosen.is_some();
+            let clicks = widget::action_bar(ui, widget::ActionBar { delete: Some(chosen), export: Some(chosen), import: Some(chosen), save: Some(chosen && self.dirty()), ..Default::default() });
+            if clicks.export {
+                let name = format!("{}.cpp", self.chosen.clone().unwrap_or_default());
+                if let Some(path) = rfd::FileDialog::new().set_title("Export the function").set_file_name(name).add_filter("C++", &["cpp", "h", "c"]).save_file() {
+                    self.status = Some(match std::fs::write(&path, &self.text) {
+                        Ok(()) => (true, format!("Exported to {}.", path.display())),
+                        Err(e) => (false, format!("{}: {e}", path.display())),
+                    });
+                }
+            }
+            if clicks.import {
+                if let Some(path) = rfd::FileDialog::new().set_title("Import a function").add_filter("C++", &["cpp", "h", "c"]).pick_file() {
+                    self.status = Some(match std::fs::read_to_string(&path) {
+                        Ok(text) => {
+                            self.text = text;
+                            (true, "Imported. Save or compile to keep it.".to_string())
+                        }
+                        Err(e) => (false, format!("{}: {e}", path.display())),
+                    });
+                }
+            }
+            save = clicks.save;
+            delete = clicks.delete;
+            ui.add_enabled_ui(chosen && can_compile, |ui| {
+                compile = widget::button(ui, "Compile");
             })
             .response
             .on_hover_text(if can_compile { "Saves the function and compiles it with devkitARM (F5)." } else { "Give the folder of devkitPro in Home first." });
-            ui.add_enabled_ui(self.chosen.is_some(), |ui| {
-                delete = widget::button(ui, "Delete");
-            });
-            let undo_label = self.history.last().map(|b| format!("Undo: {}", b.label));
-            ui.add_enabled_ui(undo_label.is_some(), |ui| {
-                undo = widget::button(ui, "Undo");
-            })
-            .response
-            .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
             if self.dirty() {
                 widget::badge(ui, "Not saved", color::AMBER);
             }
@@ -579,9 +590,6 @@ impl Code {
         }
         if delete {
             self.delete(sd);
-        }
-        if undo {
-            self.undo(sd);
         }
     }
 

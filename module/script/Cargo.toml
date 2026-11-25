@@ -7,6 +7,7 @@ description = "The script editor of Sango Studio: the compiled scripts of the ga
 [dependencies]
 sango-core.workspace = true
 sango-ui.workspace = true
+rfd.workspace = true
 sango-species-base.workspace = true
 sango-species.workspace = true
 serde = { version = "1", features = ["derive"] }

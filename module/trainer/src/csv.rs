@@ -4,22 +4,15 @@ use crate::store::Store;
 use sango_core::csv_text::{quote, records};
 use sango_core::trainer::{self as data, Team, TrainerData, TrainerPokemon};
 use sango_core::SdCard;
-use sango_ui::theme::color;
-use sango_ui::{egui, widget};
 use std::path::Path;
 
-const TRAINERS_FILE: &str = "trainers.csv";
-const TEAMS_FILE: &str = "trainer_teams.csv";
+pub const TRAINERS_FILE: &str = "trainers.csv";
+pub const TEAMS_FILE: &str = "trainer_teams.csv";
 const TRAINERS_HEADER: &str = "trainer,name,class,fight_type,ai,item1,item2,item3,item4,money,heal_after,gift_item";
 const TEAMS_HEADER: &str = "trainer,slot,species,form,level,iv,ability,gender,item,move1,move2,move3,move4";
 /// The English language: the names of the file are the English ones.
 const ENGLISH: usize = 2;
 
-/// The state of the CSV card.
-#[derive(Default)]
-pub struct Card {
-    status: Option<(bool, String)>,
-}
 
 /// The two files, as text, for all the trainers as the user has them now.
 pub fn export(store: &mut Store, sd: Option<&SdCard>) -> Result<(String, String), String> {
@@ -144,44 +137,8 @@ fn read(folder: &Path, name: &str) -> Result<String, String> {
     std::fs::read_to_string(folder.join(name)).map_err(|e| format!("{}: {e}", folder.join(name).display()))
 }
 
-impl Card {
-    /// Draws the card. Gives true when the files changed.
-    pub fn ui(&mut self, ui: &mut egui::Ui, store: &mut Store, sd: &SdCard) -> bool {
-        let mut changed = false;
-        widget::card(ui, |ui| {
-            ui.label(widget::title("CSV files of all the trainers"));
-            ui.label(widget::hint("These buttons work on all the trainers, not only on the one that is open."));
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if widget::button(ui, "Export CSV…") {
-                    self.status = Some(match export_files(store, sd) {
-                        Ok(Some(path)) => (true, format!("Wrote {TRAINERS_FILE} and {TEAMS_FILE} in {path}.")),
-                        Ok(None) => (true, "Nothing was written.".to_string()),
-                        Err(message) => (false, message),
-                    });
-                }
-                if widget::button(ui, "Import CSV…") {
-                    match import_files(store, sd) {
-                        Ok(Some(count)) => {
-                            changed = true;
-                            self.status = Some((true, format!("Imported {count} trainers. Restart the game to see the change.")));
-                        }
-                        Ok(None) => {}
-                        Err(message) => self.status = Some((false, message)),
-                    }
-                }
-            });
-            ui.label(widget::hint(&format!("Export writes {TRAINERS_FILE} (the data and the English name of each trainer) and {TEAMS_FILE} (one line for each Pokémon) in a folder that you choose. Import reads the two files from a folder, checks all of them, and writes the changes on the SD card.")));
-            if let Some((ok, message)) = &self.status {
-                ui.add_space(4.0);
-                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }));
-            }
-        });
-        changed
-    }
-}
 
-fn export_files(store: &mut Store, sd: &SdCard) -> Result<Option<String>, String> {
+pub fn export_files(store: &mut Store, sd: &SdCard) -> Result<Option<String>, String> {
     let Some(folder) = rfd::FileDialog::new().set_title("Folder for the CSV files").pick_folder() else { return Ok(None) };
     let (trainers, teams) = export(store, Some(sd))?;
     std::fs::write(folder.join(TRAINERS_FILE), trainers).map_err(|e| format!("{TRAINERS_FILE}: {e}"))?;
@@ -189,7 +146,7 @@ fn export_files(store: &mut Store, sd: &SdCard) -> Result<Option<String>, String
     Ok(Some(folder.display().to_string()))
 }
 
-fn import_files(store: &mut Store, sd: &SdCard) -> Result<Option<usize>, String> {
+pub fn import_files(store: &mut Store, sd: &SdCard) -> Result<Option<usize>, String> {
     let Some(folder) = rfd::FileDialog::new().set_title("Folder of the CSV files").pick_folder() else { return Ok(None) };
     let imported = parse(store, Some(sd), &read(&folder, TRAINERS_FILE)?, &read(&folder, TEAMS_FILE)?)?;
     let count = write(store, sd, imported)?;

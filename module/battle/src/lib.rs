@@ -112,6 +112,8 @@ struct Open {
 
 /// The Battle page.
 pub struct BattlePage {
+    /// The window of the button Reset….
+    reset_open: bool,
     opened_for: Option<PathBuf>,
     entries: Vec<Entry>,
     filter: String,
@@ -123,7 +125,7 @@ pub struct BattlePage {
 
 impl Default for BattlePage {
     fn default() -> Self {
-        BattlePage { opened_for: None, entries: Vec::new(), filter: String::new(), open: None, status: None, scroll_list: false }
+        BattlePage { reset_open: false, opened_for: None, entries: Vec::new(), filter: String::new(), open: None, status: None, scroll_list: false }
     }
 }
 
@@ -382,18 +384,49 @@ impl Module for BattlePage {
         ui.horizontal_wrapped(|ui| {
             ui.label(widget::title(&format!("File {}{}", open.id, entry.as_ref().and_then(|e| e.name()).map(|n| format!(" · {n}")).unwrap_or_default())));
             ui.separator();
-            if ui.add_enabled(open.dirty, egui::Button::new("Save for the game")).clicked() {
+            let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(open.replaced), save: Some(open.dirty), ..Default::default() });
+            if clicks.export {
+                self.status = export_bytes("Export the file", &format!("battle_{}.bin", open.id), ("File of the game", &["bin"]), &open.raw).or(self.status.take());
+            }
+            if clicks.import {
+                match import_bytes("Import a file", ("File of the game", &["bin"])) {
+                    Some(Ok(raw)) => {
+                        let (_, parts) = parts_of(&raw);
+                        open.raw = raw;
+                        open.parts = parts;
+                        open.part = 0;
+                        open.pictures.clear();
+                        open.pictures_for = None;
+                        if let Some((old, _)) = open.view.take() {
+                            open.retired.push(old);
+                        }
+                        open.dirty = true;
+                        self.status = Some((true, "Imported. Save to keep it.".to_string()));
+                    }
+                    Some(Err(message)) => self.status = Some((false, message)),
+                    None => {}
+                }
+            }
+            if clicks.save {
                 save(open, session.sd.as_ref(), &mut self.status);
             }
-            if ui.add_enabled(open.replaced, egui::Button::new("Back to the game file")).clicked() {
-                reset(open, &dump, session.sd.as_ref(), &mut self.status);
+            self.reset_open |= clicks.reset;
+            if open.dirty {
+                widget::badge(ui, "Not saved", color::AMBER);
+            } else if open.replaced {
+                widget::badge(ui, "From the SD card", color::TEAL);
+            } else {
+                widget::badge(ui, "From the romfs", color::GREEN);
             }
         });
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, &format!("The file {}", open.id), &mut []) {
+            reset(open, &dump, session.sd.as_ref(), &mut self.status);
+        }
         if let Some((ok, text)) = &self.status {
             ui.colored_label(if *ok { color::GREEN } else { color::ROSE }, text);
         }
         ui.label(widget::hint(&format!(
-            "{} · {} KB{}{}. Restart the game to see a saved file. The plugin reads it in place of the file of the game.",
+            "{} · {} KB{}{}",
             entry.as_ref().map(|e| format!("{} part{}", e.parts, if e.parts == 1 { "" } else { "s" })).unwrap_or_default(),
             open.raw.len() / 1024,
             if open.compressed { ", compressed" } else { "" },
@@ -648,4 +681,19 @@ mod pictures {
             }
         }
     }
+}
+
+/// Writes bytes in a file that the user chooses. Gives what happened, or `None` when the user closed the window.
+fn export_bytes(title: &str, name: &str, filter: (&str, &[&str]), bytes: &[u8]) -> Option<(bool, String)> {
+    let path = rfd::FileDialog::new().set_title(title).set_file_name(name).add_filter(filter.0, filter.1).save_file()?;
+    Some(match std::fs::write(&path, bytes) {
+        Ok(()) => (true, format!("Exported to {}.", path.display())),
+        Err(e) => (false, format!("{}: {e}", path.display())),
+    })
+}
+
+/// Reads a file that the user chooses (decompressed when it is compressed like the files of the game).
+fn import_bytes(title: &str, filter: (&str, &[&str])) -> Option<Result<Vec<u8>, String>> {
+    let path = rfd::FileDialog::new().set_title(title).add_filter(filter.0, filter.1).pick_file()?;
+    Some(std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display())).map(|b| if sango_core::lz::is_compressed(&b) { sango_core::lz::decompress(&b).unwrap_or(b) } else { b }))
 }

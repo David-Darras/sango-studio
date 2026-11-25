@@ -1,8 +1,14 @@
 //! The code of a script as Pawn-like text, for reading. It is made by following the stack machine of the code: the values that are pushed
 //! become the parameters of the calls, the jumps become `if` and `while` when their shape is simple, and the rest stays as `goto`.
 //!
-//! The text is a help to understand the assembly, not a program that can be built again: the names of the variables are made up (`arg1`, `local1`,
-//! `data3`) and the shape of the structures is a guess.
+//! The text is a help to understand the assembly, not a program that can be built again: the shape of the structures is a guess. The names are
+//! found where they can be:
+//!
+//! - a function that only calls one other function (a native, or a function of the script) has the name of that function and a number: a
+//!   function that only calls `set_flag` is `set_flag_0`, the next one `set_flag_1`;
+//! - an argument or a local that goes into a native has the name of that parameter of the native (`character`, `flag`...), and the name goes
+//!   on through the calls of the functions of the script and through the copies (`local2 = arg1`) until nothing changes;
+//! - the other variables keep a made-up name (`arg1`, `local1`, `data3`).
 
 use crate::amx::Amx;
 use crate::assembly::{decode, opcode, target_of, Instruction};
@@ -24,6 +30,8 @@ enum Expr {
     Address(Box<Expr>),
     Deref(Box<Expr>),
     Index(Box<Expr>, Box<Expr>),
+    /// A variable with a name that was found (see the top of the file).
+    Name(String),
     Unknown,
 }
 
@@ -47,6 +55,7 @@ impl Expr {
             Expr::Address(a) => format!("&{}", a.text()),
             Expr::Deref(a) => format!("*{}", a.wrapped()),
             Expr::Index(a, i) => format!("{}[{}]", a.wrapped(), i.text()),
+            Expr::Name(name) => name.clone(),
             Expr::Unknown => "?".to_string(),
         }
     }
@@ -124,6 +133,9 @@ struct Machine<'a> {
     stack: Vec<Expr>,
     out: Vec<Stmt>,
     results: u32,
+    /// The address of the instruction of each statement of `out`, and of the instruction that runs now.
+    addrs: Vec<usize>,
+    here: usize,
     natives: &'a dyn Fn(i32) -> String,
     functions: &'a BTreeMap<i64, String>,
 }
@@ -137,6 +149,12 @@ fn variable(offset: i32) -> Expr {
 }
 
 impl Machine<'_> {
+    /// Adds a statement, with the address of the instruction that runs now.
+    fn emit(&mut self, statement: Stmt) {
+        self.out.push(statement);
+        self.addrs.push(self.here);
+    }
+
     fn pop(&mut self) -> Expr {
         self.stack.pop().unwrap_or(Expr::Unknown)
     }
@@ -145,7 +163,7 @@ impl Machine<'_> {
         let args: Vec<Expr> = (0..count).map(|_| self.pop()).collect();
         self.results += 1;
         let id = self.results;
-        self.out.push(Stmt::Let(id, Expr::Call(name, args)));
+        self.emit(Stmt::Let(id, Expr::Call(name, args)));
         self.pri = Expr::Result(id);
     }
 
@@ -159,7 +177,7 @@ impl Machine<'_> {
     }
 
     fn branch(&mut self, at: &Instruction, cell: i32, jump_when: Expr) {
-        self.out.push(Stmt::Branch(jump_when, target_of(at.at + 4, cell)));
+        self.emit(Stmt::Branch(jump_when, target_of(at.at + 4, cell)));
     }
 
     /// Runs one instruction.
@@ -170,8 +188,8 @@ impl Machine<'_> {
         let first = c.first().copied().map_or(0, |v| if form == Form::Packed { i32::from(v as u16 as i16) } else { v });
         match name {
             "proc" | "break" | "nop" | "align.pri" | "align.alt" => {}
-            "const" => self.out.push(Stmt::Assign(Expr::Data(first / 4), Expr::Number(c[1]))),
-            "const.s" => self.out.push(Stmt::Assign(variable(first), Expr::Number(c[1]))),
+            "const" => self.emit(Stmt::Assign(Expr::Data(first / 4), Expr::Number(c[1]))),
+            "const.s" => self.emit(Stmt::Assign(variable(first), Expr::Number(c[1]))),
             "const.pri" => self.pri = Expr::Number(first),
             "const.alt" => self.alt = Expr::Number(first),
             "const.p.pri" => self.pri = Expr::Number(first),
@@ -195,15 +213,15 @@ impl Machine<'_> {
             "load.i" => self.pri = Expr::Deref(Box::new(self.pri.clone())),
             "addr.pri" | "addr.p.pri" => self.pri = Expr::Address(Box::new(variable(first))),
             "addr.alt" | "addr.p.alt" => self.alt = Expr::Address(Box::new(variable(first))),
-            "stor.pri" | "stor.p.pri" => self.out.push(Stmt::Assign(Expr::Data(first / 4), self.pri.clone())),
-            "stor.alt" | "stor.p.alt" => self.out.push(Stmt::Assign(Expr::Data(first / 4), self.alt.clone())),
-            "stor.s.pri" | "stor.p.s.pri" => self.out.push(Stmt::Assign(variable(first), self.pri.clone())),
-            "stor.s.alt" | "stor.p.s.alt" => self.out.push(Stmt::Assign(variable(first), self.alt.clone())),
-            "sref.s.pri" | "sref.p.s.pri" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(variable(first))), self.pri.clone())),
-            "sref.s.alt" | "sref.p.s.alt" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(variable(first))), self.alt.clone())),
-            "sref.pri" | "sref.p.pri" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(Expr::Data(first / 4))), self.pri.clone())),
-            "sref.alt" | "sref.p.alt" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(Expr::Data(first / 4))), self.alt.clone())),
-            "stor.i" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(self.alt.clone())), self.pri.clone())),
+            "stor.pri" | "stor.p.pri" => self.emit(Stmt::Assign(Expr::Data(first / 4), self.pri.clone())),
+            "stor.alt" | "stor.p.alt" => self.emit(Stmt::Assign(Expr::Data(first / 4), self.alt.clone())),
+            "stor.s.pri" | "stor.p.s.pri" => self.emit(Stmt::Assign(variable(first), self.pri.clone())),
+            "stor.s.alt" | "stor.p.s.alt" => self.emit(Stmt::Assign(variable(first), self.alt.clone())),
+            "sref.s.pri" | "sref.p.s.pri" => self.emit(Stmt::Assign(Expr::Deref(Box::new(variable(first))), self.pri.clone())),
+            "sref.s.alt" | "sref.p.s.alt" => self.emit(Stmt::Assign(Expr::Deref(Box::new(variable(first))), self.alt.clone())),
+            "sref.pri" | "sref.p.pri" => self.emit(Stmt::Assign(Expr::Deref(Box::new(Expr::Data(first / 4))), self.pri.clone())),
+            "sref.alt" | "sref.p.alt" => self.emit(Stmt::Assign(Expr::Deref(Box::new(Expr::Data(first / 4))), self.alt.clone())),
+            "stor.i" => self.emit(Stmt::Assign(Expr::Deref(Box::new(self.alt.clone())), self.pri.clone())),
             "lidx" => self.pri = Expr::Index(Box::new(self.alt.clone()), Box::new(self.pri.clone())),
             "idxaddr" => self.pri = Expr::Address(Box::new(Expr::Index(Box::new(self.alt.clone()), Box::new(self.pri.clone())))),
             "lidx.b" | "idxaddr.b" | "idxaddr.p.b" | "lidx.p.b" => self.pri = Expr::Index(Box::new(self.alt.clone()), Box::new(self.pri.clone())),
@@ -274,8 +292,8 @@ impl Machine<'_> {
             "shr.c.alt" | "shr.p.c.alt" => self.alt = Expr::Binary(Box::new(self.alt.clone()), ">>", Box::new(Expr::Number(first))),
             "zero.pri" => self.pri = Expr::Number(0),
             "zero.alt" => self.alt = Expr::Number(0),
-            "zero" | "zero.p" => self.out.push(Stmt::Assign(Expr::Data(first / 4), Expr::Number(0))),
-            "zero.s" | "zero.p.s" => self.out.push(Stmt::Assign(variable(first), Expr::Number(0))),
+            "zero" | "zero.p" => self.emit(Stmt::Assign(Expr::Data(first / 4), Expr::Number(0))),
+            "zero.s" | "zero.p.s" => self.emit(Stmt::Assign(variable(first), Expr::Number(0))),
             "sign.pri" | "sign.alt" => {}
             "eq" => self.compare("==", None),
             "neq" => self.compare("!=", None),
@@ -292,12 +310,12 @@ impl Machine<'_> {
             "inc.alt" => self.alt = Expr::Binary(Box::new(self.alt.clone()), "+", Box::new(Expr::Number(1))),
             "dec.pri" => self.pri = Expr::Binary(Box::new(self.pri.clone()), "-", Box::new(Expr::Number(1))),
             "dec.alt" => self.alt = Expr::Binary(Box::new(self.alt.clone()), "-", Box::new(Expr::Number(1))),
-            "inc" | "inc.p" => self.out.push(Stmt::Assign(Expr::Data(first / 4), Expr::Binary(Box::new(Expr::Data(first / 4)), "+", Box::new(Expr::Number(1))))),
-            "dec" | "dec.p" => self.out.push(Stmt::Assign(Expr::Data(first / 4), Expr::Binary(Box::new(Expr::Data(first / 4)), "-", Box::new(Expr::Number(1))))),
-            "inc.s" | "inc.p.s" => self.out.push(Stmt::Assign(variable(first), Expr::Binary(Box::new(variable(first)), "+", Box::new(Expr::Number(1))))),
-            "dec.s" | "dec.p.s" => self.out.push(Stmt::Assign(variable(first), Expr::Binary(Box::new(variable(first)), "-", Box::new(Expr::Number(1))))),
-            "inc.i" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(self.pri.clone())), Expr::Binary(Box::new(Expr::Deref(Box::new(self.pri.clone()))), "+", Box::new(Expr::Number(1))))),
-            "dec.i" => self.out.push(Stmt::Assign(Expr::Deref(Box::new(self.pri.clone())), Expr::Binary(Box::new(Expr::Deref(Box::new(self.pri.clone()))), "-", Box::new(Expr::Number(1))))),
+            "inc" | "inc.p" => self.emit(Stmt::Assign(Expr::Data(first / 4), Expr::Binary(Box::new(Expr::Data(first / 4)), "+", Box::new(Expr::Number(1))))),
+            "dec" | "dec.p" => self.emit(Stmt::Assign(Expr::Data(first / 4), Expr::Binary(Box::new(Expr::Data(first / 4)), "-", Box::new(Expr::Number(1))))),
+            "inc.s" | "inc.p.s" => self.emit(Stmt::Assign(variable(first), Expr::Binary(Box::new(variable(first)), "+", Box::new(Expr::Number(1))))),
+            "dec.s" | "dec.p.s" => self.emit(Stmt::Assign(variable(first), Expr::Binary(Box::new(variable(first)), "-", Box::new(Expr::Number(1))))),
+            "inc.i" => self.emit(Stmt::Assign(Expr::Deref(Box::new(self.pri.clone())), Expr::Binary(Box::new(Expr::Deref(Box::new(self.pri.clone()))), "+", Box::new(Expr::Number(1))))),
+            "dec.i" => self.emit(Stmt::Assign(Expr::Deref(Box::new(self.pri.clone())), Expr::Binary(Box::new(Expr::Deref(Box::new(self.pri.clone()))), "-", Box::new(Expr::Number(1))))),
             "call" => {
                 let target = target_of(at.at + 4, first);
                 let count = match self.pop() {
@@ -322,10 +340,10 @@ impl Machine<'_> {
             }
             "retn" | "ret" => {
                 let value = if matches!(self.pri, Expr::Unknown) { None } else { Some(self.pri.clone()) };
-                self.out.push(Stmt::Return(value));
+                self.emit(Stmt::Return(value));
             }
-            "halt" | "halt.p" => self.out.push(Stmt::Note("halt".to_string())),
-            "jump" => self.out.push(Stmt::Goto(target_of(at.at + 4, first))),
+            "halt" | "halt.p" => self.emit(Stmt::Note("halt".to_string())),
+            "jump" => self.emit(Stmt::Goto(target_of(at.at + 4, first))),
             "jzer" => self.branch(at, first, self.pri.negated()),
             "jnz" => self.branch(at, first, self.pri.clone()),
             "jeq" => self.branch(at, first, Expr::Binary(Box::new(self.pri.clone()), "==", Box::new(self.alt.clone()))),
@@ -339,18 +357,19 @@ impl Machine<'_> {
                 let count = first as usize;
                 let default = target_of(at.at + 8, c[1]);
                 let cases = (0..count).map(|k| (c[2 + 2 * k], target_of(at.at + 16 + 8 * k, c[3 + 2 * k]))).collect();
-                self.out.push(Stmt::Switch(self.pri.clone(), cases, default));
+                self.emit(Stmt::Switch(self.pri.clone(), cases, default));
             }
             _ => {
-                self.out.push(Stmt::Note(format!("{name} {}", c.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "))));
+                self.emit(Stmt::Note(format!("{name} {}", c.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(", "))));
             }
         }
     }
 }
 
 /// A result that is used once, in the next statement, goes into that statement; one that is not used loses its name.
-fn simplify(stmts: Vec<Stmt>) -> Vec<Stmt> {
+fn simplify(stmts: Vec<Stmt>, addrs: Vec<usize>) -> (Vec<Stmt>, Vec<usize>) {
     let mut list = stmts;
+    let mut addrs = addrs;
     let mut at = 0;
     while at < list.len() {
         if let Stmt::Let(id, value) = list[at].clone() {
@@ -367,7 +386,10 @@ fn simplify(stmts: Vec<Stmt>) -> Vec<Stmt> {
                 (0, _) => list[at] = Stmt::Run(value),
                 (1, Some(k)) if k == at + 1 && !matches!(list[k], Stmt::Label(_)) => {
                     list[k] = replace_in(&list[k], id, &value);
+                    // The line starts at the first instruction of the value.
+                    addrs[k] = addrs[at];
                     list.remove(at);
+                    addrs.remove(at);
                     continue;
                 }
                 _ => {}
@@ -375,7 +397,7 @@ fn simplify(stmts: Vec<Stmt>) -> Vec<Stmt> {
         }
         at += 1;
     }
-    list
+    (list, addrs)
 }
 
 fn stmt_uses(s: &Stmt, id: u32) -> usize {
@@ -400,7 +422,7 @@ fn replace_in(s: &Stmt, id: u32, with: &Expr) -> Stmt {
 }
 
 /// Writes the statements with `if`, `if else` and `while` where the jumps have a simple shape.
-fn structure(list: &[Stmt], used: &HashMap<i64, usize>, depth: usize, out: &mut Vec<String>) {
+fn structure(list: &[Stmt], addrs: &[usize], used: &HashMap<i64, usize>, depth: usize, out: &mut Vec<(String, usize)>) {
     let pad = "    ".repeat(depth);
     let position = |label: i64, from: usize| list.iter().enumerate().skip(from).find(|(_, s)| matches!(s, Stmt::Label(l) if *l == label)).map(|(k, _)| k);
     let mut at = 0;
@@ -411,15 +433,15 @@ fn structure(list: &[Stmt], used: &HashMap<i64, usize>, depth: usize, out: &mut 
                 let back = list.iter().enumerate().skip(at + 1).rev().find(|(_, s)| matches!(s, Stmt::Goto(g) if g == l)).map(|(k, _)| k);
                 if let (Some(end), Some(Stmt::Branch(cond, exit))) = (back, list.get(at + 1)) {
                     if position(*exit, at + 1) == Some(end + 1) {
-                        out.push(format!("{pad}while ({}) {{", cond.negated().text()));
-                        structure(&list[at + 2..end], used, depth + 1, out);
-                        out.push(format!("{pad}}}"));
+                        out.push((format!("{pad}while ({}) {{", cond.negated().text()), addrs[at]));
+                        structure(&list[at + 2..end], &addrs[at + 2..end], used, depth + 1, out);
+                        out.push((format!("{pad}}}"), addrs[at]));
                         at = end + 2;
                         continue;
                     }
                 }
                 if used.get(l).copied().unwrap_or(0) > 0 {
-                    out.push(format!("{}L{l:04X}:", "    ".repeat(depth.saturating_sub(1))));
+                    out.push((format!("{}L{l:04X}:", "    ".repeat(depth.saturating_sub(1))), addrs[at]));
                 }
             }
             Stmt::Branch(cond, label) => {
@@ -432,47 +454,285 @@ fn structure(list: &[Stmt], used: &HashMap<i64, usize>, depth: usize, out: &mut 
                             else_end = Some((body_end - 1, k));
                         }
                     }
-                    out.push(format!("{pad}if ({}) {{", cond.negated().text()));
+                    out.push((format!("{pad}if ({}) {{", cond.negated().text()), addrs[at]));
                     match else_end {
                         Some((then_end, k)) => {
-                            structure(&list[at + 1..then_end], used, depth + 1, out);
-                            out.push(format!("{pad}}} else {{"));
-                            structure(&list[end + 1..k], used, depth + 1, out);
-                            out.push(format!("{pad}}}"));
+                            structure(&list[at + 1..then_end], &addrs[at + 1..then_end], used, depth + 1, out);
+                            out.push((format!("{pad}}} else {{"), addrs[at]));
+                            structure(&list[end + 1..k], &addrs[end + 1..k], used, depth + 1, out);
+                            out.push((format!("{pad}}}"), addrs[at]));
                             at = k + 1;
                         }
                         None => {
-                            structure(&list[at + 1..body_end], used, depth + 1, out);
-                            out.push(format!("{pad}}}"));
+                            structure(&list[at + 1..body_end], &addrs[at + 1..body_end], used, depth + 1, out);
+                            out.push((format!("{pad}}}"), addrs[at]));
                             at = end + 1;
                         }
                     }
                     continue;
                 }
-                out.push(format!("{pad}if ({}) goto L{label:04X};", cond.text()));
+                out.push((format!("{pad}if ({}) goto L{label:04X};", cond.text()), addrs[at]));
             }
-            Stmt::Goto(l) => out.push(format!("{pad}goto L{l:04X};")),
-            Stmt::Assign(a, b) => out.push(format!("{pad}{} = {};", a.text(), b.text())),
-            Stmt::Let(n, e) => out.push(format!("{pad}result{n} = {};", e.text())),
-            Stmt::Run(e) => out.push(format!("{pad}{};", e.text())),
-            Stmt::Return(None) => out.push(format!("{pad}return;")),
-            Stmt::Return(Some(e)) => out.push(format!("{pad}return {};", e.text())),
+            Stmt::Goto(l) => out.push((format!("{pad}goto L{l:04X};"), addrs[at])),
+            Stmt::Assign(a, b) => out.push((format!("{pad}{} = {};", a.text(), b.text()), addrs[at])),
+            Stmt::Let(n, e) => out.push((format!("{pad}result{n} = {};", e.text()), addrs[at])),
+            Stmt::Run(e) => out.push((format!("{pad}{};", e.text()), addrs[at])),
+            Stmt::Return(None) => out.push((format!("{pad}return;"), addrs[at])),
+            Stmt::Return(Some(e)) => out.push((format!("{pad}return {};", e.text()), addrs[at])),
             Stmt::Switch(e, cases, default) => {
-                out.push(format!("{pad}switch ({}) {{", e.text()));
+                out.push((format!("{pad}switch ({}) {{", e.text()), addrs[at]));
                 for (value, label) in cases {
-                    out.push(format!("{pad}    case {value}: goto L{label:04X};"));
+                    out.push((format!("{pad}    case {value}: goto L{label:04X};"), addrs[at]));
                 }
-                out.push(format!("{pad}    default: goto L{default:04X};"));
-                out.push(format!("{pad}}}"));
+                out.push((format!("{pad}    default: goto L{default:04X};"), addrs[at]));
+                out.push((format!("{pad}}}"), addrs[at]));
             }
-            Stmt::Note(text) => out.push(format!("{pad}// {text}")),
+            Stmt::Note(text) => out.push((format!("{pad}// {text}"), addrs[at])),
         }
         at += 1;
     }
 }
 
+/// A variable of a function that can get a name: an argument or a local, by its number.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Var {
+    Arg(i32),
+    Local(i32),
+}
+
+/// The variable that an expression is, or whose address or content it is.
+fn var_of(e: &Expr) -> Option<Var> {
+    match e {
+        Expr::Arg(k) => Some(Var::Arg(*k)),
+        Expr::Local(k) => Some(Var::Local(*k)),
+        Expr::Address(inner) | Expr::Deref(inner) => var_of(inner),
+        _ => None,
+    }
+}
+
+/// Gives every call of an expression to `found`.
+fn calls_in<'a>(e: &'a Expr, found: &mut Vec<(&'a str, &'a [Expr])>) {
+    match e {
+        Expr::Call(name, args) => {
+            found.push((name.as_str(), args.as_slice()));
+            args.iter().for_each(|a| calls_in(a, found));
+        }
+        Expr::Binary(a, _, b) | Expr::Index(a, b) => {
+            calls_in(a, found);
+            calls_in(b, found);
+        }
+        Expr::Unary(_, a) | Expr::Address(a) | Expr::Deref(a) => calls_in(a, found),
+        _ => {}
+    }
+}
+
+/// The expressions of a statement.
+fn exprs_of(s: &Stmt) -> Vec<&Expr> {
+    match s {
+        Stmt::Assign(a, b) => vec![a, b],
+        Stmt::Let(_, e) | Stmt::Run(e) | Stmt::Branch(e, _) | Stmt::Switch(e, _, _) | Stmt::Return(Some(e)) => vec![e],
+        _ => Vec::new(),
+    }
+}
+
+/// The calls of a list of statements.
+fn calls_of(list: &[Stmt]) -> Vec<(&str, &[Expr])> {
+    let mut found = Vec::new();
+    for s in list {
+        for e in exprs_of(s) {
+            calls_in(e, &mut found);
+        }
+    }
+    found
+}
+
+/// The function that a function only calls, when it does nothing else: no jump, no change of a variable, one call, and a return of its value
+/// or of nothing.
+fn only_call(list: &[Stmt]) -> Option<&str> {
+    let busy = list.iter().any(|s| matches!(s, Stmt::Assign(..) | Stmt::Branch(..) | Stmt::Switch(..) | Stmt::Goto(_)));
+    let calls = calls_of(list);
+    (!busy && calls.len() == 1).then(|| calls[0].0)
+}
+
+/// The renaming of the functions and of the variables (see the top of the file). `functions` gives the statements of each function by its name;
+/// `params` gives the names of the parameters of a native from its name in the text. Returns the new name of each function that gets one, and the
+/// names of the variables of each function.
+fn find_names(functions: &[(String, Vec<Stmt>)], params: &dyn Fn(&str) -> Option<Vec<String>>) -> (HashMap<String, String>, HashMap<String, BTreeMap<Var, String>>) {
+    // The functions that only call one other function. A function that calls such a function takes the base of its name.
+    let mut renamed: HashMap<String, String> = HashMap::new();
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for (name, list) in functions {
+        if name.starts_with("public_") {
+            continue;
+        }
+        if let Some(callee) = only_call(list) {
+            let base = renamed.get(callee).map_or(callee, |n| n.rsplit_once('_').map_or(n.as_str(), |(base, _)| base)).to_string();
+            let number = counts.entry(base.clone()).or_default();
+            renamed.insert(name.clone(), format!("{base}_{number}"));
+            *number += 1;
+        }
+    }
+    // The names of the variables: from the parameters of the natives, then through the calls and the copies, until nothing changes.
+    let mut names: HashMap<String, BTreeMap<Var, String>> = functions.iter().map(|(n, _)| (n.clone(), BTreeMap::new())).collect();
+    for _ in 0..12 {
+        let mut changed = false;
+        for (name, list) in functions {
+            let mut found: Vec<(Var, String)> = Vec::new();
+            for (callee, args) in calls_of(list) {
+                let callee_names: Option<Vec<String>> = params(callee).or_else(|| {
+                    names.get(callee).map(|vars| (1..=args.len() as i32).map(|k| vars.get(&Var::Arg(k)).cloned().unwrap_or_default()).collect())
+                });
+                let Some(callee_names) = callee_names else { continue };
+                for (arg, param) in args.iter().zip(callee_names) {
+                    if let (Some(var), false) = (var_of(arg), param.is_empty()) {
+                        found.push((var, param));
+                    }
+                }
+            }
+            // The copies: a variable that gets a named variable (or gives its value to one) has the same name.
+            for s in list {
+                if let Stmt::Assign(a, b) = s {
+                    if let (Some(x), Some(y)) = (var_of(a), var_of(b)) {
+                        let vars = &names[name];
+                        if let Some(n) = vars.get(&y).cloned() {
+                            found.push((x, n));
+                        } else if let Some(n) = vars.get(&x).cloned() {
+                            found.push((y, n));
+                        }
+                    }
+                }
+            }
+            let vars = names.get_mut(name).expect("every function has its map");
+            for (var, param) in found {
+                if !vars.contains_key(&var) {
+                    vars.insert(var, param);
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    (renamed, names)
+}
+
+/// The text of a variable in a function: its name, made unique in the function (`flag`, `flag_2`), or its made-up name.
+fn display_names(vars: &BTreeMap<Var, String>) -> HashMap<Var, String> {
+    let mut out = HashMap::new();
+    let mut taken: HashMap<String, usize> = HashMap::new();
+    for (var, name) in vars {
+        let clean: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+        let count = taken.entry(clean.clone()).or_default();
+        *count += 1;
+        out.insert(*var, if *count == 1 { clean } else { format!("{clean}_{count}") });
+    }
+    out
+}
+
+impl Expr {
+    /// The expression with the names of the variables and of the functions.
+    fn named(&self, vars: &HashMap<Var, String>, functions: &HashMap<String, String>) -> Expr {
+        let go = |e: &Expr| Box::new(e.named(vars, functions));
+        match self {
+            Expr::Arg(k) => vars.get(&Var::Arg(*k)).map_or_else(|| self.clone(), |n| Expr::Name(n.clone())),
+            Expr::Local(k) => vars.get(&Var::Local(*k)).map_or_else(|| self.clone(), |n| Expr::Name(n.clone())),
+            Expr::Binary(a, op, b) => Expr::Binary(go(a), op, go(b)),
+            Expr::Index(a, b) => Expr::Index(go(a), go(b)),
+            Expr::Unary(op, a) => Expr::Unary(op, go(a)),
+            Expr::Address(a) => Expr::Address(go(a)),
+            Expr::Deref(a) => Expr::Deref(go(a)),
+            Expr::Call(name, args) => Expr::Call(functions.get(name).cloned().unwrap_or_else(|| name.clone()), args.iter().map(|a| a.named(vars, functions)).collect()),
+            other => other.clone(),
+        }
+    }
+}
+
+/// The statement with the names of the variables and of the functions.
+fn named_stmt(s: &Stmt, vars: &HashMap<Var, String>, functions: &HashMap<String, String>) -> Stmt {
+    let n = |e: &Expr| e.named(vars, functions);
+    match s {
+        Stmt::Assign(a, b) => Stmt::Assign(n(a), n(b)),
+        Stmt::Let(id, e) => Stmt::Let(*id, n(e)),
+        Stmt::Run(e) => Stmt::Run(n(e)),
+        Stmt::Branch(e, l) => Stmt::Branch(n(e), *l),
+        Stmt::Switch(e, c, d) => Stmt::Switch(n(e), c.clone(), *d),
+        Stmt::Return(Some(e)) => Stmt::Return(Some(n(e))),
+        other => other.clone(),
+    }
+}
+
+/// The names that the Pawn-like text gives, for the assembly: the name of each function by the address of its first instruction, and the
+/// name of each variable of a function by the place of the variable on the stack (an argument at 12, 16..., a local at -4, -8...).
+pub struct Names {
+    pub functions: BTreeMap<usize, String>,
+    pub variables: BTreeMap<usize, HashMap<i32, String>>,
+}
+
+/// The names of the functions and of the variables of a script (see [`Names`]).
+pub fn names(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result<Names, String> {
+    let (bodies, body_addrs) = bodies(amx, native_name)?;
+    let starts = body_addrs.iter().map(|(start, _)| *start);
+    let params = |name: &str| crate::natives::find(name).filter(|n| !n.params.is_empty()).map(|n| n.params.iter().map(|p| p.name.to_string()).collect::<Vec<String>>());
+    let (renamed, variables) = find_names(&bodies, &params);
+    let mut out = Names { functions: BTreeMap::new(), variables: BTreeMap::new() };
+    for ((name, _), start) in bodies.iter().zip(starts) {
+        out.functions.insert(start, renamed.get(name).cloned().unwrap_or_else(|| name.clone()));
+        let shown = display_names(&variables[name]);
+        let by_place = shown.into_iter().map(|(var, text)| (match var { Var::Arg(k) => 12 + 4 * (k - 1), Var::Local(k) => -4 * k }, text)).collect();
+        out.variables.insert(start, by_place);
+    }
+    Ok(out)
+}
+
 /// The code of a script as Pawn-like text. `native_name` gives the name of a native from its number in the table of the file.
+#[cfg(test)]
 pub fn to_pawn(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result<String, String> {
+    Ok(to_pawn_lines(amx, native_name)?.into_iter().map(|(line, _)| line + "\n").collect())
+}
+
+/// The lines of the Pawn-like text, each with the address of the instruction that it comes from (`None` for a line without instruction: a
+/// brace, an empty line, the first comments).
+pub fn to_pawn_lines(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result<Vec<(String, Option<usize>)>, String> {
+    let mut lines: Vec<(String, Option<usize>)> = vec![
+        ("// Pawn-like text made from the code, to read. It is a guess: some names are made up and the shape of the structures may be wrong.".to_string(), None),
+        ("// Change the script in the assembly, on the left.".to_string(), None),
+        (String::new(), None),
+    ];
+    let (bodies, body_addrs) = bodies(amx, native_name)?;
+    let params = |name: &str| crate::natives::find(name).filter(|n| !n.params.is_empty()).map(|n| n.params.iter().map(|p| p.name.to_string()).collect::<Vec<String>>());
+    let (renamed, variables) = find_names(&bodies, &params);
+    for ((name, statements), (start, addrs)) in bodies.iter().zip(&body_addrs) {
+        let vars = display_names(&variables[name]);
+        let statements: Vec<Stmt> = statements.iter().map(|s| named_stmt(s, &vars, &renamed)).collect();
+        let mut used: HashMap<i64, usize> = HashMap::new();
+        for s in &statements {
+            match s {
+                Stmt::Goto(l) | Stmt::Branch(_, l) => *used.entry(*l).or_default() += 1,
+                Stmt::Switch(_, cases, d) => {
+                    *used.entry(*d).or_default() += 1;
+                    cases.iter().for_each(|(_, l)| *used.entry(*l).or_default() += 1);
+                }
+                _ => {}
+            }
+        }
+        // The arguments: the largest number that the code uses (before the names), with their names.
+        let max_arg = statements_max_arg(&bodies.iter().find(|(n, _)| n == name).map(|(_, s)| s.clone()).unwrap_or_default());
+        let shown = renamed.get(name).unwrap_or(name);
+        let args: Vec<String> = (1..=max_arg).map(|k| vars.get(&Var::Arg(k)).cloned().unwrap_or_else(|| format!("arg{k}"))).collect();
+        lines.push((format!("{shown}({}) {{", args.join(", ")), Some(*start)));
+        let mut body_lines = Vec::new();
+        structure(&statements, addrs, &used, 1, &mut body_lines);
+        lines.extend(body_lines.into_iter().map(|(line, at)| (line, Some(at))));
+        lines.push(("}".to_string(), None));
+        lines.push((String::new(), None));
+    }
+    Ok(lines)
+}
+
+/// The statements of every function of a script with their name, and the first address of each function with the address of the instruction of
+/// each statement.
+fn bodies(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result<(Vec<(String, Vec<Stmt>)>, Vec<(usize, Vec<usize>)>), String> {
     let code = decode(&amx.code)?;
     let natives = |index: i32| -> String {
         amx.natives.get(index as usize).map_or_else(|| format!("native_{index}"), |n| native_name(n.name).unwrap_or_else(|| format!("native_{:08X}", n.name)))
@@ -488,13 +748,12 @@ pub fn to_pawn(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result
         functions.insert(i64::from(entry.address), format!("public_{:08X}", entry.name));
     }
     let starts: Vec<usize> = functions.keys().map(|&a| a as usize).collect();
-    let mut text = String::new();
-    text.push_str("// Pawn-like text made from the code, to read. It is a guess: the names are made up and the shape of the structures may be wrong.\n");
-    text.push_str("// Change the script in the Assembly tab.\n\n");
+    let mut bodies: Vec<(String, Vec<Stmt>)> = Vec::new();
+    let mut body_addrs: Vec<(usize, Vec<usize>)> = Vec::new();
     for (place, &start) in starts.iter().enumerate() {
         let end = starts.get(place + 1).copied().unwrap_or(usize::MAX);
         let body: Vec<&Instruction> = code.iter().filter(|i| i.at >= start && i.at < end).collect();
-        let mut machine = Machine { pri: Expr::Unknown, alt: Expr::Unknown, stack: Vec::new(), out: Vec::new(), results: 0, natives: &natives, functions: &functions };
+        let mut machine = Machine { pri: Expr::Unknown, alt: Expr::Unknown, stack: Vec::new(), out: Vec::new(), results: 0, addrs: Vec::new(), here: start, natives: &natives, functions: &functions };
         let targets: BTreeSet<i64> = body
             .iter()
             .flat_map(|i| match opcode(i.number).map(|(_, f)| f) {
@@ -504,38 +763,21 @@ pub fn to_pawn(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result
             })
             .collect();
         for instruction in &body {
+            machine.here = instruction.at;
             if targets.contains(&(instruction.at as i64)) {
                 // The registers are not known after a label that is jumped to.
-                machine.out.push(Stmt::Label(instruction.at as i64));
+                machine.emit(Stmt::Label(instruction.at as i64));
                 machine.pri = Expr::Unknown;
                 machine.alt = Expr::Unknown;
             }
             machine.step(instruction);
         }
-        let statements = simplify(machine.out);
-        let mut used: HashMap<i64, usize> = HashMap::new();
-        for s in &statements {
-            match s {
-                Stmt::Goto(l) | Stmt::Branch(_, l) => *used.entry(*l).or_default() += 1,
-                Stmt::Switch(_, cases, d) => {
-                    *used.entry(*d).or_default() += 1;
-                    cases.iter().for_each(|(_, l)| *used.entry(*l).or_default() += 1);
-                }
-                _ => {}
-            }
-        }
         let name = functions.get(&(start as i64)).cloned().unwrap_or_default();
-        let max_arg = statements_max_arg(&statements);
-        text.push_str(&format!("{name}({}) {{\n", (1..=max_arg).map(|k| format!("arg{k}")).collect::<Vec<_>>().join(", ")));
-        let mut lines = Vec::new();
-        structure(&statements, &used, 1, &mut lines);
-        for line in lines {
-            text.push_str(&line);
-            text.push('\n');
-        }
-        text.push_str("}\n\n");
+        let (statements, addrs) = simplify(machine.out, machine.addrs);
+        bodies.push((name, statements));
+        body_addrs.push((start, addrs));
     }
-    Ok(text)
+    Ok((bodies, body_addrs))
 }
 
 fn statements_max_arg(list: &[Stmt]) -> i32 {
@@ -577,6 +819,31 @@ mod test {
         assert_eq!(Expr::Local(1).negated().negated().text(), "local1");
     }
 
+    /// A function that only calls a native takes its name, and the arguments that go into the native take the names of its parameters; the names go
+    /// on to the callers.
+    #[test]
+    fn the_names_come_from_the_natives() {
+        let call = |name: &str, args: Vec<Expr>| Expr::Call(name.to_string(), args);
+        let functions = vec![
+            ("func_0010".to_string(), vec![Stmt::Return(Some(call("set_flag", vec![Expr::Arg(1), Expr::Arg(2)])))]),
+            ("func_0020".to_string(), vec![Stmt::Run(call("set_flag", vec![Expr::Number(3), Expr::Number(1)])), Stmt::Return(None)]),
+            ("func_0030".to_string(), vec![Stmt::Assign(Expr::Local(1), Expr::Arg(1)), Stmt::Run(call("func_0010", vec![Expr::Local(1), Expr::Number(1)])), Stmt::Run(call("other", vec![]))]),
+        ];
+        let params = |name: &str| (name == "set_flag").then(|| vec!["flag".to_string(), "value".to_string()]);
+        let (renamed, vars) = find_names(&functions, &params);
+        assert_eq!(renamed.get("func_0010").map(String::as_str), Some("set_flag_0"));
+        assert_eq!(renamed.get("func_0020").map(String::as_str), Some("set_flag_1"));
+        assert!(!renamed.contains_key("func_0030"), "a function that calls two functions keeps its name");
+        assert_eq!(vars["func_0010"].get(&Var::Arg(1)).map(String::as_str), Some("flag"));
+        assert_eq!(vars["func_0010"].get(&Var::Arg(2)).map(String::as_str), Some("value"));
+        // Through the call of func_0010, then through the copy local1 = arg1.
+        assert_eq!(vars["func_0030"].get(&Var::Local(1)).map(String::as_str), Some("flag"));
+        assert_eq!(vars["func_0030"].get(&Var::Arg(1)).map(String::as_str), Some("flag"));
+        let shown = display_names(&vars["func_0030"]);
+        assert_eq!(shown.get(&Var::Arg(1)).map(String::as_str), Some("flag"));
+        assert_eq!(shown.get(&Var::Local(1)).map(String::as_str), Some("flag_2"));
+    }
+
     /// With the dump: every script of the game is turned into text, and the text is not empty.
     #[test]
     fn the_scripts_of_the_game_are_turned_into_text() {
@@ -600,6 +867,11 @@ mod test {
         }
         assert!(scripts >= 90 && lines > 10_000, "{scripts} scripts, {lines} lines");
         assert!(calls > 100, "the natives are named in the calls: {calls}");
+        if let Ok(file) = std::env::var("SANGO_PAWN_SAMPLE") {
+            let garc = sango_core::Garc::open(&dump.archive(29)).unwrap();
+            let amx = Amx::parse(&garc.first_file_decompressed(1).unwrap()).unwrap();
+            std::fs::write(file, to_pawn(&amx, &|h| names.get(&h).cloned()).unwrap()).unwrap();
+        }
         eprintln!("{scripts} scripts, {lines} lines of Pawn-like text");
     }
 }

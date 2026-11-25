@@ -29,6 +29,8 @@ const ROW: f32 = 22.0;
 
 /// The page.
 pub struct Choreography {
+    /// The window of the button Reset….
+    reset_open: bool,
     /// The file that the user chose while the open choreography had changes that were not saved: the window asks first.
     pending_file: Option<usize>,
     garc: Option<Garc>,
@@ -50,7 +52,7 @@ pub struct Choreography {
 
 impl Default for Choreography {
     fn default() -> Self {
-        Choreography { garc: None, root: None, error: None, names: Vec::new(), file: 119 + 1, choreography: None, baseline: Vec::new(), selected: None, zoom: 6.0, status: None, new_kind: 1, pending_file: None }
+        Choreography { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 119 + 1, choreography: None, baseline: Vec::new(), selected: None, zoom: 6.0, status: None, new_kind: 1, pending_file: None }
     }
 }
 
@@ -188,7 +190,6 @@ impl Choreography {
         let from_card = session.sd.as_ref().is_some_and(|sd| sd.read(&path(self.file)).is_some());
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Choreography"));
                 let mut file = self.file;
                 let names: Vec<&str> = self.names.iter().map(String::as_str).collect();
                 sango_species_base::searchable_picker(ui, "choreography_file", &mut file, &names, 320.0);
@@ -201,22 +202,30 @@ impl Choreography {
                         self.load(session.sd.as_ref());
                     }
                 }
-                if let Some(sd) = session.sd.as_ref() {
-                    ui.add_enabled_ui(dirty, |ui| {
-                        if widget::save_button(ui, self.unsaved()) {
-                            self.save(sd);
-                        }
-                    })
-                    .response
-                    .on_disabled_hover_text("Nothing to save: no change since the last save.");
-                    ui.add_enabled_ui(dirty, |ui| {
-                        if widget::confirm_button(ui, "Discard the changes", "Click again to discard") {
-                            self.load(Some(sd));
-                        }
-                    });
-                    if from_card && widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                        self.reset(sd);
+                let has_card = session.sd.is_some();
+                let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(self.choreography.is_some()), import: Some(true), reset: Some(has_card && from_card), save: Some(has_card && dirty), ..Default::default() });
+                if clicks.export {
+                    if let Some(choreography) = self.choreography.as_ref() {
+                        self.status = export_bytes("Export the choreography", &format!("choreography_{}.bin", self.file), ("Choreography", &["bin"]), &choreography.to_bytes()).or(self.status.take());
                     }
+                }
+                if clicks.import {
+                    match import_bytes("Import a choreography", ("Choreography", &["bin"])) {
+                        Some(Ok(bytes)) => match MoveChoreography::parse(&bytes) {
+                            Ok(choreography) => {
+                                self.choreography = Some(choreography);
+                                self.selected = None;
+                                self.status = Some((true, "Imported. Save to keep it.".to_string()));
+                            }
+                            Err(message) => self.status = Some((false, format!("This file is not a choreography: {message}"))),
+                        },
+                        Some(Err(message)) => self.status = Some((false, message)),
+                        None => {}
+                    }
+                }
+                self.reset_open |= clicks.reset;
+                if let (true, Some(sd)) = (clicks.save, session.sd.as_ref()) {
+                    self.save(sd);
                 }
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -233,6 +242,11 @@ impl Choreography {
                 ui.label(egui::RichText::new(message).color(if *good { color::GREEN } else { color::ROSE }));
             }
         });
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, &format!("The choreography {}", self.file), &mut []) {
+            if let Some(sd) = session.sd.as_ref() {
+                self.reset(sd);
+            }
+        }
     }
 
     /// The timeline: a row for each step, with a bar from its first to its last frame.
@@ -519,4 +533,19 @@ mod test {
         assert_ne!(page.choreography.as_ref().unwrap().steps[place].value(&kind.params[0]), Value::Vec3([9.0, 9.0, 9.0]));
         let _ = std::fs::remove_dir_all(&folder);
     }
+}
+
+/// Writes bytes in a file that the user chooses. Gives what happened, or `None` when the user closed the window.
+fn export_bytes(title: &str, name: &str, filter: (&str, &[&str]), bytes: &[u8]) -> Option<(bool, String)> {
+    let path = rfd::FileDialog::new().set_title(title).set_file_name(name).add_filter(filter.0, filter.1).save_file()?;
+    Some(match std::fs::write(&path, bytes) {
+        Ok(()) => (true, format!("Exported to {}.", path.display())),
+        Err(e) => (false, format!("{}: {e}", path.display())),
+    })
+}
+
+/// Reads a file that the user chooses (decompressed when it is compressed like the files of the game).
+fn import_bytes(title: &str, filter: (&str, &[&str])) -> Option<Result<Vec<u8>, String>> {
+    let path = rfd::FileDialog::new().set_title(title).add_filter(filter.0, filter.1).pick_file()?;
+    Some(std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display())).map(|b| if sango_core::lz::is_compressed(&b) { sango_core::lz::decompress(&b).unwrap_or(b) } else { b }))
 }

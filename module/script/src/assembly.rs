@@ -80,7 +80,23 @@ fn parse_number(text: &str) -> Result<i64, String> {
 }
 
 /// The script as text. `native_name` gives the name that the game uses for a native (from its number), for the comments.
+#[cfg(test)]
 pub fn to_text(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result<String, String> {
+    to_text_named(amx, native_name, None)
+}
+
+/// The instructions whose first operand is a place on the stack (a variable of the function), and the number of such operands.
+fn stack_operands(name: &str) -> usize {
+    match name {
+        "load.s.both" => 2,
+        _ if name.contains(".s.") || name.ends_with(".s") || name.starts_with("addr.") || name == "push.adr" || name == "push.p.adr" => 1,
+        _ => 0,
+    }
+}
+
+/// The script as text, with the names of the Pawn-like text (see `decompile::names`): each function is a label with its name (`set_flag_0:`),
+/// and an instruction that uses a named variable says its name in a comment (`load.s.pri 12 ; flag`).
+pub fn to_text_named(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>, names: Option<&crate::decompile::Names>) -> Result<String, String> {
     let code = decode(&amx.code)?;
     let starts: BTreeSet<usize> = code.iter().map(|i| i.at).collect();
     let mut labels: BTreeMap<i64, String> = BTreeMap::new();
@@ -89,6 +105,15 @@ pub fn to_text(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result
     }
     if amx.entry >= 0 {
         labels.entry(i64::from(amx.entry)).or_insert_with(|| label(i64::from(amx.entry)));
+    }
+    // The functions have the names of the Pawn-like text (the public functions keep theirs).
+    if let Some(names) = names {
+        for (&at, name) in &names.functions {
+            let at = at as i64;
+            if !labels.get(&at).is_some_and(|l| l.starts_with("public_")) {
+                labels.insert(at, name.clone());
+            }
+        }
     }
     let mut targets = |at: usize, cell_index: usize, value: i32| {
         let target = target_of(at + 4 * cell_index, value);
@@ -146,7 +171,18 @@ pub fn to_text(amx: &Amx, native_name: &dyn Fn(u32) -> Option<String>) -> Result
                         operands[0] = text;
                     }
                 }
-                out.push_str(&format!("    {name} {}\n", operands.join(", ")));
+                // The names of the variables of the function, in a comment.
+                let mut comment = String::new();
+                if let Some(vars) = names.and_then(|n| n.variables.range(..=instruction.at).next_back()).map(|(_, v)| v) {
+                    let found: Vec<&str> = instruction.cells.iter().take(stack_operands(name)).filter_map(|cell| {
+                        let place = if form == Form::Packed { i32::from(*cell as u16 as i16) } else { *cell };
+                        vars.get(&place).map(String::as_str)
+                    }).collect();
+                    if !found.is_empty() {
+                        comment = format!("    ; {}", found.join(", "));
+                    }
+                }
+                out.push_str(&format!("    {name} {}{comment}\n", operands.join(", ")));
             }
             Form::Jump => out.push_str(&format!("    {name} {}\n", target_text(1, instruction.cells[0]))),
             Form::CaseTable => {
@@ -189,6 +225,13 @@ enum Pending {
 
 /// Builds a script from the text. The jumps are made again from the labels; the sizes of the file are made again.
 pub fn from_text(text: &str) -> Result<Amx, String> {
+    from_text_with_lines(text).map(|(amx, _)| amx)
+}
+
+/// The same, with the address of the code of each line of the text (`None` for a line that is not in the code: a directive, the data, a
+/// comment). A label has the address of the instruction after it.
+pub fn from_text_with_lines(text: &str) -> Result<(Amx, Vec<Option<usize>>), String> {
+    let mut line_at: Vec<Option<usize>> = vec![None; text.lines().count()];
     let mut amx = Amx { file_version: 10, amx_version: 10, flags: 0, definition_size: 8, stack_top: 0, entry: -1, publics: Vec::new(), natives: Vec::new(), table_offsets: [0; 5], other_tables: Vec::new(), code: Vec::new(), data: Vec::new(), tail: Vec::new() };
     let mut entry_label: Option<String> = None;
     let mut public_labels: Vec<(u32, String)> = Vec::new();
@@ -237,6 +280,9 @@ pub fn from_text(text: &str) -> Result<Amx, String> {
                 _ => return Err(fail(format!("The directive .{word} is not known."))),
             }
             continue;
+        }
+        if section == "code" {
+            line_at[number] = Some(at);
         }
         if let Some(name) = line.strip_suffix(':') {
             if section != "code" {
@@ -345,7 +391,7 @@ pub fn from_text(text: &str) -> Result<Amx, String> {
         Some(label) => *label_at.get(&label).ok_or_else(|| format!("The label {label} of the start is not in the code."))? as i32,
         None => -1,
     };
-    Ok(amx)
+    Ok((amx, line_at))
 }
 
 #[cfg(test)]
@@ -376,6 +422,32 @@ mod test {
         }
         assert!(checked >= 90, "{checked}");
         eprintln!("{checked} scripts, {lines} lines of assembly");
+    }
+
+    #[test]
+    fn the_named_text_gives_the_same_file_and_the_addresses_of_its_lines() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let names = crate::natives::display_names();
+        let garc = sango_core::Garc::open(&dump.archive(29)).unwrap();
+        let mut named = 0;
+        for id in 0..garc.file_count() {
+            let Some(bytes) = garc.first_file_decompressed(id) else { continue };
+            if bytes.len() < 8 || u16::from_le_bytes([bytes[4], bytes[5]]) != crate::amx::MAGIC {
+                continue;
+            }
+            let amx = Amx::parse(&bytes).unwrap();
+            let found = crate::decompile::names(&amx, &|h| names.get(&h).cloned()).unwrap();
+            let text = to_text_named(&amx, &|h| names.get(&h).cloned(), Some(&found)).unwrap();
+            named += text.matches("    ; ").count();
+            let (again, lines) = from_text_with_lines(&text).unwrap_or_else(|e| panic!("file {id}: {e}"));
+            assert_eq!(again.to_bytes(), amx.to_bytes(), "file {id}: the names change nothing in the file");
+            // The first instruction of the code is at the address 0, and the addresses go up.
+            let addresses: Vec<usize> = lines.iter().flatten().copied().collect();
+            assert_eq!(addresses.first(), Some(&0));
+            assert!(addresses.windows(2).all(|w| w[0] <= w[1]));
+        }
+        assert!(named > 100, "the variables have their names in comments: {named}");
     }
 
     #[test]

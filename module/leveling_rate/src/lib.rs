@@ -134,6 +134,8 @@ fn clamp_level(level: usize, range: &RangeInclusive<usize>) -> usize {
 pub struct LevelingRate {
     /// The dump that the data comes from.
     root: Option<PathBuf>,
+    /// The window of the button Reset….
+    reset_open: bool,
     /// The tables that the user edits.
     table: Option<ExperienceTable>,
     /// The tables as they were read or saved: to know what changed.
@@ -175,6 +177,7 @@ impl Default for LevelingRate {
     fn default() -> Self {
         LevelingRate {
             root: None,
+            reset_open: false,
             table: None,
             saved: None,
             romfs: None,
@@ -398,34 +401,25 @@ impl LevelingRate {
         });
     }
 
-    /// The state, and the buttons. Returns what the user asked: (new_rate, export, import, reset, save).
+    /// The buttons of every page (see `widget::action_bar`) and the state. Returns what the user asked: (new_rate, export, import, reset, save).
     fn tool_bar(&mut self, ui: &mut egui::Ui, can_save: bool) -> (bool, bool, bool, bool, bool) {
-        let mut asked = (false, false, false, false, false);
         let at_limit = self.rate_count() >= MAX_RATES;
+        let changed = (0..self.rate_count()).any(|rate| self.changed(rate));
+        let mut clicks = widget::ActionClicks::default();
         ui.horizontal_wrapped(|ui| {
-            asked.0 = can_save && widget::button_styled(
-                ui,
-                egui::RichText::new("+ New leveling rate").color(if at_limit { color::MUTED } else { color::WHITE }),
-                Some(if at_limit { color::SURFACE } else { color::ACCENT }),
-            );
-            asked.1 = widget::button(ui, "Export");
-            asked.2 = can_save && widget::button(ui, "Import");
-            asked.3 = widget::button(ui, "Reset");
-            asked.4 = can_save && widget::save_button(ui, (0..self.rate_count()).any(|rate| self.changed(rate)));
-            let count = self.rate_count();
-            if (0..count).any(|rate| self.changed(rate)) {
+            clicks = widget::action_bar(ui, widget::ActionBar { new: Some(("+ New leveling rate", can_save && !at_limit)), export: Some(true), import: Some(can_save), reset: Some(can_save), save: Some(can_save && changed), ..Default::default() });
+            if changed {
                 widget::badge(ui, "Not saved", color::AMBER);
             } else if self.from_card.contains(&self.rate) {
                 widget::badge(ui, "From the SD card", color::TEAL);
             } else {
                 widget::badge(ui, "From the romfs", color::GREEN);
             }
-            ui.label(widget::hint("Drag a point up or down. Shift: the points beside it stay. Ctrl: draw the curve."));
         });
         if let Some((ok, message)) = &self.status {
             ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
         }
-        asked
+        (clicks.new, clicks.export, clicks.import, clicks.reset, clicks.save)
     }
 
     /// The graph: the levels on the horizontal axis, a value on the vertical axis, one curve for each rate.
@@ -857,7 +851,8 @@ impl Module for LevelingRate {
         if import {
             self.import_csv(session);
         }
-        if reset {
+        self.reset_open |= reset;
+        if widget::reset_window(ui.ctx(), &mut self.reset_open, "The leveling rate that is open", &mut []) {
             self.reset();
         }
         if save {

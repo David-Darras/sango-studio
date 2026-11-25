@@ -52,6 +52,10 @@ pub(crate) type Outcome = Result<String, String>;
 
 #[derive(Default)]
 pub struct MusicPage {
+    /// The windows of the buttons Export…, Import… and Reset….
+    export_open: bool,
+    import_open: bool,
+    reset_open: bool,
     /// The folder `sound` of the dump that the list was read from.
     folder: Option<PathBuf>,
     entries: Vec<Entry>,
@@ -308,36 +312,64 @@ impl MusicPage {
                         self.playing = Some(play(music));
                     }
                 }
-                if widget::button(ui, "Export WAV…") {
-                    self.export(index, false);
-                }
-                if widget::button(ui, "Export MP3…") {
-                    self.export(index, true);
-                }
-            });
-            ui.add_space(10.0);
-            ui.label(widget::title("Replace"));
-            ui.label(widget::hint("Choose a WAV or an MP3 file. It is brought to 32728 Hz and to the channels of this music, then written for the game."));
-            ui.horizontal(|ui| {
-                ui.checkbox(&mut self.loop_on, "Loop");
-                ui.add_enabled(self.loop_on, egui::DragValue::new(&mut self.loop_seconds).speed(0.1).range(0.0..=3600.0).suffix(" s"));
-                ui.label(widget::hint("start of the loop (a WAV file with its own loop keeps it)"));
-            });
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("Import WAV or MP3…").color(color::WHITE), Some(color::ACCENT)) {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("Sound", &["wav", "mp3"]).pick_file() {
-                            self.start_import(path, sd);
-                        }
-                    }
-                });
+                ui.separator();
                 let replaced = sd.bgm_folder().join(&entry.file).exists();
-                ui.add_enabled_ui(replaced && !busy, |ui| {
-                    if widget::button(ui, "Put the music of the game back") {
-                        self.reset(index, sd);
-                    }
-                });
+                // The file is written at once by an import: there is no Save.
+                let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(!busy), reset: Some(replaced && !busy), ..Default::default() });
+                self.export_open |= clicks.export;
+                self.import_open |= clicks.import;
+                self.reset_open |= clicks.reset;
+                if replaced {
+                    widget::badge(ui, "From the SD card", color::TEAL);
+                } else {
+                    widget::badge(ui, "From the romfs", color::GREEN);
+                }
             });
+            let ctx = ui.ctx().clone();
+            if self.export_open {
+                let (mut open, mut wav, mut mp3, mut close) = (true, false, false, false);
+                egui::Window::new("Export").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(&ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        wav = widget::button(ui, "WAV file");
+                        mp3 = widget::button(ui, "MP3 file");
+                        close = widget::button(ui, "Cancel");
+                    });
+                });
+                if wav || mp3 {
+                    self.export(index, mp3);
+                }
+                if wav || mp3 || close || !open {
+                    self.export_open = false;
+                }
+            }
+            if self.import_open {
+                let (mut open, mut choose, mut close) = (true, false, false);
+                egui::Window::new("Import").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(&ctx, |ui| {
+                    ui.set_max_width(460.0);
+                    ui.label(widget::hint("A WAV or an MP3 file. It is brought to 32728 Hz and to the channels of this music."));
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.loop_on, "Loop from");
+                        ui.add_enabled(self.loop_on, egui::DragValue::new(&mut self.loop_seconds).speed(0.1).range(0.0..=3600.0).suffix(" s"));
+                    })
+                    .response
+                    .on_hover_text("A WAV file with its own loop keeps it.");
+                    ui.horizontal(|ui| {
+                        choose = widget::button_styled(ui, egui::RichText::new("Choose a file…").color(color::WHITE), Some(color::ACCENT));
+                        close = widget::button(ui, "Cancel");
+                    });
+                });
+                if choose {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Sound", &["wav", "mp3"]).pick_file() {
+                        self.start_import(path, sd);
+                    }
+                }
+                if choose || close || !open {
+                    self.import_open = false;
+                }
+            }
+            if widget::reset_window(&ctx, &mut self.reset_open, &format!("The music {}", entry.file), &mut []) {
+                self.reset(index, sd);
+            }
             if busy {
                 ui.horizontal(|ui| {
                     ui.spinner();

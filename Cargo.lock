@@ -2787,6 +2787,7 @@ dependencies = [
 name = "sango-choreography"
 version = "0.1.0"
 dependencies = [
+ "rfd",
  "sango-core",
  "sango-species-base",
  "sango-ui",
@@ -3000,6 +3001,7 @@ dependencies = [
 name = "sango-script"
 version = "0.1.0"
 dependencies = [
+ "rfd",
  "sango-core",
  "sango-species",
  "sango-species-base",

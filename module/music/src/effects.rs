@@ -45,6 +45,9 @@ impl Entry {
 
 #[derive(Default)]
 pub struct Effects {
+    /// The windows of the buttons Export… and Reset….
+    export_open: bool,
+    reset_open: bool,
     folder: Option<PathBuf>,
     archive: Option<Archive>,
     /// The archive of the game.
@@ -269,31 +272,45 @@ impl Effects {
                         self.playing = Some(play(&as_music(sound)));
                     }
                 }
-                if widget::button(ui, "Export WAV…") {
-                    self.export(false);
-                }
-                if widget::button(ui, "Export MP3…") {
-                    self.export(true);
-                }
-            });
-            ui.add_space(10.0);
-            ui.label(widget::title("Replace this wave"));
-            ui.label(widget::hint(&format!("Choose a WAV or an MP3 file. It is made mono and written in the room of the old wave (at most {:.2} s at the rate of the file: a longer sound is cut).", waves::room_samples(self.slots[selected].size) as f32 / self.waves.get(selected).and_then(|w| w.as_ref().ok()).map_or(32000.0, |w| w.rate as f32))));
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(!busy, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("Import WAV or MP3…").color(color::WHITE), Some(color::ACCENT)) {
-                        if let Some(path) = rfd::FileDialog::new().add_filter("Sound", &["wav", "mp3"]).pick_file() {
-                            self.start_import(path, sd);
-                        }
-                    }
-                });
+                ui.separator();
                 let changed = self.changed.get(selected).copied().unwrap_or(false);
-                ui.add_enabled_ui(changed && !busy, |ui| {
-                    if widget::button(ui, "Put the wave of the game back") {
-                        self.reset(sd);
+                // The archive is written at once by an import: there is no Save.
+                let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(!busy), reset: Some(changed && !busy), ..Default::default() });
+                self.export_open |= clicks.export;
+                if clicks.import {
+                    if let Some(path) = rfd::FileDialog::new().add_filter("Sound", &["wav", "mp3"]).pick_file() {
+                        self.start_import(path, sd);
                     }
-                });
+                }
+                self.reset_open |= clicks.reset;
+                if changed {
+                    widget::badge(ui, "From the SD card", color::TEAL);
+                } else {
+                    widget::badge(ui, "From the romfs", color::GREEN);
+                }
             });
+            let room = waves::room_samples(self.slots[selected].size) as f32 / self.waves.get(selected).and_then(|w| w.as_ref().ok()).map_or(32000.0, |w| w.rate as f32);
+            ui.label(widget::hint(&format!("An imported sound is made mono and cut at {room:.2} s.")));
+            let ctx = ui.ctx().clone();
+            if self.export_open {
+                let (mut open, mut wav, mut mp3, mut close) = (true, false, false, false);
+                egui::Window::new("Export").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(&ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        wav = widget::button(ui, "WAV file");
+                        mp3 = widget::button(ui, "MP3 file");
+                        close = widget::button(ui, "Cancel");
+                    });
+                });
+                if wav || mp3 {
+                    self.export(mp3);
+                }
+                if wav || mp3 || close || !open {
+                    self.export_open = false;
+                }
+            }
+            if widget::reset_window(&ctx, &mut self.reset_open, "The wave of the sound", &mut []) {
+                self.reset(sd);
+            }
             if busy {
                 ui.horizontal(|ui| {
                     ui.spinner();

@@ -321,6 +321,66 @@ fn remove_index(folder: &Path, id: usize) -> Result<(), String> {
     std::fs::write(&path, sango_core::file_lists::index_bytes(&files)).map_err(|e| format!("{}: {e}", path.display()))
 }
 
+/// The header line of the CSV file of the wild Pokémon of a map. A line `rate` gives a rate of the table (its place from 0, and the value); a
+/// line `place` gives a place of a kind (its number from 1, the species, the form and the levels).
+pub const CSV_HEADER: &str = "line,kind,number,species_or_rate,form,min_level,max_level";
+
+impl Encounter {
+    /// The table as a CSV file.
+    pub fn to_csv(&self) -> String {
+        let mut out = format!("{CSV_HEADER}\n");
+        for (place, rate) in self.rates.iter().enumerate() {
+            let kind = METHODS.iter().find(|m| m.rate_at == place).map_or("", |m| m.name);
+            out.push_str(&format!("rate,{kind},{place},{rate},,,\n"));
+        }
+        for method in &METHODS {
+            for (number, slot) in self.places(method).iter().enumerate() {
+                out.push_str(&format!("place,{},{},{},{},{},{}\n", method.name, number + 1, slot.species, slot.form, slot.min_level, slot.max_level));
+            }
+        }
+        out
+    }
+
+    /// Reads a CSV file of [`Encounter::to_csv`]. The lines that are not in the file keep the values of `base`.
+    pub fn from_csv(text: &str, base: &Encounter) -> Result<Encounter, String> {
+        let mut table = base.clone();
+        for (number, line) in text.lines().enumerate().skip(1) {
+            let at = |message: String| format!("Line {}: {message}", number + 1);
+            if line.trim().is_empty() {
+                continue;
+            }
+            let cells: Vec<&str> = line.split(',').map(str::trim).collect();
+            if cells.len() < 4 {
+                return Err(at("a line has at least 4 values.".into()));
+            }
+            let value = |i: usize, max: u32| -> Result<u32, String> {
+                let v: u32 = cells.get(i).copied().unwrap_or("").parse().map_err(|_| at(format!("\"{}\" is not a number.", cells.get(i).copied().unwrap_or(""))))?;
+                if v > max {
+                    return Err(at(format!("{v} is bigger than {max}.")));
+                }
+                Ok(v)
+            };
+            match cells[0] {
+                "rate" => {
+                    let place = value(2, RATE_COUNT as u32 - 1)? as usize;
+                    table.rates[place] = value(3, 255)? as u8;
+                }
+                "place" => {
+                    let method = METHODS.iter().find(|m| m.name == cells[1]).ok_or_else(|| at(format!("\"{}\" is not a kind of place.", cells[1])))?;
+                    let place = value(2, method.count as u32)? as usize;
+                    if place == 0 {
+                        return Err(at("the places start at 1.".into()));
+                    }
+                    let slot = &mut table.places_mut(method)[place - 1];
+                    *slot = Slot { species: value(3, 0x7FF)? as u16, form: value(4, 31)? as u8, min_level: value(5, 100)? as u8, max_level: value(6, 100)? as u8 };
+                }
+                other => return Err(at(format!("\"{other}\" is not rate or place."))),
+            }
+        }
+        Ok(table)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -395,5 +455,17 @@ mod test {
             let (_, parts) = bundle::split(&raw).unwrap();
             assert_eq!(parts[PART_INDEX], &table.to_bytes()[..], "map {zone}");
         }
+    }
+
+    #[test]
+    fn a_table_goes_to_csv_and_comes_back() {
+        let mut table = Encounter::default();
+        table.rates[0] = 10;
+        table.slots[3] = Slot { species: 25, form: 1, min_level: 3, max_level: 5 };
+        table.slots[50] = Slot { species: 399, form: 0, min_level: 10, max_level: 12 };
+        let text = table.to_csv();
+        assert_eq!(Encounter::from_csv(&text, &Encounter::default()).unwrap(), table);
+        assert!(Encounter::from_csv("h\nplace,Grass,13,1,0,1,1", &table).is_err(), "Grass has 12 places");
+        assert!(Encounter::from_csv("h\nplace,Lava,1,1,0,1,1", &table).is_err());
     }
 }

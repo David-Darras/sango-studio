@@ -27,6 +27,8 @@ const UNDO_LIMIT: usize = 100;
 
 /// The Encounter page.
 pub struct EncounterPage {
+    /// The window of the button Reset….
+    reset_open: bool,
     zones: Option<Zones>,
     opened_for: Option<(PathBuf, PathBuf)>,
     error: Option<String>,
@@ -57,6 +59,7 @@ pub struct EncounterPage {
 impl Default for EncounterPage {
     fn default() -> Self {
         EncounterPage {
+            reset_open: false,
             zones: None,
             opened_for: None,
             error: None,
@@ -241,25 +244,17 @@ impl EncounterPage {
                         self.load(value as usize);
                     }
                 }
-                if let Some(sd) = session.sd.as_ref() {
-                    ui.add_enabled_ui(dirty, |ui| {
-                        if widget::save_button(ui, self.unsaved()) {
-                            let _ = sd;
-                            self.save(session);
-                        }
-                    })
-                    .response
-                    .on_disabled_hover_text("Nothing to save: the table is the one that was loaded or saved.");
-                    ui.add_enabled_ui(!self.undo.is_empty(), |ui| {
-                        if widget::button(ui, "Undo") {
-                            if let Some(before) = self.undo.pop() {
-                                self.table = Some(before);
-                            }
-                        }
-                    });
-                    if self.from_sd && widget::confirm_button(ui, "Reset to the game", "Click again to reset") {
-                        self.reset(session);
-                    }
+                let has_card = session.sd.is_some();
+                let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(self.table.is_some()), import: Some(true), reset: Some(has_card && self.from_sd), save: Some(has_card && dirty), ..Default::default() });
+                if clicks.export {
+                    self.export_csv();
+                }
+                if clicks.import {
+                    self.import_csv();
+                }
+                self.reset_open |= clicks.reset;
+                if clicks.save {
+                    self.save(session);
                 }
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -270,12 +265,44 @@ impl EncounterPage {
                 }
             });
             if session.sd.is_none() {
-                ui.label(egui::RichText::new("The SD card is not chosen: you can read the tables, but nothing can be saved.").color(color::AMBER));
+                ui.label(widget::hint("Choose the SD card on the Home page to save."));
             }
             if let Some((good, message)) = &self.status {
                 ui.label(egui::RichText::new(message).color(if *good { color::GREEN } else { color::ROSE }));
             }
         });
+    }
+
+    /// Writes the table of the open map as a CSV file that the user chooses.
+    fn export_csv(&mut self) {
+        let Some(table) = self.table.as_ref() else { return };
+        let name = format!("wild_{}.csv", self.zone);
+        let Some(path) = rfd::FileDialog::new().set_title("Export the wild Pokémon").set_file_name(name).add_filter("CSV", &["csv"]).save_file() else { return };
+        self.status = Some(match std::fs::write(&path, table.to_csv()) {
+            Ok(()) => (true, format!("Exported to {}.", path.display())),
+            Err(e) => (false, format!("{}: {e}", path.display())),
+        });
+    }
+
+    /// Reads a CSV file of the wild Pokémon in place of the table of the open map. Save writes it.
+    fn import_csv(&mut self) {
+        let Some(path) = rfd::FileDialog::new().set_title("Import the wild Pokémon").add_filter("CSV", &["csv"]).pick_file() else { return };
+        let base = self.table.clone().unwrap_or_default();
+        self.status = Some(match std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display())).and_then(|text| data::Encounter::from_csv(&text, &base)) {
+            Ok(table) => {
+                self.table = Some(table);
+                (true, "Imported. Save to keep it.".to_string())
+            }
+            Err(message) => (false, message),
+        });
+    }
+
+    /// The window of the button Reset…: the table of the game comes back for the open map.
+    fn reset_dialog(&mut self, ctx: &egui::Context, session: &Session) {
+        let what = format!("The wild Pokémon of {}", self.names.get(self.zone).cloned().unwrap_or_default());
+        if widget::reset_window(ctx, &mut self.reset_open, &what, &mut []) {
+            self.reset(session);
+        }
     }
 
     /// The question that comes when the user opens another map with changes that are not saved.
@@ -512,6 +539,7 @@ impl Module for EncounterPage {
         }
         self.tool_bar(ui, session);
         self.pending_dialog(ui.ctx(), session);
+        self.reset_dialog(ui.ctx(), session);
         ui.add_space(8.0);
         if self.tab == DEXNAV {
             self.kind_tabs(ui);
