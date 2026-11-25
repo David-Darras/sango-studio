@@ -66,6 +66,8 @@ pub struct Move {
     /// The move that `data` is for.
     loaded: Option<usize>,
     tab: usize,
+    /// The move that the user chose while the open one had changes that were not saved: the window asks first.
+    pending_open: Option<usize>,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
     /// The names of the moves in the list, as the user has them.
@@ -98,6 +100,7 @@ impl Default for Move {
             from_sd: false,
             loaded: None,
             tab: 0,
+            pending_open: None,
             status: None,
             list_names: None,
             modified: Default::default(),
@@ -342,7 +345,7 @@ impl Move {
                 })
                 .response
                 .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
-                save = self.data.is_some() && session.sd.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+                save = self.data.is_some() && session.sd.is_some() && widget::save_button(ui, self.unsaved());
                 if self.data.is_some() && self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_sd || self.texts.from_card() {
@@ -363,7 +366,13 @@ impl Move {
             self.delete_move(session);
         }
         if self.id != before {
-            self.loaded = None;
+            if self.data.is_some() && self.data != self.baseline {
+                // The data of the open move would be lost: the window asks first.
+                self.pending_open = Some(self.id);
+                self.id = before;
+            } else {
+                self.loaded = None;
+            }
         }
         if reset_tab {
             let part = if self.tab == TEXT_TAB { tools::Part::Texts } else { tools::Part::Data };
@@ -748,6 +757,26 @@ impl Module for Move {
         let session: &Session = session;
         sango_species_base::battle_icons::refresh_custom_types(session.sd.as_ref());
         self.top_bar(ui, session);
+        if let Some(target) = self.pending_open {
+            let what = format!("the move {}", self.id);
+            match widget::unsaved_window(ui.ctx(), &what) {
+                Some(widget::Unsaved::Save) => {
+                    self.save(session);
+                    if self.data == self.baseline {
+                        self.id = target;
+                        self.loaded = None;
+                    }
+                    self.pending_open = None;
+                }
+                Some(widget::Unsaved::Discard) => {
+                    self.id = target;
+                    self.loaded = None;
+                    self.pending_open = None;
+                }
+                Some(widget::Unsaved::Stay) => self.pending_open = None,
+                None => {}
+            }
+        }
         self.reset_window(ui.ctx(), session);
         ui.add_space(8.0);
         let mut clicked = None;

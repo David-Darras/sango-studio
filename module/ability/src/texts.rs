@@ -62,6 +62,7 @@ impl AbilityTexts {
     pub fn open(&mut self, dump: &Dump) {
         self.archives = LANGUAGES.iter().map(|language| Garc::open(&dump.archive(language.archive)).ok()).collect();
         self.reload();
+        self.language = ENGLISH;
     }
 
     /// Forgets the texts that were read and the changes that were not saved: the next display reads the files again.
@@ -101,12 +102,6 @@ impl AbilityTexts {
         self.files.get(&(ENGLISH, FIELDS[0].file)).and_then(|file| file.text(id)).unwrap_or_default()
     }
 
-    /// A text of an ability in a language, as the user has it now (empty when the file has no such line).
-    pub fn text(&mut self, sd: Option<&SdCard>, language: usize, field: usize, id: usize) -> String {
-        self.load(sd, language, FIELDS[field].file);
-        self.files.get(&(language, FIELDS[field].file)).and_then(|file| file.text(id)).unwrap_or_default()
-    }
-
     /// True when a file of texts changed since it was read or saved.
     pub fn changed(&self) -> bool {
         self.files.iter().any(|(key, file)| self.saved.get(key) != Some(file))
@@ -132,47 +127,30 @@ impl AbilityTexts {
         Ok(written)
     }
 
-    /// Draws the tab for an ability.
-    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, id: usize) {
+    /// The texts of an ability of the game: a menu of the language, then the name and the description.
+    pub fn compact_ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, id: usize) {
         if self.current != Some(id) {
             self.current = Some(id);
             self.buffers.clear();
             self.errors.clear();
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for (index, language) in LANGUAGES.iter().enumerate() {
-                self.language = language_tab(ui, index, language.name, self.language);
+        egui::Grid::new("ability_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
+            ui.label("Language");
+            language_menu(ui, "ability_text_language", &mut self.language);
+            ui.end_row();
+            for field in &FIELDS {
+                ui.label(field.label).on_hover_text(field.hint);
+                ui.vertical(|ui| self.edit(ui, sd, field, id));
+                ui.end_row();
             }
-        });
-        ui.add_space(8.0);
-        egui::ScrollArea::vertical().id_salt("ability_text_tab").auto_shrink([false, false]).show(ui, |ui| {
-            widget::card(ui, |ui| {
-                ui.set_width(760.0);
-                for field in &FIELDS {
-                    self.field(ui, sd, field, id);
-                    ui.add_space(10.0);
-                }
-            });
         });
     }
 
-    /// One field: its name, its text box, and what is wrong with the text.
-    fn field(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, field: &Field, id: usize) {
+    /// The text box of a field in the chosen language, and what is wrong with the text.
+    fn edit(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, field: &Field, id: usize) {
         let language = self.language;
         self.load(sd, language, field.file);
         let key = (language, field.file, id);
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(field.label).strong());
-            let edited = match (self.files.get(&(language, field.file)), self.saved.get(&(language, field.file))) {
-                (Some(now), Some(before)) => now.text(id) != before.text(id),
-                _ => false,
-            };
-            if edited {
-                widget::badge(ui, "Not saved", color::AMBER);
-            }
-        });
-        ui.label(widget::hint(field.hint));
         let Some(file) = self.files.get_mut(&(language, field.file)) else {
             ui.label(widget::hint("This text is not in the files that were read."));
             return;
@@ -183,7 +161,7 @@ impl AbilityTexts {
         };
         let buffer = self.buffers.entry(key).or_insert(original);
         let edit = if field.rows == 1 { egui::TextEdit::singleline(buffer) } else { egui::TextEdit::multiline(buffer).desired_rows(field.rows) };
-        let response = ui.add(edit.id_salt(key).desired_width(f32::INFINITY));
+        let response = ui.add(edit.id_salt(key).desired_width(520.0));
         if response.changed() {
             match file.set_text(id, buffer) {
                 Ok(()) => {
@@ -198,23 +176,18 @@ impl AbilityTexts {
             ui.label(egui::RichText::new(format!("{message} The change is not kept until the text is right.")).color(color::ROSE).size(13.0));
         }
     }
+
 }
 
-/// A tab button of the languages. Returns the chosen place.
-fn language_tab(ui: &mut egui::Ui, place: usize, text: &str, chosen: usize) -> usize {
-    let id = egui::Id::new(("ability_text_language", place));
-    let mut chosen = chosen;
-    let active = widget::is_active(ui, id);
-    if active && chosen != place {
-        chosen = place;
-    }
-    let response = widget::tab_button(ui, text, chosen == place, active && widget::page_has_focus(ui));
-    widget::register_focusable(ui, id, response.rect);
-    if response.clicked() {
-        chosen = place;
-        widget::set_active_id(ui, id);
-    }
-    chosen
+/// A menu of the eight languages, English first. The value is the place of the language in `LANGUAGES`.
+pub(crate) fn language_menu(ui: &mut egui::Ui, id: &str, language: &mut usize) {
+    let chosen = LANGUAGES.get(*language).map_or("?", |l| l.name);
+    egui::ComboBox::from_id_salt(id).selected_text(chosen).show_ui(ui, |ui| {
+        let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
+        for place in order {
+            ui.selectable_value(language, place, LANGUAGES[place].name);
+        }
+    });
 }
 
 /// What the CSV functions need to read the texts.

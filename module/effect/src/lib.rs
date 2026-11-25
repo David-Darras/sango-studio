@@ -19,6 +19,8 @@ const FOLDER: &str = "effect";
 
 /// The page.
 pub struct EffectPage {
+    /// The file that the user chose while the open effect had changes that were not saved: the window asks first.
+    pending_file: Option<usize>,
     garc: Option<Garc>,
     root: Option<std::path::PathBuf>,
     error: Option<String>,
@@ -38,7 +40,7 @@ pub struct EffectPage {
 
 impl Default for EffectPage {
     fn default() -> Self {
-        EffectPage { garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default() }
+        EffectPage { garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), pending_file: None }
     }
 }
 
@@ -276,6 +278,28 @@ impl EffectPage {
     }
 
     fn tool_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
+        if let Some(file) = self.pending_file {
+            let what = format!("the effect {}", self.file);
+            match widget::unsaved_window(ui.ctx(), &what) {
+                Some(widget::Unsaved::Save) => {
+                    if let Some(sd) = session.sd.as_ref() {
+                        self.save(sd);
+                    }
+                    if !self.dirty() {
+                        self.file = file;
+                        self.load(session.sd.as_ref());
+                    }
+                    self.pending_file = None;
+                }
+                Some(widget::Unsaved::Discard) => {
+                    self.file = file;
+                    self.load(session.sd.as_ref());
+                    self.pending_file = None;
+                }
+                Some(widget::Unsaved::Stay) => self.pending_file = None,
+                None => {}
+            }
+        }
         let dirty = self.dirty();
         let from_card = session.sd.as_ref().is_some_and(|sd| sd.read(&path(self.file)).is_some());
         widget::card(ui, |ui| {
@@ -285,12 +309,17 @@ impl EffectPage {
                 let names: Vec<&str> = self.names.iter().map(String::as_str).collect();
                 sango_species_base::searchable_picker(ui, "effect_file", &mut file, &names, 320.0);
                 if file != self.file && file >= 1 && file <= names.len() {
-                    self.file = file;
-                    self.load(session.sd.as_ref());
+                    if dirty {
+                        // The changes of the open file would be lost: the window asks first.
+                        self.pending_file = Some(file);
+                    } else {
+                        self.file = file;
+                        self.load(session.sd.as_ref());
+                    }
                 }
                 if let Some(sd) = session.sd.as_ref() {
                     ui.add_enabled_ui(dirty, |ui| {
-                        if widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
+                        if widget::save_button(ui, self.unsaved()) {
                             self.save(sd);
                         }
                     })

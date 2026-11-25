@@ -45,6 +45,8 @@ impl Default for SpeciesTable {
 impl SpeciesTable {
     /// The width of the list, in points.
     pub const WIDTH: f32 = LIST_WIDTH;
+    /// The height of one row, in points: `show` with `rows * ROW_HEIGHT` shows that many rows, and the others scroll.
+    pub const ROW_HEIGHT: f32 = LIST_ROW_HEIGHT;
 
     /// Reads the types and the base stats again (the SD card first, then the romfs). The icons are opened once for each dump.
     pub fn load(&mut self, session: &Session) {

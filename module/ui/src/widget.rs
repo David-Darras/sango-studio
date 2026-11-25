@@ -1306,3 +1306,55 @@ mod test {
     }
 }
 
+
+/// The Save button of a page: in the colour of the actions when something changed, greyed out (and not clickable) when there is
+/// nothing to save. Gives true when it is clicked.
+pub fn save_button(ui: &mut egui::Ui, changed: bool) -> bool {
+    let mut clicked = false;
+    ui.add_enabled_ui(changed, |ui| {
+        let ink = if changed { color::WHITE } else { color::MUTED };
+        clicked = button_styled(ui, egui::RichText::new("Save").color(ink), Some(if changed { color::ACCENT } else { color::SURFACE }));
+    })
+    .response
+    .on_hover_text(if changed { "Writes the changes on the SD card." } else { "Nothing changed: there is nothing to save." });
+    clicked && changed
+}
+
+/// What the user answers to the window of the changes that are not saved.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Unsaved {
+    /// Save the changes, then go on.
+    Save,
+    /// Go on without the changes.
+    Discard,
+    /// Stay: nothing happens.
+    Stay,
+}
+
+/// The window that a page shows before it opens another entry while its changes are not saved. `what` says what was changed (for
+/// example "#0025 Pikachu"). Gives the answer of the user, or None while the window waits.
+pub fn unsaved_window(ctx: &egui::Context, what: &str) -> Option<Unsaved> {
+    let mut answer = None;
+    let mut open = true;
+    egui::Window::new("Changes not saved").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+        ui.set_max_width(420.0);
+        ui.label(format!("The changes of {what} are not saved."));
+        ui.label(hint("Save them before you open another one, or leave them."));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            if button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
+                answer = Some(Unsaved::Save);
+            }
+            if button_styled(ui, egui::RichText::new("Don't save").color(color::WHITE), Some(color::ROSE)) {
+                answer = Some(Unsaved::Discard);
+            }
+            if button(ui, "Cancel") {
+                answer = Some(Unsaved::Stay);
+            }
+        });
+    });
+    if !open {
+        answer = Some(Unsaved::Stay);
+    }
+    answer
+}

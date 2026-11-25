@@ -12,7 +12,9 @@ pub mod rules;
 mod texts;
 mod tools;
 
-use sango_core::{Dump, SdCard};
+use sango_core::Dump;
+#[cfg(test)]
+use sango_core::SdCard;
 use sango_species::SpeciesTable;
 use sango_species_base::SpeciesAbilities;
 use sango_ui::theme::color;
@@ -23,13 +25,7 @@ use std::path::PathBuf;
 pub const COUNT: usize = 191;
 
 /// The tabs of the page.
-const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
 
-/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
-const CSV_TAB: usize = 3;
-
-/// The place of the tab "Reactions" in [`TABS`]: the rules of a new ability, or of an ability of the game.
-const REACTIONS_TAB: usize = 1;
 
 /// The names of the three ability slots of a species.
 const SLOTS: [&str; 3] = ["Ability 1", "Ability 2", "Hidden ability"];
@@ -41,7 +37,6 @@ pub struct Ability {
     /// The dump that the archives come from.
     root: Option<PathBuf>,
     id: usize,
-    tab: usize,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
     /// The names of the abilities in the list, as the user has them.
@@ -65,7 +60,7 @@ pub struct Ability {
 
 impl Default for Ability {
     fn default() -> Self {
-        Ability { root: None, id: 1, tab: 0, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, species_table: SpeciesTable::default(), texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2, draft: None }
+        Ability { root: None, id: 1, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, species_table: SpeciesTable::default(), texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2, draft: None }
     }
 }
 
@@ -191,42 +186,27 @@ impl Ability {
         let id = self.id;
         let mut back_to_game = false;
         let mut own_rules = false;
-        egui::ScrollArea::vertical().id_salt("ability_game_reactions").auto_shrink([false, false]).show(ui, |ui| {
-            if let Some(entry) = self.store.find_mut(id) {
-                widget::card(ui, |ui| {
-                    ui.set_min_width(700.0);
-                    ui.label(widget::title("Your rules replace the code of the game"));
-                    ui.label(widget::hint("The file ability/<number>.bin is on the SD card (or is written at the next \"Save\"): the plugin runs these rules, and not the code of the game, for this ability. Omega Ruby and Alpha Sapphire only."));
-                    ui.add_space(4.0);
-                    back_to_game = session.sd.is_some() && widget::button(ui, "Back to the code of the game");
-                });
-                ui.add_space(10.0);
-                custom::reactions_ui(ui, entry);
-                return;
-            }
+        if let Some(entry) = self.store.find_mut(id) {
+            // The rules of the file replace the code of the game.
+            ui.horizontal(|ui| {
+                ui.label(widget::hint("These rules replace the code of the game."));
+                back_to_game = session.sd.is_some() && ui.small_button("Back to the code of the game").clicked();
+            });
+            custom::reactions_ui(ui, entry);
+        } else {
             let preset = rules::presets::game_rules(id as u8);
             if self.draft.as_ref().map(|d| d.id as usize) != Some(id) {
                 self.draft = preset.clone().map(|rules| rules::CustomAbility::game(id as u8, rules));
             }
-            widget::card(ui, |ui| {
-                ui.set_min_width(700.0);
-                if preset.is_some() {
-                    ui.label(widget::title("The game runs its own code"));
-                    ui.label(widget::hint("Below is what the code of the game does, written as rules. Change a value: at the next \"Save\", the Studio writes the file ability/<number>.bin and the plugin runs the rules in place of the code of the game. Some values are rounded (1/8 of the HP is 12%)."));
-                } else {
-                    ui.label(widget::title("No reaction as rules for this ability"));
+            match &mut self.draft {
+                // The reaction of the game as rules: a change makes a file at the next "Save".
+                Some(draft) => custom::reactions_ui(ui, draft),
+                None => {
                     ui.label(egui::RichText::new(rules::reasons::ability_reason(id as u8)).color(color::AMBER));
-                    ui.add_space(4.0);
-                    ui.label(widget::hint("You can replace the code of the game with your own rules: the ability then loses its effect of the game."));
-                    ui.add_space(4.0);
-                    own_rules = session.sd.is_some() && widget::button(ui, "Replace with my own rules");
+                    own_rules = session.sd.is_some() && ui.small_button("Replace with my own rules").on_hover_text("The ability then loses its effect of the game.").clicked();
                 }
-            });
-            if let Some(draft) = &mut self.draft {
-                ui.add_space(10.0);
-                custom::reactions_ui(ui, draft);
             }
-        });
+        }
         if let (Some(draft), Some(preset)) = (&self.draft, rules::presets::game_rules(id as u8)) {
             if draft.rules != preset {
                 self.store.insert(draft.clone());
@@ -263,9 +243,7 @@ impl Ability {
     /// The picker, the buttons and the state.
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let mut save = false;
-        let mut reset_tab = false;
-        let mut reset_more = false;
-        let mut undo = false;
+        let mut reset = false;
         let mut add = false;
         let mut delete = false;
         widget::card(ui, |ui| {
@@ -279,29 +257,28 @@ impl Ability {
                     add = widget::button_styled(ui, egui::RichText::new("+ New ability").color(color::WHITE), Some(color::ACCENT));
                 })
                 .response
-                .on_hover_text("Adds an ability. Then you change its name in the Text tab and its reactions in the Reactions tab.");
+                .on_hover_text("Adds an ability: then write its name, its description and its reactions.");
                 ui.add_enabled_ui(has_card && self.is_custom(), |ui| {
-                    delete = widget::button(ui, "Delete");
+                    if widget::confirm_button(ui, "Delete", "Click again to delete") {
+                        delete = true;
+                    }
                 })
                 .response
-                .on_hover_text("Deletes this new ability.");
+                .on_hover_text(if self.is_custom() { "Deletes this new ability." } else { "Only a new ability can be deleted, not one of the game." });
+                if widget::button(ui, "Export…") {
+                    self.tools.export_open = true;
+                }
+                ui.add_enabled_ui(has_card, |ui| {
+                    if widget::button(ui, "Import…") {
+                        self.tools.import_open = true;
+                    }
+                });
                 ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset_tab = widget::button(ui, "Reset texts");
+                    reset = widget::button(ui, "Reset…");
                 })
                 .response
-                .on_hover_text("Puts the name and the description of this ability back to the romfs. Undo gives them back.");
-                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset_more = widget::button(ui, "Reset…");
-                })
-                .response
-                .on_hover_text("Reset one ability or all the abilities.");
-                let undo_label = self.tools.history.last().map(|backup| format!("Undo: {}", backup.label));
-                ui.add_enabled_ui(undo_label.is_some() && has_card, |ui| {
-                    undo = widget::button(ui, "Undo");
-                })
-                .response
-                .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
-                save = has_card && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+                .on_hover_text("Puts the texts or the reactions of one ability or of all the abilities back to the game: choose in the window.");
+                save = has_card && widget::save_button(ui, self.unsaved());
                 if self.texts.changed() || self.store.changed() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.texts.from_card() {
@@ -321,41 +298,39 @@ impl Ability {
         if delete {
             self.delete_ability(session);
         }
-        if reset_tab {
-            self.run_reset(session, tools::Scope::Ability);
-        }
-        if reset_more {
+        if reset {
             self.tools.reset_open = true;
-        }
-        if undo {
-            self.undo(session);
         }
         if save {
             self.save(session);
         }
     }
 
-    /// The General tab: the name and the description, what an ability is and who has it.
-    fn general_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
-        let sd = session.sd.as_ref();
-        let (name, description) = match self.store.find(self.id).filter(|entry| !entry.is_game()) {
-            Some(entry) => (entry.names[rules::ENGLISH].clone(), entry.descriptions[rules::ENGLISH].clone()),
-            None => (self.texts.text(sd, texts::ENGLISH, 0, self.id), self.texts.text(sd, texts::ENGLISH, 1, self.id)),
-        };
-        egui::ScrollArea::vertical().id_salt("ability_general").auto_shrink([false, false]).show(ui, |ui| {
-            widget::card(ui, |ui| {
-                ui.set_min_width(700.0);
-                ui.label(widget::title(&format!("#{:03} {name}", self.id)));
-                ui.label(&description);
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(widget::hint("An ability has no data in a file: the game runs its effect from its code, so this page edits its texts and shows who has it."));
-                    ui.hyperlink_to("Bulbapedia ↗", "https://bulbapedia.bulbagarden.net/wiki/Ability");
+    /// The page: the texts and the reactions on the left, the Pokémon that have the ability on the right.
+    fn page_view(&mut self, ui: &mut egui::Ui, session: &Session) {
+        egui::ScrollArea::vertical().id_salt("ability_page").auto_shrink([false, false]).show(ui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_width(720.0);
+                    // One card: the language, the name, the description, then the reactions.
+                    widget::card(ui, |ui| {
+                        ui.set_min_width(690.0);
+                        if let Some(entry) = self.store.find_mut(self.id).filter(|entry| !entry.is_game()) {
+                            let mut language = self.custom_language;
+                            custom::texts_ui(ui, entry, &mut language);
+                            self.custom_language = language;
+                            ui.add_space(8.0);
+                            custom::reactions_ui(ui, entry);
+                        } else {
+                            self.texts.compact_ui(ui, session.sd.as_ref(), self.id);
+                            ui.add_space(8.0);
+                            self.game_reactions_tab(ui, session);
+                        }
+                    });
                 });
+                ui.add_space(12.0);
+                ui.vertical(|ui| self.users_card(ui, session));
             });
-            ui.add_space(10.0);
-            self.users_card(ui, session);
-            ui.add_space(10.0);
         });
     }
 
@@ -363,9 +338,8 @@ impl Ability {
     fn users_card(&mut self, ui: &mut egui::Ui, session: &Session) {
         let users = self.usage.get(self.id).cloned().unwrap_or_default();
         widget::card(ui, |ui| {
-            ui.set_min_width(700.0);
             ui.horizontal(|ui| {
-                ui.label(widget::title(&format!("Species with this ability ({})", self.user_count(self.id))));
+                ui.label(widget::title(&format!("Pokémon with this ability ({})", self.user_count(self.id))));
                 if widget::button(ui, "Read again") {
                     self.read_usage(session);
                 }
@@ -382,7 +356,7 @@ impl Ability {
                     ui.label(widget::hint("No species."));
                 } else {
                     // Each slot has its own list: its widgets (the header, the scroll area) need their own ids.
-                    let clicked = ui.push_id(slot, |ui| self.species_table.show(ui, "ability_users", &numbers, 300.0)).inner;
+                    let clicked = ui.push_id(slot, |ui| self.species_table.show(ui, "ability_users", &numbers, 4.0 * SpeciesTable::ROW_HEIGHT)).inner;
                     if let Some((species, form)) = clicked {
                         sango_species_base::open_species_form(ui.ctx(), species, form);
                     }
@@ -427,59 +401,9 @@ impl Module for Ability {
         }
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
+        self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
-        let mut clicked = None;
-        egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(12.0)).inner_margin(egui::Margin::same(6.0)).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (i, name) in TABS.iter().enumerate() {
-                    let tab_id = egui::Id::new(format!("ability_tab_{i}"));
-                    let active = widget::is_active(ui, tab_id);
-                    if active && self.tab != i {
-                        self.tab = i;
-                    }
-                    let response = widget::tab_button(ui, name, self.tab == i, active && widget::page_has_focus(ui));
-                    widget::register_focusable(ui, tab_id, response.rect);
-                    ui.ctx().data_mut(|d| d.insert_temp(tab_id.with("is_button"), true));
-                    if response.clicked() {
-                        clicked = Some((i, tab_id));
-                    }
-                }
-            });
-        });
-        if let Some((i, tab_id)) = clicked {
-            self.tab = i;
-            widget::set_active_id(ui, tab_id);
-        }
-        ui.add_space(6.0);
-        match self.tab {
-            0 => self.general_tab(ui, session),
-            CSV_TAB => {
-                egui::ScrollArea::vertical().id_salt("ability_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
-            }
-            REACTIONS_TAB => {
-                if self.is_custom() {
-                    match self.store.find_mut(self.id) {
-                        Some(entry) => egui::ScrollArea::vertical().id_salt("ability_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
-                        None => widget::card(ui, |ui| {
-                            ui.label(widget::hint("This ability has no file."));
-                        }),
-                    }
-                } else {
-                    self.game_reactions_tab(ui, session);
-                }
-            }
-            _ => {
-                if let Some(entry) = self.store.find_mut(self.id).filter(|entry| !entry.is_game()) {
-                    let mut language = self.custom_language;
-                    egui::ScrollArea::vertical().id_salt("ability_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
-                    self.custom_language = language;
-                } else {
-                    let sd: Option<&SdCard> = session.sd.as_ref();
-                    self.texts.ui(ui, sd, self.id);
-                }
-            }
-        }
+        self.page_view(ui, session);
     }
 }
 
@@ -501,9 +425,8 @@ mod test {
                 egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
             });
         };
-        for (id, tab) in [(1, 0), (65, 0), (191, 0), (34, 1), (1, 1)] {
+        for id in [1, 65, 191, 34] {
             page.id = id;
-            page.tab = tab;
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }
@@ -539,8 +462,7 @@ mod add_test {
         frame(&mut page, &mut session);
         page.add_ability();
         assert_eq!(page.id, 192);
-        for tab in [0, 1, 2] {
-            page.tab = tab;
+        for _ in 0..3 {
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }

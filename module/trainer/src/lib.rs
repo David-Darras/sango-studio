@@ -745,7 +745,7 @@ impl Trainer {
                     ui.label(egui::RichText::new(format!("#{:03}  {name}", open.id)).strong().size(17.0));
                 }
                 ui.add_enabled_ui(dirty, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
+                    if widget::save_button(ui, self.unsaved()) {
                         self.save(sd);
                     }
                 })

@@ -134,7 +134,7 @@ impl Creator {
                 }
                 let changed = self.events[number] != self.saved[number];
                 ui.add_enabled_ui(changed, |ui| {
-                    if widget::button(ui, "Save") {
+                    if widget::save_button(ui, self.unsaved()) {
                         self.save(sd, number);
                     }
                     if widget::button(ui, "Undo") {

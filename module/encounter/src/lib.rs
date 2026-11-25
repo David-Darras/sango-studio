@@ -243,7 +243,7 @@ impl EncounterPage {
                 }
                 if let Some(sd) = session.sd.as_ref() {
                     ui.add_enabled_ui(dirty, |ui| {
-                        if widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
+                        if widget::save_button(ui, self.unsaved()) {
                             let _ = sd;
                             self.save(session);
                         }

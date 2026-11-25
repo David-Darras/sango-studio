@@ -411,7 +411,7 @@ impl LevelingRate {
             asked.1 = widget::button(ui, "Export");
             asked.2 = can_save && widget::button(ui, "Import");
             asked.3 = widget::button(ui, "Reset");
-            asked.4 = can_save && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+            asked.4 = can_save && widget::save_button(ui, (0..self.rate_count()).any(|rate| self.changed(rate)));
             let count = self.rate_count();
             if (0..count).any(|rate| self.changed(rate)) {
                 widget::badge(ui, "Not saved", color::AMBER);

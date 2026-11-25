@@ -211,7 +211,7 @@ impl Type {
                 })
                 .response
                 .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
-                save = has_card && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+                save = has_card && widget::save_button(ui, self.unsaved());
                 if self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.chart_baseline != Chart::original() || !self.list_baseline.custom.is_empty() || self.icons.from_card() || self.texts.from_card() {

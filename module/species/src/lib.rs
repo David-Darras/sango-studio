@@ -90,6 +90,8 @@ pub struct Species {
     game: Option<SpeciesData>,
     /// The window of the button "+ New species", when it is open.
     new_pokemon: Option<NewPokemon>,
+    /// The species and the form that the user chose while the open one had changes that were not saved: the window asks first.
+    pending_open: Option<(usize, usize)>,
     /// The data as it was loaded or saved: to know what changed.
     baseline: Option<SpeciesData>,
     /// True when the data came from the SD card.
@@ -165,6 +167,7 @@ impl Default for Species {
             baseline: None,
             game: None,
             new_pokemon: None,
+            pending_open: None,
             from_sd: false,
             pokedex: None,
             pokedex_archive: None,
@@ -984,7 +987,7 @@ impl Species {
                 })
                 .response
                 .on_hover_text("Puts parts of one form, one species or all the species back to the romfs: choose in the window.");
-                save = self.data.is_some() && widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT));
+                save = self.data.is_some() && widget::save_button(ui, self.unsaved());
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_sd || self.pokedex_from_sd || self.mega_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() || self.cry_tab.from_card() {
@@ -999,7 +1002,13 @@ impl Species {
             }
         });
         if (self.species, self.form) != before {
-            self.loaded = None;
+            if self.loses_changes() {
+                // The changes of the open Pokémon would be lost: the window asks first.
+                self.pending_open = Some((self.species, self.form));
+                (self.species, self.form) = before;
+            } else {
+                self.loaded = None;
+            }
         }
         if delete_open {
             if self.form == 0 && self.species > SPECIES_COUNT {
@@ -1022,6 +1031,12 @@ impl Species {
         if save {
             self.save(session);
         }
+    }
+
+    /// True when opening another species or form would lose changes: the data, the shape, the moves and the evolutions belong to the
+    /// open one. (The texts, the icons and the cries keep their changes for every species.)
+    fn loses_changes(&self) -> bool {
+        self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed())
     }
 
     /// The window of the button "+ New species": the species, the name of the form, and what the new species-form starts with.
@@ -2375,6 +2390,26 @@ impl Module for Species {
         }
         battle_icons::refresh_custom_types(session.sd.as_ref());
         self.top_bar(ui, session);
+        if let Some(target) = self.pending_open {
+            let what = format!("#{:04} {}", self.species, entry_name(self.species, self.form));
+            match widget::unsaved_window(ui.ctx(), &what) {
+                Some(widget::Unsaved::Save) => {
+                    self.save(session);
+                    if !self.loses_changes() {
+                        (self.species, self.form) = target;
+                        self.loaded = None;
+                    }
+                    self.pending_open = None;
+                }
+                Some(widget::Unsaved::Discard) => {
+                    (self.species, self.form) = target;
+                    self.loaded = None;
+                    self.pending_open = None;
+                }
+                Some(widget::Unsaved::Stay) => self.pending_open = None,
+                None => {}
+            }
+        }
         self.reset_window(ui.ctx(), session);
         self.csv_windows(ui.ctx(), session);
         self.new_pokemon_window(ui.ctx(), session);

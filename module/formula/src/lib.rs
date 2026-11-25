@@ -129,7 +129,7 @@ impl Formula {
                 });
                 let changed = self.formulas != self.saved;
                 ui.add_enabled_ui(changed && sd.is_some(), |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
+                    if widget::save_button(ui, self.unsaved()) {
                         if let Some(sd) = sd {
                             self.save(sd);
                         }

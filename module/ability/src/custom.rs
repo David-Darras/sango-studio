@@ -3,10 +3,9 @@
 //! [`crate::rules`]).
 
 use crate::rules::{self, Context, CustomAbility};
-use sango_core::text::LANGUAGES;
 use sango_core::SdCard;
 use sango_ui::theme::color;
-use sango_ui::{egui, widget};
+use sango_ui::egui;
 
 /// The folder of the files on the SD card.
 const FOLDER: &str = "ability";
@@ -149,54 +148,28 @@ impl Store {
     }
 }
 
-/// The name and the description of a new ability in a language: the Text tab of a new ability.
+/// The name and the description of a new ability, in a language that a menu chooses.
 pub fn texts_ui(ui: &mut egui::Ui, ability: &mut CustomAbility, language: &mut usize) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-        for (i, entry) in LANGUAGES.iter().enumerate() {
-            if widget::tab_button(ui, entry.name, *language == i, false).clicked() {
-                *language = i;
-            }
-        }
-    });
-    ui.add_space(8.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::hint("A new ability starts with the same text in every language: write the text of this language."));
-        ui.add_space(6.0);
-        let language = (*language).min(7);
-        ui.horizontal(|ui| {
-            ui.label("Name");
-            ui.add(egui::TextEdit::singleline(&mut ability.names[language]).desired_width(300.0));
-        });
+    let place = (*language).min(7);
+    egui::Grid::new("custom_ability_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
+        ui.label("Language");
+        crate::texts::language_menu(ui, "custom_ability_language", language);
+        ui.end_row();
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut ability.names[place]).desired_width(300.0)).on_hover_text("A new ability starts with the same text in every language: write the text of each language.");
+        ui.end_row();
         ui.label("Description");
-        ui.add(egui::TextEdit::multiline(&mut ability.descriptions[language]).desired_rows(3).desired_width(520.0));
+        ui.add(egui::TextEdit::multiline(&mut ability.descriptions[place]).desired_rows(3).desired_width(520.0));
+        ui.end_row();
     });
 }
 
-/// What a new ability does: its reactions. The Reactions tab of a new ability.
+/// What a new ability does: its reactions.
 pub fn reactions_ui(ui: &mut egui::Ui, ability: &mut CustomAbility) {
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("What the ability does"));
-        ui.label(widget::hint("Each reaction says: when this happens, if all these are true, do these things. An ability can have several reactions, for different moments."));
-        sango_rules::editor::rules_editor(ui, &format!("ability_{}", ability.id), &mut ability.rules, Context::Ability);
-    });
-    ui.add_space(10.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("Summary"));
-        for sentence in ability.preview() {
-            ui.label(sentence);
-        }
-        let problems = ability.problems();
-        if !problems.is_empty() {
-            ui.add_space(6.0);
-            for problem in problems {
-                ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
-            }
-        }
-    });
+    sango_rules::editor::rules_editor(ui, &format!("ability_{}", ability.id), &mut ability.rules, Context::Ability);
+    for problem in ability.problems() {
+        ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
+    }
 }
 
 #[cfg(test)]

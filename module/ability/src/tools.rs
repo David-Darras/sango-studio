@@ -25,15 +25,21 @@ pub enum Scope {
 
 /// The state of the tools.
 pub struct Tools {
-    /// The copies for Undo, the last one at the end.
+    /// The copies of the files before an operation, the last one at the end.
     pub history: Vec<Backup>,
     pub reset_open: bool,
     pub scope: Scope,
+    /// The parts of a reset: the texts, the reactions.
+    pub reset_texts: bool,
+    pub reset_reactions: bool,
+    /// The windows of the buttons Export… and Import….
+    pub export_open: bool,
+    pub import_open: bool,
 }
 
 impl Default for Tools {
     fn default() -> Self {
-        Tools { history: Vec::new(), reset_open: false, scope: Scope::Ability }
+        Tools { history: Vec::new(), reset_open: false, scope: Scope::Ability, reset_texts: true, reset_reactions: false, export_open: false, import_open: false }
     }
 }
 
@@ -62,7 +68,7 @@ impl Ability {
         if self.tools.history.len() > HISTORY {
             self.tools.history.remove(0);
         }
-        self.status = Some((true, format!("{done} {count} file(s) changed. Undo gives them back.")));
+        self.status = Some((true, format!("{done} {count} file(s) changed.")));
     }
 
     /// Puts the texts of an ability, or of all the abilities, back to the romfs.
@@ -90,7 +96,7 @@ impl Ability {
             }
             Err(message) => {
                 self.finish(backup, session, "Reset stopped.");
-                self.status = Some((false, format!("{message} The files that were already changed can be undone.")));
+                self.status = Some((false, message));
             }
         }
     }
@@ -105,7 +111,27 @@ impl Ability {
         self.files_changed();
     }
 
-    /// The window of the reset: the scope.
+    /// Puts the reactions of an ability of the game, or of all of them, back to the code of the game: their files are deleted.
+    fn reset_reactions(&mut self, session: &Session, scope: Scope) {
+        let Some(sd) = session.sd.as_ref() else { return };
+        let ids: Vec<usize> = match scope {
+            Scope::Ability => vec![self.id],
+            Scope::All => self.store.game_ids(),
+        };
+        let mut done = 0;
+        let with_rules = self.store.game_ids();
+        for id in ids.into_iter().filter(|id| with_rules.contains(id)) {
+            if let Err(message) = self.store.delete(sd, id) {
+                self.status = Some((false, message));
+                return;
+            }
+            done += 1;
+        }
+        self.draft = None;
+        self.status = Some((true, format!("{done} ability(ies) run the code of the game again.")));
+    }
+
+    /// The window of the reset: how much, and what (the texts, the reactions).
     pub fn reset_window(&mut self, ctx: &egui::Context, session: &Session) {
         if !self.tools.reset_open {
             return;
@@ -120,13 +146,20 @@ impl Ability {
             ui.radio_value(&mut self.tools.scope, Scope::Ability, format!("This ability: #{:03} {name}", self.id));
             ui.radio_value(&mut self.tools.scope, Scope::All, "All the abilities");
             ui.add_space(8.0);
-            ui.label(widget::hint("The name and the description, in every language, go back to the texts of the romfs. The changes that are not saved are lost. Undo gives the files back."));
+            ui.label(egui::RichText::new("What").strong());
+            ui.checkbox(&mut self.tools.reset_texts, "Texts");
+            ui.label(widget::hint("The name and the description, in every language, go back to the texts of the romfs."));
+            ui.checkbox(&mut self.tools.reset_reactions, "Reactions");
+            ui.label(widget::hint("The rules that replace the code of the game are deleted: the game runs its own code again."));
+            ui.add_space(8.0);
+            ui.label(widget::hint("The changes that are not saved are lost."));
             if self.tools.scope == Scope::All {
                 ui.label(egui::RichText::new("This reaches every ability.").color(color::ROSE));
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(session.sd.is_some(), |ui| {
+                let any = self.tools.reset_texts || self.tools.reset_reactions;
+                ui.add_enabled_ui(session.sd.is_some() && any, |ui| {
                     run = widget::button_styled(ui, egui::RichText::new("Reset").color(color::WHITE), Some(color::ROSE));
                 });
                 close = widget::button(ui, "Cancel");
@@ -134,7 +167,12 @@ impl Ability {
         });
         if run {
             let scope = self.tools.scope;
-            self.run_reset(session, scope);
+            if self.tools.reset_texts {
+                self.run_reset(session, scope);
+            }
+            if self.tools.reset_reactions {
+                self.reset_reactions(session, scope);
+            }
             self.tools.reset_open = false;
         }
         if close || !open {
@@ -142,22 +180,45 @@ impl Ability {
         }
     }
 
-    /// The card of the CSV file in the General tab: all the abilities, whatever the ability that is open.
-    pub fn csv_card(&mut self, ui: &mut egui::Ui, session: &Session) {
-        widget::card(ui, |ui| {
-            ui.label(widget::title("CSV file of all the abilities"));
-            ui.label(widget::hint("These buttons work on the texts of all the abilities, not only on the one that is open."));
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                if widget::button(ui, "Export CSV…") {
+    /// The windows of the buttons Export… and Import…: the texts of all the abilities in a CSV file.
+    pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
+        for import in [false, true] {
+            let shown = if import { self.tools.import_open } else { self.tools.export_open };
+            if !shown {
+                continue;
+            }
+            let mut open = true;
+            let mut run = false;
+            let mut close = false;
+            let title = if import { "Import CSV file" } else { "Export CSV file" };
+            egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(widget::hint("For all the abilities, not only the one that is open."));
+                ui.add_space(6.0);
+                let mut texts = true;
+                ui.add_enabled(false, egui::Checkbox::new(&mut texts, "Texts: the name and the description in the eight languages (ability_texts.csv)"));
+                ui.add_space(6.0);
+                ui.label(widget::hint(if import { "Choose the folder of the file: it is checked, then the changes go on the SD card." } else { "Choose a folder for the file." }));
+                ui.horizontal(|ui| {
+                    run = widget::button_styled(ui, egui::RichText::new(if import { "Import" } else { "Export" }).color(color::WHITE), Some(color::ACCENT));
+                    close = widget::button(ui, "Cancel");
+                });
+            });
+            if run {
+                if import {
+                    self.import_csv(session);
+                } else {
                     self.export_csv(session);
                 }
-                if session.sd.is_some() && widget::button(ui, "Import CSV…") {
-                    self.import_csv(session);
+            }
+            if run || close || !open {
+                if import {
+                    self.tools.import_open = false;
+                } else {
+                    self.tools.export_open = false;
                 }
-            });
-            ui.label(widget::hint("Export writes ability_texts.csv in a folder that you choose: the name and the description of each ability, in the eight languages. Import reads the file with this name from a folder, checks all of it, and writes the changes on the SD card. Undo gives the files back."));
-        });
+            }
+        }
     }
 
     /// Writes the CSV file in a folder that the user chooses.
