@@ -47,11 +47,11 @@ impl App {
             Box::new(sango_home::Home::default()),
             // Pokémon.
             Box::new(sango_species::Species::default()),
+            Box::new(sango_type::Type::default()),
             Box::new(sango_leveling_rate::LevelingRate::default()),
             Box::new(sango_nature::Nature::default()),
             Box::new(sango_ability::Ability::default()),
             Box::new(sango_move::Move::default()),
-            Box::new(sango_type::Type::default()),
             Box::new(sango_item::Item::default()),
             // Battle.
             Box::new(sango_formula::Formula::default()),

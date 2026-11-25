@@ -2,7 +2,7 @@
 //!
 //! They are the lines 0 to 17 of the file of texts 18: the line is the number of the type. A file that the user changed goes
 //! on the SD card with the layout of the romfs, in the folder `text`. The names of the new types, in every language, are in the
-//! list of the types (see `types.rs`): the Text tab edits them too.
+//! list of the types (see `types.rs`).
 
 use sango_core::csv_text::{quote, records};
 use sango_core::text::{self, TextFile, LANGUAGES};
@@ -23,7 +23,7 @@ pub const ENGLISH: usize = 2;
 /// The header line of the CSV file of the texts.
 pub const HEADER: &str = "type,language,text";
 
-/// The state of the Text tab.
+/// The names of the types of the game: the files that were read and the changes.
 #[derive(Default)]
 pub struct TypeTexts {
     archives: Vec<Option<Garc>>,
@@ -39,12 +39,16 @@ pub struct TypeTexts {
     errors: HashMap<(usize, usize), String>,
     /// The chosen language (0 to 7).
     language: usize,
+    /// The files of the romfs that were read, for each language.
+    originals: HashMap<usize, TextFile>,
 }
 
 impl TypeTexts {
     /// Opens the archives of a dump.
     pub fn open(&mut self, dump: &Dump) {
         self.archives = LANGUAGES.iter().map(|language| Garc::open(&dump.archive(language.archive)).ok()).collect();
+        self.originals.clear();
+        self.language = ENGLISH;
         self.reload();
     }
 
@@ -109,111 +113,91 @@ impl TypeTexts {
         Ok(written)
     }
 
-    /// Draws the tab: the languages, and for each type its icon in this language and a box for its name. `row` draws what belongs
-    /// to a type in this language: it gets the type, the language and `false` to draw the icon before the box, `true` to draw the
-    /// buttons of the icon after it. Gives the number of a new type that the user removed.
-    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, custom: &mut crate::types::TypeList, row: &mut dyn FnMut(&mut egui::Ui, usize, usize, bool)) -> Option<usize> {
-        let mut removed = None;
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for (index, language) in LANGUAGES.iter().enumerate() {
-                self.language = language_tab(ui, index, language.name, self.language);
-            }
-        });
-        ui.add_space(8.0);
+    /// The name of a type of the game in the chosen language, as the user has it now.
+    pub fn text(&mut self, sd: Option<&SdCard>, kind: usize) -> String {
         let language = self.language;
         self.load(sd, language);
-        egui::ScrollArea::vertical().id_salt("type_text_tab").auto_shrink([false, false]).show(ui, |ui| {
-            widget::card(ui, |ui| {
-                ui.set_min_width(820.0);
-                ui.label(widget::hint("The name of each type and its icon (50 × 20 pixels, with the name written on it), in this language. The new types come after the types of the game; a new type without an icon in this language shows its English icon."));
-                ui.add_space(6.0);
-                for kind in 0..COUNT {
-                    let key = (language, kind);
-                    ui.horizontal(|ui| {
-                        ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| row(ui, kind, language, false));
-                        let Some(file) = self.files.get_mut(&language) else {
-                            ui.label(widget::hint("This language is not in the files that were read."));
-                            return;
-                        };
-                        let Some(original) = file.text(kind) else {
-                            ui.label(widget::hint("No line for this type."));
-                            return;
-                        };
-                        let buffer = self.buffers.entry(key).or_insert(original);
-                        let response = sango_ui::game_text::edit(ui, key, buffer, 1, 260.0);
-                        if response.changed() {
-                            match file.set_text(kind, buffer) {
-                                Ok(()) => {
-                                    self.errors.remove(&key);
-                                }
-                                Err(message) => {
-                                    self.errors.insert(key, message);
-                                }
-                            }
-                        }
-                        if let Some(message) = self.errors.get(&key) {
-                            ui.label(egui::RichText::new(message).color(color::ROSE).size(12.5));
-                        }
-                        row(ui, kind, language, true);
-                    });
-                    ui.add_space(2.0);
-                }
-                if !custom.custom.is_empty() {
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("New types").strong());
-                    if language != ENGLISH {
-                        ui.label(widget::hint("A new type starts with its English name in every language: type the name in this language."));
-                    }
-                    for entry in custom.custom.iter_mut() {
-                        let id = entry.id;
-                        ui.horizontal(|ui| {
-                            ui.allocate_ui(egui::vec2(60.0, 22.0), |ui| row(ui, id, language, false));
-                            let mut text = entry.name_in(language).to_string();
-                            let response = ui.add(egui::TextEdit::singleline(&mut text).id_salt(("type_new_text", language, id)).desired_width(260.0).char_limit(crate::types::MAX_NAME));
-                            if response.changed() {
-                                if language == ENGLISH {
-                                    entry.rename(&text);
-                                } else {
-                                    entry.translations[language] = text.clone();
-                                }
-                            }
-                            if let Some(problem) = crate::types::name_problem(entry.name_in(language)) {
-                                ui.label(egui::RichText::new(problem).color(color::ROSE).size(12.5));
-                            }
-                            row(ui, id, language, true);
-                            ui.label(widget::hint("Colour of the buttons in battle:"));
-                            let mut colour = entry.colour;
-                            sango_species_base::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
-                            entry.colour = colour;
-                            if widget::button(ui, "Remove") {
-                                removed = Some(id);
-                            }
-                        });
-                        ui.add_space(2.0);
-                    }
-                }
-            });
-        });
-        removed
+        self.files.get(&language).and_then(|file| file.text(kind)).unwrap_or_default()
     }
-}
 
-/// A tab button of the languages. Returns the chosen place.
-fn language_tab(ui: &mut egui::Ui, place: usize, text: &str, chosen: usize) -> usize {
-    let id = egui::Id::new(("type_text_language", place));
-    let mut chosen = chosen;
-    let active = widget::is_active(ui, id);
-    if active && chosen != place {
-        chosen = place;
+    /// The chosen language (the place in `LANGUAGES`).
+    pub fn language(&self) -> usize {
+        self.language
     }
-    let response = widget::tab_button(ui, text, chosen == place, active && widget::page_has_focus(ui));
-    widget::register_focusable(ui, id, response.rect);
-    if response.clicked() {
-        chosen = place;
-        widget::set_active_id(ui, id);
+
+    /// The menu of the eight languages, English first.
+    pub fn language_menu(&mut self, ui: &mut egui::Ui) {
+        let chosen = LANGUAGES.get(self.language).map_or("?", |l| l.name);
+        egui::ComboBox::from_id_salt("type_text_language").selected_text(chosen).show_ui(ui, |ui| {
+            let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
+            for place in order {
+                ui.selectable_value(&mut self.language, place, LANGUAGES[place].name);
+            }
+        });
     }
-    chosen
+
+    /// The name of a type of the game in the chosen language as the romfs has it.
+    fn romfs_name(&mut self, kind: usize) -> Option<String> {
+        let language = self.language;
+        if !self.originals.contains_key(&language) {
+            let file = self.romfs(language, FILE)?;
+            self.originals.insert(language, file);
+        }
+        self.originals.get(&language).and_then(|file| file.text(kind))
+    }
+
+    /// True when the name of a type of the game in the chosen language is not the name of the romfs.
+    pub fn is_changed(&mut self, sd: Option<&SdCard>, kind: usize) -> bool {
+        let language = self.language;
+        self.load(sd, language);
+        let now = self.files.get(&language).and_then(|file| file.text(kind));
+        now.is_some() && now != self.romfs_name(kind)
+    }
+
+    /// Puts the name of the romfs back for a type of the game, in the chosen language. Save writes it.
+    pub fn reset_name(&mut self, sd: Option<&SdCard>, kind: usize) {
+        let language = self.language;
+        self.load(sd, language);
+        let Some(original) = self.romfs_name(kind) else { return };
+        if let Some(file) = self.files.get_mut(&language) {
+            if file.set_text(kind, &original).is_ok() {
+                self.buffers.insert((language, kind), original);
+                self.errors.remove(&(language, kind));
+            }
+        }
+    }
+
+    /// The box of the name of a type of the game in the chosen language. A name that the game cannot keep has a red frame and says
+    /// why in a bubble.
+    pub fn name_field(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, kind: usize, width: f32) {
+        let language = self.language;
+        self.load(sd, language);
+        let key = (language, kind);
+        let Some(file) = self.files.get_mut(&language) else {
+            ui.label(widget::hint("No file"));
+            return;
+        };
+        let Some(original) = file.text(kind) else {
+            ui.label(widget::hint("No line"));
+            return;
+        };
+        let buffer = self.buffers.entry(key).or_insert(original);
+        let response = sango_ui::game_text::edit_line(ui, ("type_name", key), buffer, width);
+        if response.changed() {
+            match file.set_text(kind, buffer) {
+                Ok(()) => {
+                    self.errors.remove(&key);
+                }
+                Err(message) => {
+                    self.errors.insert(key, message);
+                }
+            }
+        }
+        if let Some(message) = self.errors.get(&key) {
+            ui.painter().rect_stroke(response.rect, 3.0, egui::Stroke::new(1.5_f32, color::ROSE));
+            response.on_hover_text(egui::RichText::new(message).color(color::ROSE));
+        }
+    }
 }
 
 /// What the CSV functions need to read the texts.

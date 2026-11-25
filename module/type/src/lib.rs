@@ -21,15 +21,11 @@ use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 use types::TypeList;
 
-/// The tabs of the page.
-const TABS: [&str; 3] = ["General", "Text", "CSV"];
-
-/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the types.
-const CSV_TAB: usize = 2;
-
 /// The size of a cell of the chart, and of the headers.
 const CELL_W: f32 = 30.0;
-const CELL_H: f32 = 24.0;
+const CELL_H: f32 = 26.0;
+/// The width of the column of the names, on the left of the chart: the menu, the box of the name and the reset button.
+const NAME_W: f32 = 200.0;
 const HEAD_W: f32 = 58.0;
 const HEAD_H: f32 = 64.0;
 
@@ -46,7 +42,6 @@ pub struct Type {
     list_baseline: TypeList,
     icons: icons::TypeIcons,
     texts: texts::TypeTexts,
-    tab: usize,
     /// What happened at the last click: true for a success.
     status: Option<(bool, String)>,
     tools: tools::Tools,
@@ -67,7 +62,6 @@ impl Default for Type {
             list_baseline: TypeList::default(),
             icons: icons::TypeIcons::default(),
             texts: texts::TypeTexts::default(),
-            tab: 0,
             status: None,
             tools: tools::Tools::default(),
             selected: (9, 11),
@@ -111,14 +105,6 @@ impl Type {
         self.status = problem.map(|message| (false, message));
     }
 
-    /// The name of a type: the English name of a type of the game, or the name of a new type.
-    fn type_name(&self, id: usize) -> String {
-        match self.list.find(id) {
-            Some(custom) => custom.name.clone(),
-            None => self.names.get(id).cloned().unwrap_or_default(),
-        }
-    }
-
     /// The colour type of a type: the type itself for a type of the game.
     fn colour_of(&self, id: usize) -> u8 {
         self.list.find(id).map_or(id.min(17) as u8, |c| c.colour)
@@ -131,7 +117,7 @@ impl Type {
         match self.list.add("New type", colour) {
             Some(id) => {
                 self.chart.clear_type(id);
-                self.status = Some((true, format!("The type {id} was added. Change its name and its icons in the Text tab, its effects in the General tab, then Save.")));
+                self.status = Some((true, format!("The type {id} was added. Change its name on the left of its row, its effects in its row and its column, then Save.")));
             }
             None => self.status = Some((false, "The list of the new types is full.".into())),
         }
@@ -183,9 +169,9 @@ impl Type {
     /// The buttons and the state.
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let mut save = false;
-        let mut reset_tab = false;
         let mut reset_more = false;
-        let mut undo = false;
+        let mut export = false;
+        let mut import = false;
         let mut add = false;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -195,22 +181,17 @@ impl Type {
                 })
                 .response
                 .on_hover_text("Adds a type with the effects ×1 against every type. Then you change it like the other types.");
+                export = widget::button(ui, "Export…");
                 ui.add_enabled_ui(has_card, |ui| {
-                    reset_tab = widget::button(ui, "Reset tab");
+                    import = widget::button(ui, "Import…");
                 })
                 .response
-                .on_hover_text("Puts the data of this tab back to the romfs and to the chart of the game. Undo gives it back.");
+                .on_hover_text("Reads the CSV files of the types.");
                 ui.add_enabled_ui(has_card, |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
                 .on_hover_text("Reset the chart, the new types or the names, for the parts that you choose.");
-                let undo_label = self.tools.history.last().map(|backup| format!("Undo: {}", backup.label));
-                ui.add_enabled_ui(undo_label.is_some() && has_card, |ui| {
-                    undo = widget::button(ui, "Undo");
-                })
-                .response
-                .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = has_card && widget::save_button(ui, self.unsaved());
                 if self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -229,15 +210,14 @@ impl Type {
         if add {
             self.add_type();
         }
-        if reset_tab {
-            self.run_reset(session, &tools::tab_parts(self.tab));
-        }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [self.tab == 0, self.tab == 1, self.tab == 1];
         }
-        if undo {
-            self.undo(session);
+        if export {
+            self.tools.export_open = true;
+        }
+        if import {
+            self.tools.import_open = true;
         }
         if save {
             self.save(session);
@@ -254,116 +234,232 @@ impl Type {
         }
     }
 
-    /// The General tab: the grid of the types.
-    fn chart_tab(&mut self, ui: &mut egui::Ui) {
+    /// The name of a type in the chosen language, for the icons and the bubbles.
+    fn name_in_language(&mut self, sd: Option<&SdCard>, id: usize) -> String {
+        match self.list.find(id) {
+            Some(custom) => custom.name_in(self.texts.language()).to_string(),
+            None => self.texts.text(sd, id),
+        }
+    }
+
+    /// The row of the names of a type, on the left of its row of the chart: the menu of the type, the box of the name in the chosen
+    /// language, and the button that puts the name of the game back.
+    fn name_row(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, id: usize, asked: &mut Option<RowAction>) {
+        let language = self.texts.language();
+        let has_override = self.icons.has_override(id, language);
+        ui.menu_button("⋯", |ui| {
+            if ui.button("Export the icon (PNG)…").clicked() {
+                *asked = Some(RowAction::Icon(IconAction::Export, id, language));
+                ui.close_menu();
+            }
+            if ui.button("Import an icon (PNG)…").clicked() {
+                *asked = Some(RowAction::Icon(IconAction::Import, id, language));
+                ui.close_menu();
+            }
+            if ui.add_enabled(has_override, egui::Button::new("Put the icon of the game back")).clicked() {
+                *asked = Some(RowAction::Icon(IconAction::Reset, id, language));
+                ui.close_menu();
+            }
+            if let Some(entry) = self.list.custom.iter_mut().find(|c| c.id == id) {
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Colour of the buttons in battle");
+                    let mut colour = entry.colour;
+                    sango_species_base::game_type_menu(ui, &format!("type_colour_{id}"), &mut colour);
+                    entry.colour = colour;
+                });
+                if ui.button("Remove this type").clicked() {
+                    *asked = Some(RowAction::Remove(id));
+                    ui.close_menu();
+                }
+            }
+        })
+        .response
+        .on_hover_text("The icon of the type in this language, and more");
+        let changed = if let Some(entry) = self.list.custom.iter_mut().find(|c| c.id == id) {
+            // A new type: its names are in the list of the types. Without a name of its own, a language shows the English name.
+            let mut text = entry.name_in(language).to_string();
+            let response = sango_ui::game_text::edit_line(ui, ("type_new_name", language, id), &mut text, NAME_W - 52.0);
+            if response.changed() {
+                if language == texts::ENGLISH {
+                    entry.rename(&text);
+                } else {
+                    entry.translations[language] = text;
+                }
+            }
+            if let Some(problem) = types::name_problem(entry.name_in(language)) {
+                ui.painter().rect_stroke(response.rect, 3.0, egui::Stroke::new(1.5_f32, color::ROSE));
+                response.on_hover_text(egui::RichText::new(problem).color(color::ROSE));
+            }
+            language != texts::ENGLISH && !entry.translations[language].is_empty() && entry.translations[language] != entry.name
+        } else {
+            self.texts.name_field(ui, sd, id, NAME_W - 52.0);
+            self.texts.is_changed(sd, id)
+        };
+        let hint = if self.list.find(id).is_some() { "Shows the English name in this language again" } else { "Puts the name of the game back, in this language" };
+        if ui.add_enabled(changed, egui::Button::new("↺").small()).on_hover_text(hint).clicked() {
+            *asked = Some(RowAction::ResetName(id));
+        }
+    }
+
+    /// The page: the menu of the language, then the chart with the name of each type on the left of its row.
+    fn page_view(&mut self, ui: &mut egui::Ui, session: &Session) {
+        let sd = session.sd.as_ref();
+        let mut asked = None;
         egui::ScrollArea::both().id_salt("type_chart_scroll").auto_shrink([false, false]).show(ui, |ui| {
             let ids = self.list.ids();
-            let n = ids.len();
-            let names: Vec<String> = ids.iter().map(|&id| self.type_name(id)).collect();
+            let names: Vec<String> = ids.iter().map(|&id| self.name_in_language(sd, id)).collect();
+            let language = self.texts.language();
             widget::card(ui, |ui| {
-                ui.label(widget::title("Type chart"));
-                ui.label(widget::hint("The row is the type of the move, the column is the type of the target. A click changes a cell (×1, ×2, ×½, ×0); a right click goes back."));
-                ui.label(widget::hint("With the keyboard: the arrows move, Space changes the cell, and 0, 5, 1 and 2 give ×0, ×½, ×1 and ×2."));
-                ui.add_space(8.0);
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(HEAD_W + n as f32 * CELL_W, HEAD_H + n as f32 * CELL_H), egui::Sense::hover());
-                let grid_id = ui.make_persistent_id("type_chart_grid");
-                widget::register_focusable(ui, grid_id, rect);
-                let hovered = ui.input(|i| i.pointer.hover_pos()).and_then(|pos| {
-                    let (x, y) = (pos.x - rect.left() - HEAD_W, pos.y - rect.top() - HEAD_H);
-                    (x >= 0.0 && y >= 0.0 && ((x / CELL_W) as usize) < n && ((y / CELL_H) as usize) < n).then(|| ((y / CELL_H) as usize, (x / CELL_W) as usize))
+                ui.horizontal(|ui| {
+                    ui.label("Language");
+                    self.texts.language_menu(ui);
+                    ui.add_space(12.0);
+                    ui.label(widget::hint("Row: the type of the move. Column: the type of the target. Click a cell: ×1, ×2, ×½, ×0."))
+                        .on_hover_text("A right click goes back. With the keyboard: the arrows move, Space changes the cell, and 0, 5, 1 and 2 give ×0, ×½, ×1 and ×2.");
                 });
-                // The icons of the headers.
-                for (place, &id) in ids.iter().enumerate() {
-                    let colour = self.colour_of(id);
-                    // The icons of the columns are turned: they are as long as the icons of the rows.
-                    let column = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + place as f32 * CELL_W + 4.0, rect.top() + 4.0), egui::vec2(CELL_W - 8.0, HEAD_H - 8.0));
-                    self.icons.paint_turned(ui, id, icons::ENGLISH, column, &names[place], colour);
-                    let row = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.top() + HEAD_H + place as f32 * CELL_H + 2.0), egui::vec2(HEAD_W - 6.0, CELL_H - 4.0));
-                    self.icons.paint(ui, id, icons::ENGLISH, row, &names[place], colour);
-                }
-                // The cells.
-                let mut selected = ids.iter().position(|&id| id == self.selected.0).zip(ids.iter().position(|&id| id == self.selected.1)).unwrap_or((0, 0));
-                for row in 0..n {
-                    for column in 0..n {
-                        let cell = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + column as f32 * CELL_W, rect.top() + HEAD_H + row as f32 * CELL_H), egui::vec2(CELL_W, CELL_H)).shrink(1.0);
-                        let response = ui.interact(cell, grid_id.with((row, column)), egui::Sense::click());
-                        let (attacking, defending) = (ids[row], ids[column]);
-                        let value = self.chart.get(attacking, defending);
-                        if response.clicked() || response.secondary_clicked() {
-                            self.chart.set(attacking, defending, chart::next(value, response.secondary_clicked()));
-                            selected = (row, column);
-                            widget::set_active_id(ui, grid_id);
-                        }
-                        let value = self.chart.get(attacking, defending);
-                        let (fill, ink) = Self::cell_colours(value);
-                        let on_line = hovered.is_some_and(|(r, c)| r == row || c == column);
-                        if on_line {
-                            ui.painter().rect_filled(cell, 3.0, color::ACCENT_SOFT);
-                        }
-                        ui.painter().rect_filled(cell, 3.0, fill);
-                        if value != chart::NORMAL || on_line {
-                            ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, chart::text(value).trim_start_matches('×'), egui::FontId::proportional(13.0), ink);
-                        }
-                        if self.chart.is_changed(attacking, defending) {
-                            ui.painter().circle_filled(cell.right_top() + egui::vec2(-4.0, 4.0), 2.5, color::AMBER);
-                        }
-                        if hovered == Some((row, column)) {
-                            ui.painter().rect_stroke(cell, 3.0, egui::Stroke::new(1.5_f32, color::ACCENT));
-                        }
-                        if response.hovered() {
-                            let game = if attacking < GAME_TYPES && defending < GAME_TYPES { chart::text(chart::ORIGINAL[attacking][defending]) } else { chart::text(chart::NORMAL) };
-                            response.on_hover_text(format!("{} attacking {}: {} (the game: {})", names[row], names[column], chart::text(value), game));
-                        }
-                    }
-                }
-                // The keyboard.
-                self.selected = (ids[selected.0], ids[selected.1]);
-                if widget::is_active(ui, grid_id) && widget::page_has_focus(ui) {
-                    let selected_rect = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + selected.1 as f32 * CELL_W, rect.top() + HEAD_H + selected.0 as f32 * CELL_H), egui::vec2(CELL_W, CELL_H));
-                    widget::glow(ui, selected_rect, 4.0);
-                    let (attacking, defending) = (ids[selected.0], ids[selected.1]);
-                    let mut moved = (selected.0 as isize, selected.1 as isize);
-                    let mut set = None;
-                    let current = self.chart.get(attacking, defending);
-                    ui.input_mut(|i| {
-                        for (key, dx, dy) in [(egui::Key::ArrowUp, 0, -1), (egui::Key::ArrowDown, 0, 1), (egui::Key::ArrowLeft, -1, 0), (egui::Key::ArrowRight, 1, 0)] {
-                            if i.consume_key(egui::Modifiers::NONE, key) {
-                                moved = (moved.0 + dy, moved.1 + dx);
-                            }
-                        }
-                        for (key, value) in [(egui::Key::Num0, chart::NONE), (egui::Key::Num5, chart::HALF), (egui::Key::Num1, chart::NORMAL), (egui::Key::Num2, chart::DOUBLE)] {
-                            if i.consume_key(egui::Modifiers::NONE, key) {
-                                set = Some(value);
-                            }
-                        }
-                        if i.consume_key(egui::Modifiers::NONE, egui::Key::Space) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
-                            set = Some(chart::next(current, false));
+                ui.add_space(8.0);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    // The names, on the left of the rows.
+                    ui.vertical(|ui| {
+                        ui.set_width(NAME_W);
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                        ui.add_space(HEAD_H);
+                        for &id in &ids {
+                            ui.horizontal(|ui| {
+                                ui.set_height(CELL_H);
+                                self.name_row(ui, sd, id, &mut asked);
+                            });
                         }
                     });
-                    if let Some(value) = set {
-                        self.chart.set(attacking, defending, value);
-                    }
-                    let (row, column) = (moved.0.clamp(0, n as isize - 1) as usize, moved.1.clamp(0, n as isize - 1) as usize);
-                    self.selected = (ids[row], ids[column]);
-                }
-                ui.add_space(8.0);
-                ui.horizontal_wrapped(|ui| {
-                    for (value, label) in [(chart::DOUBLE, "×2 super effective"), (chart::HALF, "×½ not very effective"), (chart::NONE, "×0 no effect")] {
-                        let (fill, ink) = Self::cell_colours(value);
-                        let (swatch, _) = ui.allocate_exact_size(egui::vec2(18.0, 14.0), egui::Sense::hover());
-                        ui.painter().rect_filled(swatch, 3.0, fill);
-                        ui.painter().rect_stroke(swatch, 3.0, egui::Stroke::new(1.0_f32, ink));
-                        ui.label(widget::hint(label));
-                    }
-                    ui.label(egui::RichText::new("•").color(color::AMBER));
-                    ui.label(widget::hint("different from the game"));
-                    if widget::button(ui, "Put the chart of the game back") {
-                        self.chart = Chart::original();
-                    }
+                    ui.vertical(|ui| self.chart_grid(ui, &ids, &names, language));
                 });
+                ui.add_space(8.0);
+                self.legend(ui);
             });
             ui.add_space(10.0);
         });
+        match asked {
+            Some(RowAction::Icon(action, id, language)) => self.icon_action(action, id, language),
+            Some(RowAction::Remove(id)) => {
+                self.list.remove(id);
+                self.chart.clear_type(id);
+                self.icons.reset_all(id);
+            }
+            Some(RowAction::ResetName(id)) => {
+                let language = self.texts.language();
+                match self.list.custom.iter_mut().find(|c| c.id == id) {
+                    Some(entry) => entry.translations[language].clear(),
+                    None => self.texts.reset_name(sd, id),
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// The meaning of the colours of the cells, and the button that puts the chart of the game back.
+    fn legend(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            for (value, label) in [(chart::DOUBLE, "×2 super effective"), (chart::HALF, "×½ not very effective"), (chart::NONE, "×0 no effect")] {
+                let (fill, ink) = Self::cell_colours(value);
+                let (swatch, _) = ui.allocate_exact_size(egui::vec2(18.0, 14.0), egui::Sense::hover());
+                ui.painter().rect_filled(swatch, 3.0, fill);
+                ui.painter().rect_stroke(swatch, 3.0, egui::Stroke::new(1.0_f32, ink));
+                ui.label(widget::hint(label));
+            }
+            ui.label(egui::RichText::new("•").color(color::AMBER));
+            ui.label(widget::hint("different from the game"));
+            if widget::button(ui, "Put the chart of the game back") {
+                self.chart = Chart::original();
+            }
+        });
+    }
+
+    /// The grid of the chart: the icons of the types in the chosen language on the top and on the left, and the cells.
+    fn chart_grid(&mut self, ui: &mut egui::Ui, ids: &[usize], names: &[String], language: usize) {
+        let n = ids.len();
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(HEAD_W + n as f32 * CELL_W, HEAD_H + n as f32 * CELL_H), egui::Sense::hover());
+        let grid_id = ui.make_persistent_id("type_chart_grid");
+        widget::register_focusable(ui, grid_id, rect);
+        let hovered = ui.input(|i| i.pointer.hover_pos()).and_then(|pos| {
+            let (x, y) = (pos.x - rect.left() - HEAD_W, pos.y - rect.top() - HEAD_H);
+            (x >= 0.0 && y >= 0.0 && ((x / CELL_W) as usize) < n && ((y / CELL_H) as usize) < n).then(|| ((y / CELL_H) as usize, (x / CELL_W) as usize))
+        });
+        // The icons of the headers.
+        for (place, &id) in ids.iter().enumerate() {
+            let colour = self.colour_of(id);
+            // The icons of the columns are turned: they are as long as the icons of the rows.
+            let column = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + place as f32 * CELL_W + 4.0, rect.top() + 4.0), egui::vec2(CELL_W - 8.0, HEAD_H - 8.0));
+            self.icons.paint_turned(ui, id, language, column, &names[place], colour);
+            let row = egui::Rect::from_min_size(egui::pos2(rect.left() + 2.0, rect.top() + HEAD_H + place as f32 * CELL_H + 2.0), egui::vec2(HEAD_W - 6.0, CELL_H - 4.0));
+            self.icons.paint(ui, id, language, row, &names[place], colour);
+        }
+        // The cells.
+        let mut selected = ids.iter().position(|&id| id == self.selected.0).zip(ids.iter().position(|&id| id == self.selected.1)).unwrap_or((0, 0));
+        for row in 0..n {
+            for column in 0..n {
+                let cell = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + column as f32 * CELL_W, rect.top() + HEAD_H + row as f32 * CELL_H), egui::vec2(CELL_W, CELL_H)).shrink(1.0);
+                let response = ui.interact(cell, grid_id.with((row, column)), egui::Sense::click());
+                let (attacking, defending) = (ids[row], ids[column]);
+                let value = self.chart.get(attacking, defending);
+                if response.clicked() || response.secondary_clicked() {
+                    self.chart.set(attacking, defending, chart::next(value, response.secondary_clicked()));
+                    selected = (row, column);
+                    widget::set_active_id(ui, grid_id);
+                }
+                let value = self.chart.get(attacking, defending);
+                let (fill, ink) = Self::cell_colours(value);
+                let on_line = hovered.is_some_and(|(r, c)| r == row || c == column);
+                if on_line {
+                    ui.painter().rect_filled(cell, 3.0, color::ACCENT_SOFT);
+                }
+                ui.painter().rect_filled(cell, 3.0, fill);
+                if value != chart::NORMAL || on_line {
+                    ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, chart::text(value).trim_start_matches('×'), egui::FontId::proportional(13.0), ink);
+                }
+                if self.chart.is_changed(attacking, defending) {
+                    ui.painter().circle_filled(cell.right_top() + egui::vec2(-4.0, 4.0), 2.5, color::AMBER);
+                }
+                if hovered == Some((row, column)) {
+                    ui.painter().rect_stroke(cell, 3.0, egui::Stroke::new(1.5_f32, color::ACCENT));
+                }
+                if response.hovered() {
+                    let game = if attacking < GAME_TYPES && defending < GAME_TYPES { chart::text(chart::ORIGINAL[attacking][defending]) } else { chart::text(chart::NORMAL) };
+                    response.on_hover_text(format!("{} attacking {}: {} (the game: {})", names[row], names[column], chart::text(value), game));
+                }
+            }
+        }
+        // The keyboard.
+        self.selected = (ids[selected.0], ids[selected.1]);
+        if widget::is_active(ui, grid_id) && widget::page_has_focus(ui) {
+            let selected_rect = egui::Rect::from_min_size(egui::pos2(rect.left() + HEAD_W + selected.1 as f32 * CELL_W, rect.top() + HEAD_H + selected.0 as f32 * CELL_H), egui::vec2(CELL_W, CELL_H));
+            widget::glow(ui, selected_rect, 4.0);
+            let (attacking, defending) = (ids[selected.0], ids[selected.1]);
+            let mut moved = (selected.0 as isize, selected.1 as isize);
+            let mut set = None;
+            let current = self.chart.get(attacking, defending);
+            ui.input_mut(|i| {
+                for (key, dx, dy) in [(egui::Key::ArrowUp, 0, -1), (egui::Key::ArrowDown, 0, 1), (egui::Key::ArrowLeft, -1, 0), (egui::Key::ArrowRight, 1, 0)] {
+                    if i.consume_key(egui::Modifiers::NONE, key) {
+                        moved = (moved.0 + dy, moved.1 + dx);
+                    }
+                }
+                for (key, value) in [(egui::Key::Num0, chart::NONE), (egui::Key::Num5, chart::HALF), (egui::Key::Num1, chart::NORMAL), (egui::Key::Num2, chart::DOUBLE)] {
+                    if i.consume_key(egui::Modifiers::NONE, key) {
+                        set = Some(value);
+                    }
+                }
+                if i.consume_key(egui::Modifiers::NONE, egui::Key::Space) || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+                    set = Some(chart::next(current, false));
+                }
+            });
+            if let Some(value) = set {
+                self.chart.set(attacking, defending, value);
+            }
+            let (row, column) = (moved.0.clamp(0, n as isize - 1) as usize, moved.1.clamp(0, n as isize - 1) as usize);
+            self.selected = (ids[row], ids[column]);
+        }
     }
 
     /// Does what a click on a button of an icon asked: a PNG file goes in or out, or the icon of the game comes back.
@@ -388,6 +484,17 @@ impl Type {
             }
         }
     }
+}
+
+/// What the menu or the reset button of a row asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowAction {
+    /// A button of the icon: the action, the type and the language.
+    Icon(IconAction, usize, usize),
+    /// A new type is removed.
+    Remove(usize),
+    /// The name of the type in the chosen language goes back to the name of the game.
+    ResetName(usize),
 }
 
 /// What a button of an icon asks for.
@@ -432,71 +539,9 @@ impl Module for Type {
         let session: &Session = session;
         self.top_bar(ui, session);
         self.reset_window(ui.ctx(), session);
+        self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
-        let mut clicked = None;
-        egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(12.0)).inner_margin(egui::Margin::same(6.0)).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (i, name) in TABS.iter().enumerate() {
-                    let tab_id = egui::Id::new(format!("type_tab_{i}"));
-                    let active = widget::is_active(ui, tab_id);
-                    if active && self.tab != i {
-                        self.tab = i;
-                    }
-                    let response = widget::tab_button(ui, name, self.tab == i, active && widget::page_has_focus(ui));
-                    widget::register_focusable(ui, tab_id, response.rect);
-                    ui.ctx().data_mut(|d| d.insert_temp(tab_id.with("is_button"), true));
-                    if response.clicked() {
-                        clicked = Some((i, tab_id));
-                    }
-                }
-            });
-        });
-        if let Some((i, tab_id)) = clicked {
-            self.tab = i;
-            widget::set_active_id(ui, tab_id);
-        }
-        ui.add_space(6.0);
-        match self.tab {
-            0 => self.chart_tab(ui),
-            CSV_TAB => {
-                egui::ScrollArea::vertical().id_salt("type_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
-            }
-            _ => {
-                let sd: Option<&SdCard> = session.sd.as_ref();
-                let shown: Vec<(String, u8)> = (0..chart::MAX_TYPES).map(|id| (self.type_name(id), self.colour_of(id))).collect();
-                let icons = &mut self.icons;
-                let mut asked: Option<(IconAction, usize, usize)> = None;
-                // The icon of the type in the language of the tab before the box of the name, its buttons after it.
-                let removed = self.texts.ui(ui, sd, &mut self.list, &mut |ui, kind, language, buttons| {
-                    if !buttons {
-                        let (rect, _) = ui.allocate_exact_size(egui::vec2(icons::WIDTH as f32, icons::HEIGHT as f32), egui::Sense::hover());
-                        let (name, colour) = shown.get(kind).cloned().unwrap_or_default();
-                        icons.paint(ui, kind, language, rect, if kind < GAME_TYPES { "" } else { &name }, colour);
-                        return;
-                    }
-                    if widget::button(ui, "Export PNG…") {
-                        asked = Some((IconAction::Export, kind, language));
-                    }
-                    if widget::button(ui, "Import PNG…") {
-                        asked = Some((IconAction::Import, kind, language));
-                    }
-                    ui.add_enabled_ui(icons.has_override(kind, language), |ui| {
-                        if widget::button(ui, "Reset icon") {
-                            asked = Some((IconAction::Reset, kind, language));
-                        }
-                    });
-                });
-                if let Some((action, id, language)) = asked {
-                    self.icon_action(action, id, language);
-                }
-                if let Some(id) = removed {
-                    self.list.remove(id);
-                    self.chart.clear_type(id);
-                    self.icons.reset_all(id);
-                }
-            }
-        }
+        self.page_view(ui, session);
     }
 }
 
@@ -504,7 +549,7 @@ impl Module for Type {
 mod test {
     use super::*;
 
-    /// With the dump of the game: the page draws in the three tabs, a type is added and a cell is changed, and everything
+    /// With the dump of the game: the page draws, a type is added and a cell is changed, and everything
     /// is saved and read again.
     #[test]
     fn the_page_draws_edits_and_saves() {
@@ -519,19 +564,23 @@ mod test {
                 egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
             });
         };
-        for tab in [0, 1, 2, 0] {
-            page.tab = tab;
+        for _ in 0..2 {
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }
         assert_eq!(page.names[0], "Normal");
         assert_eq!(page.chart.changed_count(), 0);
 
+        // A name changed in a language comes back with the reset of the row.
+        let sd = session.sd.clone();
+        page.texts.reset_name(sd.as_ref(), 9);
+        assert!(!page.texts.is_changed(sd.as_ref(), 9));
+        assert_eq!(page.texts.text(sd.as_ref(), 9), "Fire");
+
         // A new type and a changed cell are saved.
         let id = page.list.add("Cosmic", 15).unwrap();
         page.chart.set(id, 0, chart::DOUBLE);
         page.chart.set(9, 11, chart::HALF);
-        page.tab = 0;
         frame(&mut page, &mut session);
         assert!(page.dirty());
         page.save(&session);

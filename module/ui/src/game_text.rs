@@ -158,6 +158,16 @@ fn plain_character(code: u16) -> String {
 /// A text field of a text of the game. `rows` is 1 for a name, more for a description; a field of more than one row also has the
 /// buttons of the dialogues (new page, wait...). The response says when the text changed.
 pub fn edit(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, text: &mut String, rows: usize, width: f32) -> egui::Response {
+    edit_with(ui, id_salt, text, rows, width, true)
+}
+
+/// A text field of one line without the bar of the tags (the keyboard and the colours stay): for a field in a table, where the bar
+/// would move the rows.
+pub fn edit_line(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, text: &mut String, width: f32) -> egui::Response {
+    edit_with(ui, id_salt, text, 1, width, false)
+}
+
+fn edit_with(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, text: &mut String, rows: usize, width: f32, bar: bool) -> egui::Response {
     let id = ui.make_persistent_id(("game_text", id_salt));
     let ctx = ui.ctx().clone();
     let mut layouter = |ui: &egui::Ui, text: &str, wrap: f32| ui.fonts(|f| f.layout_job(layout(ui, text, wrap)));
@@ -186,7 +196,7 @@ pub fn edit(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, text: &mut String,
         set_shared(&ctx, state.clone());
     }
     let mut changed = false;
-    if state.active == Some(id) {
+    if bar && state.active == Some(id) {
         changed |= format_bar(ui, id, text, rows > 1, &mut state);
     }
     if state.keyboard == Some(id) {

@@ -22,7 +22,7 @@ const HISTORY: usize = 20;
 /// Where the chart is on the SD card.
 pub const CHART_PATH: &str = "type/chart.bin";
 
-/// A kind of data that has its own files and its own tab.
+/// A kind of data that has its own files.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     Chart,
@@ -43,9 +43,9 @@ impl Part {
 
     fn hint(self) -> &'static str {
         match self {
-            Part::Chart => "General tab: the effect of each type against each type.",
-            Part::Types => "Text tab: the new types and the icons of all the types, in every language.",
-            Part::Names => "Text tab: the names of the types of the game, in every language.",
+            Part::Chart => "The effect of each type against each type.",
+            Part::Types => "The new types and the icons of all the types, in every language.",
+            Part::Names => "The names of the types of the game, in every language.",
         }
     }
 
@@ -59,16 +59,6 @@ impl Part {
     }
 }
 
-/// The parts of the page that a tab shows: the chart in the General tab, the new types, their icons and the names in the Text
-/// tab. The CSV tab shows no part.
-pub fn tab_parts(tab: usize) -> Vec<Part> {
-    match tab {
-        0 => vec![Part::Chart],
-        1 => vec![Part::Types, Part::Names],
-        _ => Vec::new(),
-    }
-}
-
 /// The state of the tools.
 pub struct Tools {
     /// The copies for Undo, the last one at the end.
@@ -78,11 +68,14 @@ pub struct Tools {
     pub parts: [bool; 3],
     /// The parts of the CSV files: Types, Chart, Names.
     pub csv_parts: [bool; 3],
+    /// The windows of the buttons Export… and Import….
+    pub export_open: bool,
+    pub import_open: bool,
 }
 
 impl Default for Tools {
     fn default() -> Self {
-        Tools { history: Vec::new(), reset_open: false, parts: [false; 3], csv_parts: [true; 3] }
+        Tools { history: Vec::new(), reset_open: false, parts: [true, false, false], csv_parts: [true; 3], export_open: false, import_open: false }
     }
 }
 
@@ -122,7 +115,7 @@ impl Type {
         if self.tools.history.len() > HISTORY {
             self.tools.history.remove(0);
         }
-        self.status = Some((true, format!("{done} {count} file(s) changed. Undo gives them back.")));
+        self.status = Some((true, format!("{done} {count} file(s) changed.")));
     }
 
     /// Puts the files of some parts back to the romfs.
@@ -188,7 +181,7 @@ impl Type {
                 ui.label(widget::hint(part.hint()));
             }
             ui.add_space(8.0);
-            ui.label(widget::hint("The files of the SD card go back to the data of the romfs and to the chart of the game. The changes that are not saved are lost. Undo gives the files back."));
+            ui.label(widget::hint("The files of the SD card go back to the data of the romfs and to the chart of the game. The changes that are not saved are lost."));
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let any = self.tools.parts.iter().any(|on| *on) && session.sd.is_some();
@@ -208,30 +201,47 @@ impl Type {
         }
     }
 
-    /// The card of the CSV files in the General tab.
-    pub fn csv_card(&mut self, ui: &mut egui::Ui, session: &Session) {
-        widget::card(ui, |ui| {
-            ui.label(widget::title("CSV files"));
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
+    /// The windows of the buttons Export… and Import…: the CSV files of the types, for the parts that the user ticks.
+    pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
+        for import in [false, true] {
+            let shown = if import { self.tools.import_open } else { self.tools.export_open };
+            if !shown {
+                continue;
+            }
+            let mut open = true;
+            let mut run = false;
+            let mut close = false;
+            let title = if import { "Import CSV files" } else { "Export CSV files" };
+            egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+                ui.set_max_width(460.0);
                 for (place, (_, file, label)) in CSV_PARTS.iter().enumerate() {
-                    widget::chip(ui, label, &mut self.tools.csv_parts[place]).on_hover_text(*file);
+                    ui.checkbox(&mut self.tools.csv_parts[place], format!("{label} ({file})"));
                 }
-            });
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let any = self.tools.csv_parts.iter().any(|on| *on);
-                ui.add_enabled_ui(any, |ui| {
-                    if widget::button(ui, "Export CSV…") {
-                        self.export_csv_files(session);
-                    }
-                    if session.sd.is_some() && widget::button(ui, "Import CSV…") {
-                        self.import_csv_files(session);
-                    }
+                ui.add_space(6.0);
+                ui.label(widget::hint(if import { "Choose the folder of the files: they are checked, then the changes go on the SD card." } else { "Choose a folder for the files." }));
+                ui.horizontal(|ui| {
+                    let any = self.tools.csv_parts.iter().any(|on| *on) && (!import || session.sd.is_some());
+                    ui.add_enabled_ui(any, |ui| {
+                        run = widget::button_styled(ui, egui::RichText::new(if import { "Import" } else { "Export" }).color(color::WHITE), Some(color::ACCENT));
+                    });
+                    close = widget::button(ui, "Cancel");
                 });
             });
-            ui.label(widget::hint("Export writes one file for each ticked part in a folder that you choose: types.csv (the new types), type_chart.csv (the chart: one row for each attacking type, with 0, 0.5, 1 or 2) and type_texts.csv (the names of the types of the game, in the eight languages). Import reads the files with these names from a folder, checks all of them, and writes the changes on the SD card. Undo gives the files back."));
-        });
+            if run {
+                if import {
+                    self.import_csv_files(session);
+                } else {
+                    self.export_csv_files(session);
+                }
+            }
+            if run || close || !open {
+                if import {
+                    self.tools.import_open = false;
+                } else {
+                    self.tools.export_open = false;
+                }
+            }
+        }
     }
 
     /// Writes the CSV files of the ticked parts in a folder that the user chooses.
