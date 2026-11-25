@@ -23,7 +23,6 @@ sango-move = { path = "module/move" }
 sango-ability = { path = "module/ability" }
 sango-rules = { path = "module/rules" }
 sango-type = { path = "module/type" }
-sango-code = { path = "module/code" }
 sango-pack = { path = "module/pack" }
 sango-packs = { path = "module/packs" }
 sango-modelport = { path = "module/modelport" }

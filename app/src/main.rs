@@ -73,7 +73,6 @@ impl App {
             Box::new(sango_music::MusicPage::default()),
             // Tools.
             Box::new(sango_packs::Packs::default()),
-            Box::new(sango_code::Code::default()),
             Box::new(sango_archive::Archive::default()),
         ]
     }
@@ -1030,6 +1029,6 @@ mod side_bar_test {
         let first: Vec<&str> = SECTIONS.iter().map(|(place, _)| pages[*place].title()).collect();
         assert_eq!(first, ["Species", "Formula", "Overworld", "Layout", "Packs"]);
         assert_eq!(pages[0].title(), "Home");
-        assert_eq!(pages.len(), 23);
+        assert_eq!(pages.len(), 22);
     }
 }

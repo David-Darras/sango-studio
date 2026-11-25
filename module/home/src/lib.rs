@@ -30,8 +30,6 @@ struct Field {
 pub struct Home {
     dump: Field,
     sd: Field,
-    devkitpro: Field,
-    plugin: Field,
     /// True once the fields took the folders of the session.
     filled: bool,
     /// The card "Start from zero": the user asked and did not answer yet, the box of the answer, and what happened.
@@ -108,12 +106,6 @@ impl Home {
             if let Some(sd) = &session.sd {
                 self.sd.text = sd.root().to_string_lossy().to_string();
             }
-            if let Some(devkitpro) = &session.devkitpro {
-                self.devkitpro.text = devkitpro.to_string_lossy().to_string();
-            }
-            if let Some(plugin) = &session.plugin {
-                self.plugin.text = plugin.to_string_lossy().to_string();
-            }
         }
         ui.add_space(8.0);
         if let Some(sd) = session.sd.clone() {
@@ -138,20 +130,6 @@ impl Home {
             let sd_error = self.sd.error.clone();
             if folder_row(ui, "SD card folder", &format!("C:\\...\\sdmc\\{SD_FOLDER_NAME}"), "Folder of the SD card", &mut self.sd, state_of(&sd_error, &sd_path)) {
                 self.sd.error = session.set_sd(&self.sd.text).err();
-            }
-            ui.add_space(10.0);
-
-            let devkitpro_path = session.devkitpro.as_ref().map(|p| p.to_string_lossy().to_string());
-            let devkitpro_error = self.devkitpro.error.clone();
-            if folder_row(ui, "devkitPro (optional)", "C:/devkitPro", "Folder of devkitPro", &mut self.devkitpro, state_of(&devkitpro_error, &devkitpro_path)) {
-                self.devkitpro.error = session.set_devkitpro(&self.devkitpro.text).err();
-            }
-            ui.add_space(10.0);
-
-            let plugin_path = session.plugin.as_ref().map(|p| p.to_string_lossy().to_string());
-            let plugin_error = self.plugin.error.clone();
-            if folder_row(ui, "Sango plugin (optional)", "C:/.../sango_plugin", "Folder of the Sango plugin", &mut self.plugin, state_of(&plugin_error, &plugin_path)) {
-                self.plugin.error = session.set_plugin(&self.plugin.text).err();
             }
         });
     }
