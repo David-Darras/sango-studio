@@ -278,16 +278,19 @@ pub fn spans(text: &str) -> Vec<Span> {
         if start < at {
             spans.push(Span { start, end: at, mark: false, paint, size });
         }
-        let end = text[at..].find(']').map_or(text.len(), |close| at + close + 1);
+        let close = text[at..].find(']').map(|close| at + close);
+        let end = close.map_or(text.len(), |close| close + 1);
         spans.push(Span { start: at, end, mark: true, paint, size });
-        let inside = &text[at + 1..end.saturating_sub(1).max(at + 1)];
+        // The text between the brackets; a mark that is not closed yet goes to the end of the text.
+        let inside = &text[at + 1..close.unwrap_or(text.len())];
         let words: Vec<&str> = inside.split_whitespace().collect();
         let values = match words.first() {
             Some(&"tag") => words[1..].iter().map(|w| u16::from_str_radix(w, 16).ok()).collect::<Option<Vec<u16>>>(),
             _ => parse(&words).and_then(|r| r.ok()),
         };
-        if let Some(values) = values {
-            match (values.first().copied(), &values[1..]) {
+        // A tag that is being typed can have no value yet (`[tag]`): it changes nothing.
+        if let Some((&code, params)) = values.as_deref().and_then(|v| v.split_first()) {
+            match (Some(code), params) {
                 (Some(COLOR), [c]) => paint = GAME_COLORS.get(*c as usize).map_or(paint, |(_, rgb)| Paint::Color(*rgb)),
                 (Some(COLOR_END), _) => paint = Paint::Normal,
                 (Some(RGB), p) if p.len() == 3 => paint = Paint::Color([p[0] as u8, p[1] as u8, p[2] as u8]),
@@ -351,5 +354,18 @@ mod test {
         );
         // `[[` is the character `[`, not a mark.
         assert_eq!(spans("a[[b").len(), 1);
+        // A tag that is typed letter by letter never stops the program, and its parts cover the whole text.
+        let typed = "Ab [tag BD00 0006]c [gradient #FF0000 #0000FF]d [size 150]e";
+        for end in 0..=typed.len() {
+            if !typed.is_char_boundary(end) {
+                continue;
+            }
+            let text = &typed[..end];
+            let parts = spans(text);
+            assert_eq!(parts.iter().map(|s| s.end - s.start).sum::<usize>(), text.len(), "{text}");
+        }
+        for text in ["[é", "a [Pokémon", "[tag é", "[", "[tag", "[tag]", "[tag ]", "[tag zz]", "[color", "[color]", "[gradient #FF", "[size", "[size x]", "[]", "]["] {
+            spans(text);
+        }
     }
 }
