@@ -27,6 +27,9 @@ const FOLDER: &str = "font";
 /// The biggest side of the picture of all the glyphs (the smallest limit of the graphic cards that the program supports).
 const ATLAS_SIDE: usize = 2048;
 
+/// The number of glyphs on a line of the grid of the page.
+const GRID_COLUMNS: usize = 10;
+
 /// The text that the preview shows at first.
 const SAMPLE: &str = "Pokémon Alpha Sapphire 0123456789 ABCabc あいう アイウ";
 
@@ -74,6 +77,8 @@ pub struct FontPage {
     system: Option<Vec<ttf::SystemFont>>,
     pc_filter: String,
     pc_choice: Option<usize>,
+    /// The search of the menu of the fonts of the game.
+    game_filter: String,
     pc_settings: ttf::Settings,
     status: Option<(bool, String)>,
     /// The counter of the changes of this page, so that the list is read again.
@@ -82,7 +87,7 @@ pub struct FontPage {
 
 impl Default for FontPage {
     fn default() -> Self {
-        FontPage { export_open: false, import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 2, system: None, pc_filter: String::new(), pc_choice: None, pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
+        FontPage { export_open: false, import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 1, system: None, pc_filter: String::new(), pc_choice: None, game_filter: String::new(), pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
     }
 }
 
@@ -212,20 +217,20 @@ impl FontPage {
         egui::Rect::from_min_max(egui::pos2(x / w, y / h), egui::pos2((x + open.font.cell_width as f32) / w, (y + open.font.cell_height as f32) / h))
     }
 
-    fn list_card(&mut self, ui: &mut egui::Ui) -> bool {
+    /// The menu of the fonts of the game, with a search box inside. Gives true when a font is chosen.
+    fn font_menu(&mut self, ui: &mut egui::Ui) -> bool {
         let mut picked = false;
-        widget::card(ui, |ui| {
-            ui.label(widget::hint("The fonts of the game. A number that has a file for each language shows each language."));
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                for entry in &self.entries {
-                    let label = format!("{} · {}", entry.id, role(entry.id, entry.language, entry.variants));
-                    if widget::tab_button(ui, &label, self.chosen == (entry.id, entry.language), false).clicked() {
-                        self.chosen = (entry.id, entry.language);
-                        picked = true;
-                    }
+        let label = |e: &Entry| format!("{} · {}", e.id, role(e.id, e.language, e.variants));
+        let shown = self.entries.iter().find(|e| (e.id, e.language) == self.chosen).map_or("Choose a font".to_string(), label);
+        egui::ComboBox::from_id_salt("font_game_choice").selected_text(shown).width(340.0).height(420.0).show_ui(ui, |ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.game_filter).hint_text("Search").desired_width(300.0));
+            let filter = self.game_filter.to_lowercase();
+            for entry in self.entries.iter().filter(|e| filter.is_empty() || label(e).to_lowercase().contains(&filter)) {
+                if ui.selectable_label(self.chosen == (entry.id, entry.language), label(entry)).clicked() {
+                    self.chosen = (entry.id, entry.language);
+                    picked = true;
                 }
-            });
+            }
         });
         picked
     }
@@ -284,8 +289,10 @@ impl FontPage {
         let single = self.entries.iter().find(|e| (e.id, e.language) == (open.id, open.language)).is_some_and(|e| e.variants == 1);
         let (id, language, replaced, dirty) = (open.id, open.language, open.replaced, open.dirty);
         let mut clicks = widget::ActionClicks::default();
+        let mut picked = false;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
+                picked = self.font_menu(ui);
                 clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(replaced), save: Some(dirty && single), ..Default::default() });
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -296,7 +303,7 @@ impl FontPage {
                 }
             });
             if !single {
-                ui.label(widget::hint(&format!("This number has a file for each language (this is language {language}): it cannot be saved for the game yet. You can still export it.")));
+                ui.label(widget::hint(&format!("One file for each language (language {language}): it cannot be saved for the game yet.")));
             }
             if let Some((ok, message)) = &self.status {
                 if !message.is_empty() {
@@ -317,15 +324,19 @@ impl FontPage {
             if !shown {
                 continue;
             }
-            let (mut open_window, mut sheet, mut file, mut close) = (true, false, false, false);
+            let (mut open_window, mut sheet, mut file, mut close, mut computer) = (true, false, false, false, false);
             egui::Window::new(if import { "Import" } else { "Export" }).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open_window).show(ui.ctx(), |ui| {
                 ui.set_max_width(460.0);
-                ui.label(widget::hint("The sheet: a PNG picture of the glyphs and a CSV file of their widths. Draw over the PNG and keep its size."));
                 ui.horizontal(|ui| {
-                    sheet = widget::button(ui, "Sheet (PNG + CSV)");
+                    sheet = ui.button("Sheet (PNG + CSV)").on_hover_text("A PNG picture of the glyphs, 10 on a line, and a CSV file of their widths. Draw over the PNG and keep its size.").clicked();
                     file = widget::button(ui, "Font file (.bcfnt)");
                     close = widget::button(ui, "Cancel");
                 });
+                if import {
+                    ui.separator();
+                    ui.label(egui::RichText::new("From a font of the computer").strong());
+                    computer = self.computer_font(ui);
+                }
             });
             if sheet {
                 if import {
@@ -355,13 +366,16 @@ impl FontPage {
                     });
                 }
             }
-            if sheet || file || close || !open_window {
+            if sheet || file || close || computer || !open_window {
                 if import {
                     self.import_open = false;
                 } else {
                     self.export_open = false;
                 }
             }
+        }
+        if picked {
+            self.open = None;
         }
         if widget::reset_window(ui.ctx(), &mut self.reset_open, &format!("The font {id}"), &mut []) {
             self.status = Some(match sd.remove(&file_name(id)).and_then(|_| sd.mark_changed(&file_name(id))) {
@@ -370,36 +384,24 @@ impl FontPage {
             });
             *reload = true;
         }
-        ui.add_space(6.0);
-        self.generator_card(ui);
     }
 
-    /// Makes the glyphs from a font of the computer.
-    fn generator_card(&mut self, ui: &mut egui::Ui) {
-        let Some(open) = self.open.as_ref() else { return };
+    /// The glyphs made from a font of the computer: a menu of the fonts of the computer with a search box inside (or a .ttf / .otf file), the
+    /// size, and the button. The characters that the computer font does not have keep the glyph of the game. Gives true when the glyphs are made.
+    fn computer_font(&mut self, ui: &mut egui::Ui) -> bool {
+        let Some(open) = self.open.as_ref() else { return false };
         let (has_luminance, height) = (open.font.has_luminance(), open.font.height);
         if self.system.is_none() {
             self.system = Some(ttf::system_fonts());
         }
         let system = self.system.clone().unwrap_or_default();
-        widget::card(ui, |ui| {
-            ui.label(egui::RichText::new("Make the glyphs from a font of the computer").strong());
-            ui.label(widget::hint(
-                "Choose a .ttf or .otf font (the fonts of Windows and of the user are listed). The program draws each character that the game font has, on its \
-                 baseline, and sets the widths. The symbols and the characters that the computer font does not have keep the picture of the game. Then export \
-                 the sheet to retouch the glyphs by hand.",
-            ));
-            ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Search"));
-                ui.add(egui::TextEdit::singleline(&mut self.pc_filter).desired_width(160.0));
+        let mut made = false;
+        ui.horizontal_wrapped(|ui| {
+            let shown = self.pc_choice.and_then(|i| system.get(i)).map_or("Choose a font".to_string(), |f| f.name.clone());
+            egui::ComboBox::from_id_salt("font_pc_choice").selected_text(shown).width(260.0).height(360.0).show_ui(ui, |ui| {
+                ui.add(egui::TextEdit::singleline(&mut self.pc_filter).hint_text("Search").desired_width(230.0));
                 let filter = self.pc_filter.to_lowercase();
-                let shown = self.pc_choice.and_then(|i| system.get(i)).map_or("Choose a font".to_string(), |f| f.name.clone());
-                egui::ComboBox::from_id_salt("font_pc_choice").selected_text(shown).width(260.0).height(360.0).show_ui(ui, |ui| {
-                    for (i, font) in system.iter().enumerate().filter(|(_, f)| filter.is_empty() || f.name.to_lowercase().contains(&filter)) {
-                        ui.selectable_value(&mut self.pc_choice, Some(i), &font.name);
-                    }
-                });
-                if widget::button(ui, "Other file…") {
+                if ui.selectable_label(false, "A .ttf or .otf file…").clicked() {
                     if let Some(path) = rfd::FileDialog::new().set_title("Font of the computer").add_filter("Font", &["ttf", "otf"]).pick_file() {
                         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                         let list = self.system.get_or_insert_with(Vec::new);
@@ -407,41 +409,39 @@ impl FontPage {
                         self.pc_choice = Some(list.len() - 1);
                     }
                 }
-            });
-            ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Size in pixels"));
-                ui.add(egui::DragValue::new(&mut self.pc_settings.size).range(4.0..=120.0).speed(0.25));
-                if widget::button(ui, "Size of the game font") {
-                    self.pc_settings.size = f32::from(height) * 0.8;
-                }
-                ui.checkbox(&mut self.pc_settings.latin_only, "Latin characters only");
-                if has_luminance {
-                    ui.checkbox(&mut self.pc_settings.outline, "White letters with a black outline");
+                for (i, font) in system.iter().enumerate().filter(|(_, f)| filter.is_empty() || f.name.to_lowercase().contains(&filter)) {
+                    ui.selectable_value(&mut self.pc_choice, Some(i), &font.name);
                 }
             });
-            let chosen = self.pc_choice.and_then(|i| system.get(i)).cloned();
-            ui.add_enabled_ui(chosen.is_some(), |ui| {
-                if widget::button(ui, "Make the glyphs") {
-                    if let (Some(choice), Some(open)) = (chosen, self.open.as_ref()) {
-                        let result = std::fs::read(&choice.path).map_err(|e| format!("{}: {e}", choice.path.display())).and_then(|bytes| ttf::generate(&open.font, &bytes, &self.pc_settings));
-                        match result {
-                            Ok((font, report)) => {
-                                let ctx = ui.ctx().clone();
-                                self.show(&ctx, font);
-                                self.status = Some((
-                                    true,
-                                    format!(
-                                        "{} glyphs drawn from {}; {} characters are not in that font; {} glyphs are cut by the cell. Check the preview, then save.",
-                                        report.drawn, choice.name, report.missing, report.cut
-                                    ),
-                                ));
-                            }
-                            Err(e) => self.status = Some((false, e)),
+            ui.add(egui::DragValue::new(&mut self.pc_settings.size).range(4.0..=120.0).speed(0.25).suffix(" px")).on_hover_text("The size of the letters");
+            if ui.small_button("Game size").clicked() {
+                self.pc_settings.size = f32::from(height) * 0.8;
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut self.pc_settings.latin_only, "Latin only");
+            if has_luminance {
+                ui.checkbox(&mut self.pc_settings.outline, "Black outline");
+            }
+        });
+        let chosen = self.system.as_ref().and_then(|list| self.pc_choice.and_then(|i| list.get(i))).cloned();
+        ui.add_enabled_ui(chosen.is_some(), |ui| {
+            if widget::button_styled(ui, egui::RichText::new("Make the glyphs").color(color::WHITE), Some(color::ACCENT)) {
+                if let (Some(choice), Some(open)) = (chosen, self.open.as_ref()) {
+                    let result = std::fs::read(&choice.path).map_err(|e| format!("{}: {e}", choice.path.display())).and_then(|bytes| ttf::generate(&open.font, &bytes, &self.pc_settings));
+                    match result {
+                        Ok((font, report)) => {
+                            let ctx = ui.ctx().clone();
+                            self.show(&ctx, font);
+                            self.status = Some((true, format!("{} glyphs drawn from {}, {} not in that font. Save to keep them.", report.drawn, choice.name, report.missing)));
+                            made = true;
                         }
+                        Err(e) => self.status = Some((false, e)),
                     }
                 }
-            });
+            }
         });
+        made
     }
 
     /// Writes the font on the page on the SD card in place of the font `id`.
@@ -469,44 +469,13 @@ impl FontPage {
         }
     }
 
-    fn info_card(&self, ui: &mut egui::Ui) {
-        let Some(open) = self.open.as_ref() else { return };
-        let f = &open.font;
-        widget::card(ui, |ui| {
-            ui.label(format!(
-                "Cell {}×{} · line feed {} · height {} · ascent {} · baseline {} · format {} · {} sheets of {}×{} ({}×{} glyphs) · {} glyphs, {} characters · {} maps",
-                f.cell_width,
-                f.cell_height,
-                f.line_feed,
-                f.height,
-                f.ascent,
-                f.baseline,
-                f.format.name(),
-                f.sheet_count,
-                f.sheet_width,
-                f.sheet_height,
-                f.columns,
-                f.rows,
-                f.glyph_count(),
-                f.codes().len(),
-                f.maps.len()
-            ));
-        });
-    }
 
     fn preview_card(&mut self, ui: &mut egui::Ui) {
         let zoom = self.zoom as f32;
         let Some(open) = self.open.as_ref() else { return };
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Text"));
-                ui.add(egui::TextEdit::singleline(&mut self.text).desired_width(420.0));
-                ui.label(widget::hint("Zoom"));
-                for z in 1..=4 {
-                    if widget::tab_button(ui, &format!("×{z}"), self.zoom == z, false).clicked() {
-                        self.zoom = z;
-                    }
-                }
+                ui.add(egui::TextEdit::singleline(&mut self.text).desired_width(420.0).hint_text("Text to try"));
             });
             let (glyphs, width) = open.font.layout(&self.text);
             let height = open.font.cell_height as f32 * zoom;
@@ -520,38 +489,50 @@ impl FontPage {
         });
     }
 
+    /// The glyphs of the font, 10 on a line. A click chooses a glyph: its character and its widths show above the grid.
     fn grid_card(&mut self, ui: &mut egui::Ui) {
         let zoom = self.zoom as f32;
         let Some(open) = self.open.as_mut() else { return };
         widget::card(ui, |ui| {
-            ui.label(widget::hint("All the glyphs, in the order of the sheets. Click a glyph to see its character and its widths."));
-            if let Some(index) = open.selected {
-                let width = open.font.width_of(index as u16);
-                let code = open.codes.get(index).copied().flatten();
-                let character = code.and_then(|c| char::from_u32(u32::from(c))).filter(|c| !c.is_control()).map(|c| format!(" “{c}”")).unwrap_or_default();
-                let code_text = code.map_or("no character".to_string(), |c| format!("U+{c:04X}"));
-                ui.label(format!("Glyph {index} · {code_text}{character} · left {} · picture {} · advance {}", width.left, width.glyph, width.advance));
-            }
-            let size = egui::vec2(open.atlas_size.0 as f32 * zoom, open.atlas_size.1 as f32 * zoom);
-            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
-            ui.painter().rect_filled(rect, egui::Rounding::ZERO, preview_background(open.font.has_luminance()));
-            ui.painter().image(open.texture.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-            let cell = |index: usize| {
-                egui::Rect::from_min_size(
-                    egui::pos2(rect.left() + (index % open.columns) as f32 * open.stride.0 as f32 * zoom, rect.top() + (index / open.columns) as f32 * open.stride.1 as f32 * zoom),
-                    egui::vec2(open.stride.0 as f32 * zoom, open.stride.1 as f32 * zoom),
-                )
-            };
-            if response.clicked() {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    let (cx, cy) = (((pos.x - rect.left()) / (open.stride.0 as f32 * zoom)) as usize, ((pos.y - rect.top()) / (open.stride.1 as f32 * zoom)) as usize);
-                    let index = cy * open.columns + cx;
-                    open.selected = (cx < open.columns && index < open.font.glyph_count()).then_some(index);
+            let selected_text = match open.selected {
+                Some(index) => {
+                    let width = open.font.width_of(index as u16);
+                    let code = open.codes.get(index).copied().flatten();
+                    let character = code.and_then(|c| char::from_u32(u32::from(c))).filter(|c| !c.is_control()).map(|c| format!("“{c}”  ")).unwrap_or_default();
+                    let code_text = code.map_or("no character".to_string(), |c| format!("U+{c:04X}"));
+                    format!("{character}{code_text} · glyph {index} · left {} · picture {} · advance {}", width.left, width.glyph, width.advance)
                 }
-            }
-            if let Some(index) = open.selected {
-                ui.painter().rect_stroke(cell(index), egui::Rounding::ZERO, egui::Stroke::new(1.5_f32, color::ACCENT));
-            }
+                None => format!("{} glyphs", open.font.glyph_count()),
+            };
+            ui.label(egui::RichText::new(selected_text).strong());
+            ui.add_space(4.0);
+            let (cell_w, cell_h) = (open.font.cell_width as f32 * zoom, open.font.cell_height as f32 * zoom);
+            let box_size = egui::vec2(cell_w + 10.0, cell_h + 10.0);
+            let count = open.font.glyph_count();
+            let rows = count.div_ceil(GRID_COLUMNS);
+            let background = preview_background(open.font.has_luminance());
+            egui::ScrollArea::vertical().id_salt("font_grid").max_height(560.0).auto_shrink([false, true]).show_rows(ui, box_size.y + 4.0, rows, |ui, range| {
+                for row in range {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                        for index in row * GRID_COLUMNS..((row + 1) * GRID_COLUMNS).min(count) {
+                            let (rect, response) = ui.allocate_exact_size(box_size, egui::Sense::click());
+                            let chosen = open.selected == Some(index);
+                            ui.painter().rect_filled(rect, egui::Rounding::same(6.0), if response.hovered() { color::ACCENT_SOFT } else { background });
+                            let picture = egui::Rect::from_center_size(rect.center(), egui::vec2(cell_w, cell_h));
+                            ui.painter().image(open.texture.id(), picture, Self::glyph_uv(open, index), egui::Color32::WHITE);
+                            if chosen {
+                                ui.painter().rect_stroke(rect, egui::Rounding::same(6.0), egui::Stroke::new(2.0_f32, color::ACCENT));
+                            }
+                            let code = open.codes.get(index).copied().flatten();
+                            let response = response.on_hover_text(code.map_or(format!("glyph {index}"), |c| format!("U+{c:04X} · glyph {index}")));
+                            if response.clicked() {
+                                open.selected = Some(index);
+                            }
+                        }
+                    });
+                }
+            });
         });
     }
 }
@@ -576,12 +557,10 @@ impl Module for FontPage {
         if self.opened_for.as_ref() != Some(&(sd.root().to_path_buf(), self.version)) {
             self.read_list(dump, &sd);
         }
-        let picked = self.list_card(ui);
         let stale = self.open.as_ref().map_or(true, |o| (o.id, o.language) != self.chosen);
-        if picked || (stale && !self.entries.is_empty()) {
+        if stale && !self.entries.is_empty() {
             self.open_chosen(ui.ctx(), dump, &sd);
         }
-        ui.add_space(6.0);
         let mut reload = false;
         self.actions(ui, &sd, &mut reload);
         if reload {
@@ -589,8 +568,6 @@ impl Module for FontPage {
         }
         ui.add_space(6.0);
         egui::ScrollArea::both().id_salt("font_scroll").auto_shrink([false, false]).show(ui, |ui| {
-            self.info_card(ui);
-            ui.add_space(6.0);
             self.preview_card(ui);
             ui.add_space(6.0);
             self.grid_card(ui);

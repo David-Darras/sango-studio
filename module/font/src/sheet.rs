@@ -1,15 +1,15 @@
 //! The sheet of glyphs: a picture of a font that the user can draw over, and the file of the widths that goes with it.
 //!
-//! The sheet looks like the pictures of the font converter of the 3DS tools: a grid of blocks, 16 on a line, one block for each glyph in the
-//! order of the font. A block has:
+//! The sheet is a grid of blocks, 10 on a line, one block for each glyph in the order of the font. A block has:
 //!
-//! - a border of 1 pixel (black) and a margin of 1 pixel (grey-green), on the four sides,
+//! - a border of 1 pixel (light slate) and a margin of 1 pixel (very light), on the four sides,
 //! - the **cell**, `cell_width × cell_height` pixels, that holds the picture of the glyph,
-//! - under the cell a margin, then a **bar** of 1 pixel (red) and a border. The bar starts at the space on the left of the glyph and is as
+//! - a mark (indigo) in the margins on the left and on the right of the cell, at the height of the base line,
+//! - under the cell a margin, then a **bar** of 1 pixel (teal) and a border. The bar starts at the space on the left of the glyph and is as
 //!   long as the width of the character: it shows the spacing.
 //!
-//! So a block is `cell_width + 4` pixels wide and `cell_height + 5` pixels high. A block that has no glyph (the end of the last line) has a
-//! blue cell.
+//! So a block is `cell_width + 4` pixels wide and `cell_height + 5` pixels high. A block that has no glyph (the end of the last line) is
+//! filled with the colour of the margin.
 //!
 //! In a font whose pixels have only an alpha, the cell is white and the ink is dark (a darker pixel is more opaque). In a font whose pixels
 //! have a luminance and an alpha (an outlined font), the picture has the real alpha: the pixels that you do not draw are transparent.
@@ -21,12 +21,13 @@
 use crate::bcfnt::{Font, Width};
 
 /// The number of blocks on a line of the sheet.
-pub const COLUMNS: usize = 16;
+pub const COLUMNS: usize = 10;
 
-const GRID: [u8; 4] = [0, 0, 0, 255];
-const MARGIN: [u8; 4] = [153, 170, 153, 255];
-const BAR: [u8; 4] = [255, 0, 0, 255];
-const NULL_CELL: [u8; 4] = [0, 128, 255, 255];
+const GRID: [u8; 4] = [196, 202, 218, 255];
+const MARGIN: [u8; 4] = [244, 245, 250, 255];
+const BAR: [u8; 4] = [20, 184, 166, 255];
+const BASELINE: [u8; 4] = [79, 70, 229, 255];
+const NULL_CELL: [u8; 4] = MARGIN;
 
 /// A picture of 8 bits for each of red, green, blue and alpha.
 pub struct Picture {
@@ -84,6 +85,10 @@ pub fn draw(font: &Font) -> Picture {
                     put(x0 + 2 + x, y0 + 2 + y, color);
                 }
             }
+            // The marks of the base line, in the margins beside the cell.
+            let baseline = (font.baseline as usize).min(h.saturating_sub(1));
+            put(x0 + 1, y0 + 2 + baseline, BASELINE);
+            put(x0 + u - 2, y0 + 2 + baseline, BASELINE);
             // The bar: the row under the margin below the cell.
             let width_of = font.width_of(index as u16);
             let start = i32::from(width_of.left).max(0) as usize;
@@ -193,7 +198,7 @@ pub fn import(base: &Font, picture: &Picture, metrics: Option<&str>) -> Result<I
             None => {
                 let is_bar = |x: usize| {
                     let [r, g, b, a] = pixel(x0 + 2 + x, y0 + 3 + h);
-                    a > 0 && r > 200 && g < 80 && b < 80
+                    a > 0 && g > 140 && r < 110 && b > 110
                 };
                 let red: Vec<usize> = (0..w).filter(|x| is_bar(*x)).collect();
                 match red.first() {
