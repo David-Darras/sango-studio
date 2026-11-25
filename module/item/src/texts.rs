@@ -162,8 +162,7 @@ impl ItemTexts {
             return;
         };
         let buffer = self.buffers.entry(key).or_insert(original);
-        let edit = if field.rows == 1 { egui::TextEdit::singleline(buffer) } else { egui::TextEdit::multiline(buffer).desired_rows(field.rows) };
-        let response = ui.add(edit.id_salt(key).desired_width(520.0));
+        let response = sango_ui::game_text::edit(ui, key, buffer, field.rows, 520.0);
         if response.changed() {
             match file.set_text(id, buffer) {
                 Ok(()) => {

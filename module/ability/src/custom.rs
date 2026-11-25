@@ -156,10 +156,10 @@ pub fn texts_ui(ui: &mut egui::Ui, ability: &mut CustomAbility, language: &mut u
         crate::texts::language_menu(ui, "custom_ability_language", language);
         ui.end_row();
         ui.label("Name");
-        ui.add(egui::TextEdit::singleline(&mut ability.names[place]).desired_width(300.0)).on_hover_text("A new ability starts with the same text in every language: write the text of each language.");
+        sango_ui::game_text::edit(ui, ("custom_ability_name", ability.id, place), &mut ability.names[place], 1, 300.0).on_hover_text("A new ability starts with the same text in every language: write the text of each language.");
         ui.end_row();
         ui.label("Description");
-        ui.add(egui::TextEdit::multiline(&mut ability.descriptions[place]).desired_rows(3).desired_width(520.0));
+        sango_ui::game_text::edit(ui, ("custom_ability_description", ability.id, place), &mut ability.descriptions[place], 3, 520.0);
         ui.end_row();
     });
 }

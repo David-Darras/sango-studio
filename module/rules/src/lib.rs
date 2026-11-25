@@ -698,13 +698,15 @@ impl<'a> Reader<'a> {
         let length = self.word()? as usize;
         let raw = self.take(length * 2)?;
         let units: Vec<u16> = raw.chunks(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
-        String::from_utf16(&units).map_err(|_| "A text of the file is not valid.".to_string())
+        // The characters of the game, in the plain form of the texts: the tags are `[color sky]`, `[tag ...]`...
+        Ok(sango_core::text::chars_to_text(&units))
     }
 }
 
-/// Writes a text as a 16-bit length (in UTF-16 units) and the units.
+/// Writes a text as a 16-bit length and the characters of the game. The text is in the plain form of the texts of the game
+/// (`[color sky]`, `[[`...): a text that has a wrong mark is written as it is.
 pub fn write_text(out: &mut Vec<u8>, text: &str) {
-    let units: Vec<u16> = text.encode_utf16().collect();
+    let units: Vec<u16> = sango_core::text::text_to_chars(text).unwrap_or_else(|_| text.encode_utf16().collect());
     out.extend_from_slice(&(units.len() as u16).to_le_bytes());
     for unit in units {
         out.extend_from_slice(&unit.to_le_bytes());

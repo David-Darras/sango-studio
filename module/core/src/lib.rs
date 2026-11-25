@@ -17,6 +17,7 @@ pub mod custom_type;
 pub mod evolution;
 pub mod experience;
 pub mod file_lists;
+pub mod font;
 pub mod garc;
 pub mod item_icons;
 pub mod learnset;
@@ -32,6 +33,7 @@ pub mod natures;
 pub mod posing;
 pub mod render;
 pub mod text;
+pub mod text_tags;
 pub mod trainer;
 
 pub use backup::Backup;

@@ -24,7 +24,8 @@
 //! **The plain form of a line** (see [`chars_to_text`]) is the text itself, with a few marks in square brackets
 //! for what is not a letter:
 //!
-//! - `[tag CODE P1 P2]`: a tag. The game replaces it by a name, a number or a colour. `CODE` and the parameters are
+//! - `[color sky]`, `[/color]`, `[wait 30]`...: a tag that has a readable name (see [`crate::text_tags`]).
+//! - `[tag CODE P1 P2]`: another tag. The game replaces it by a name, a number or a colour. `CODE` and the parameters are
 //!   in hexadecimal. The tag `[tag 0102 0000]` is the name of a Pokémon, for example.
 //! - `[char XXXX]`: a character that has no usual form, in hexadecimal.
 //! - `[[`: the character `[` itself.
@@ -63,7 +64,7 @@ pub fn sd_path(language: usize, file: usize) -> String {
 }
 
 /// The line that starts a tag.
-const TAG: u16 = 0x10;
+use crate::text_tags::{self, TAG};
 
 /// A file of texts: its lines.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -213,6 +214,11 @@ pub fn chars_to_text(chars: &[u16]) -> String {
     while at < chars.len() {
         let c = chars[at];
         if let Some(end) = tag_end(chars, at) {
+            if let Some(name) = text_tags::name(&chars[at + 2..end]) {
+                text.push_str(&name);
+                at = end;
+                continue;
+            }
             text.push_str("[tag");
             for &value in &chars[at + 2..end] {
                 let _ = write!(text, " {value:04X}");
@@ -261,6 +267,14 @@ pub fn text_to_chars(text: &str) -> Result<Vec<u16>, String> {
                 None => return Err("A `[` has no `]`. Write `[[` for the character `[`.".into()),
             }
         }
+        let all: Vec<&str> = mark.split_whitespace().collect();
+        if let Some(values) = text_tags::parse(&all) {
+            let values = values?;
+            chars.push(TAG);
+            chars.push(values.len() as u16);
+            chars.extend(values);
+            continue;
+        }
         let mut words = mark.split_whitespace();
         let kind = words.next().unwrap_or("");
         let numbers: Result<Vec<u16>, String> = words.map(|word| u16::from_str_radix(word, 16).map_err(|_| format!("`{word}` is not a hexadecimal number in `[{mark}]`."))).collect();
@@ -272,7 +286,7 @@ pub fn text_to_chars(text: &str) -> Result<Vec<u16>, String> {
                 chars.extend(numbers);
             }
             "char" if numbers.len() == 1 => chars.push(numbers[0]),
-            _ => return Err(format!("`[{mark}]` is not a tag (`[tag CODE ...]`) or a character (`[char XXXX]`).")),
+            _ => return Err(format!("`[{mark}]` is not a tag (`[color sky]`, `[tag CODE ...]`...) or a character (`[char XXXX]`).")),
         }
     }
     Ok(chars)
@@ -328,7 +342,7 @@ mod test {
     fn tags_and_special_characters_have_a_plain_form() {
         let chars = [b'A' as u16, TAG, 2, 0xBD00, 5, b'!' as u16, 0x0007, 0xE08E, b'[' as u16, 0xAC00];
         let text = chars_to_text(&chars);
-        assert_eq!(text, "A[tag BD00 0005]![char 0007][char E08E][[\u{AC00}");
+        assert_eq!(text, "A[color purple]![char 0007][char E08E][[\u{AC00}");
         assert_eq!(text_to_chars(&text).unwrap(), chars);
         // A tag that is cut stays a character, and is written back the same.
         let cut = [TAG, 9, 1];

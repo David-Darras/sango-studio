@@ -141,7 +141,7 @@ impl TypeTexts {
                             return;
                         };
                         let buffer = self.buffers.entry(key).or_insert(original);
-                        let response = ui.add(egui::TextEdit::singleline(buffer).id_salt(key).desired_width(260.0));
+                        let response = sango_ui::game_text::edit(ui, key, buffer, 1, 260.0);
                         if response.changed() {
                             match file.set_text(kind, buffer) {
                                 Ok(()) => {

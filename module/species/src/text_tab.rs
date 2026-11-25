@@ -203,8 +203,7 @@ impl TextTab {
             return;
         };
         let buffer = self.buffers.entry(key).or_insert(original);
-        let edit = if field.rows == 1 { egui::TextEdit::singleline(buffer) } else { egui::TextEdit::multiline(buffer).desired_rows(3) };
-        let response = ui.add(edit.id_salt(key).desired_width(300.0));
+        let response = sango_ui::game_text::edit(ui, key, buffer, if field.rows == 1 { 1 } else { 3 }, 300.0);
         if response.changed() {
             match file.set_text(line, buffer) {
                 Ok(()) => {

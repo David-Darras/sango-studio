@@ -232,10 +232,10 @@ pub fn texts_ui(ui: &mut egui::Ui, item: &mut CustomMove, language: &mut usize) 
         crate::texts::language_menu(ui, "custom_move_language", language);
         ui.end_row();
         ui.label("Name");
-        ui.add(egui::TextEdit::singleline(&mut item.names[place]).desired_width(300.0)).on_hover_text("A new move starts with the same text in every language: write the text of each language.");
+        sango_ui::game_text::edit(ui, ("custom_move_name", item.id, place), &mut item.names[place], 1, 300.0).on_hover_text("A new move starts with the same text in every language: write the text of each language.");
         ui.end_row();
         ui.label("Description");
-        ui.add(egui::TextEdit::multiline(&mut item.descriptions[place]).desired_rows(3).desired_width(520.0));
+        sango_ui::game_text::edit(ui, ("custom_move_description", item.id, place), &mut item.descriptions[place], 3, 520.0);
         ui.end_row();
     });
 }

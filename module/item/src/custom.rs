@@ -345,13 +345,13 @@ pub fn texts_ui(ui: &mut egui::Ui, item: &mut CustomItem, language: &mut usize) 
         crate::texts::language_menu(ui, "custom_item_language", language);
         ui.end_row();
         ui.label("Name");
-        ui.add(egui::TextEdit::singleline(&mut item.names[place]).desired_width(300.0)).on_hover_text("A new item starts with the same text in every language: write the text of each language.");
+        sango_ui::game_text::edit(ui, ("custom_item_name", item.id, place), &mut item.names[place], 1, 300.0).on_hover_text("A new item starts with the same text in every language: write the text of each language.");
         ui.end_row();
         ui.label("Description");
-        ui.add(egui::TextEdit::multiline(&mut item.descriptions[place]).desired_rows(3).desired_width(520.0));
+        sango_ui::game_text::edit(ui, ("custom_item_description", item.id, place), &mut item.descriptions[place], 3, 520.0);
         ui.end_row();
         ui.label("Message of the Bag").on_hover_text("What the Bag says when the player uses the item. {pokemon} is the name of the Pokémon. Empty: the message of the plugin.");
-        ui.add(egui::TextEdit::singleline(&mut item.messages[place]).desired_width(520.0).hint_text("{pokemon} was changed!"));
+        sango_ui::game_text::edit(ui, ("custom_item_message", item.id, place), &mut item.messages[place], 1, 520.0);
         ui.end_row();
     });
 }

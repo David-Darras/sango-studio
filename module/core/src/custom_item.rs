@@ -43,7 +43,7 @@ fn read(bytes: &[u8], magic: &[u8; 4], texts: usize) -> Option<(usize, String, [
             let raw = bytes.get(at + 2..at + 2 + length * 2)?;
             if language == ENGLISH && text == 0 {
                 let units: Vec<u16> = raw.chunks(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
-                name = Some(String::from_utf16(&units).ok()?);
+                name = Some(crate::text::chars_to_text(&units));
             }
             at += 2 + length * 2;
         }
