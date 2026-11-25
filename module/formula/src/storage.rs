@@ -7,7 +7,6 @@
 use crate::defaults::{shiny_game_percent, KEYS, SHINY_GAME, SHINY_OUT_OF, STATS};
 use crate::expr;
 use sango_core::SdCard;
-use crate::defaults::HP;
 
 pub const TEXT_FILE: &str = "formula/formulas.txt";
 pub const BIN_FILE: &str = "formula/formulas.bin";

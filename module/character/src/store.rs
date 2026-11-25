@@ -139,15 +139,6 @@ impl Store {
         sd.mark_changed(&path(pack))
     }
 
-    /// Makes a character look like another one: the pack of `target` becomes a copy of the pack of `source` (the model, the motions).
-    pub fn swap(&self, sd: &SdCard, target: usize, source: usize) -> Result<(), String> {
-        if target == source {
-            return self.reset(sd, target);
-        }
-        let bytes = self.pack(Some(sd), source).ok_or("The model to use is not in the archive.")?;
-        Store::write(sd, target, &bytes)
-    }
-
     /// Gives back the model of the game.
     pub fn reset(&self, sd: &SdCard, pack: usize) -> Result<(), String> {
         sd.remove(&path(pack))?;
@@ -209,7 +200,7 @@ mod test {
 
     /// With the dump: a model is imported from its own GLB file, then it is read again, and the model comes back with a reset.
     #[test]
-    fn a_character_is_imported_swapped_and_given_back() {
+    fn a_character_is_imported_and_given_back() {
         let Some(store) = store() else { return };
         let folder = std::env::temp_dir().join(format!("sango_character_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
@@ -229,12 +220,6 @@ mod test {
         assert_eq!(Store::parts(&store.pack(Some(&sd), 172).unwrap()).unwrap().len(), Store::parts(&store.game_pack(172).unwrap()).unwrap().len());
         store.reset(&sd, 172).unwrap();
         assert!(!Store::changed(Some(&sd), 172));
-        // Roxanne looks like Brendan.
-        store.swap(&sd, 187, 172).unwrap();
-        assert_eq!(Store::read(&store.pack(Some(&sd), 187).unwrap()).unwrap().model.bones.len(), original.model.bones.len());
-        assert_eq!(Store::changed_packs(Some(&sd)), vec![187]);
-        store.swap(&sd, 187, 187).unwrap();
-        assert!(Store::changed_packs(Some(&sd)).is_empty());
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

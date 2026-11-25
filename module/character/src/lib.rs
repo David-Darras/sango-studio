@@ -1,11 +1,8 @@
-//! The Character and Swap pages: the 3D models of the characters of the overworld (the player, the Gym Leaders, the other people of the
-//! maps).
+//! The Character page: the 3D models of the characters of the overworld (the player, the Gym Leaders, the other people of the maps).
 //!
-//! - **Character**: shows a model, exports it as a GLB file with its skeleton, its pictures and one animation for each motion of the
-//!   character (walk, run, wave...), and imports a GLB or glTF file in its place. The motions of the game stay: the new model must have the
-//!   joints of the old one.
-//! - **Swap** (a tab of the page): makes a character look like another one. The Gym Leader, the player or any person of the maps can get the model (and the
-//!   motions) of another character.
+//! The page shows a model, exports it as a GLB file with its skeleton, its pictures and one animation for each motion of the character
+//! (walk, run, wave...), and imports a GLB or glTF file in its place. The motions of the game stay: the new model must have the joints of
+//! the old one.
 //!
 //! A change is a whole pack of the archive on the SD card (`overworld/model/<pack>.bin`, see `store.rs`). The plugin gives it to the game
 //! in place of the pack: restart the game after a change.
@@ -26,9 +23,6 @@ use store::{Loaded, Store};
 
 /// The size of the picture of the model, in pixels.
 const SIZE: usize = 360;
-
-/// The tabs of the Character page.
-const TABS: [&str; 2] = ["Model", "Swap"];
 
 /// The lists of the models: the models that the user changed come first.
 fn groups(labels: &[String], changed: &[usize]) -> Vec<Group> {
@@ -57,8 +51,6 @@ pub struct Character {
     status: Option<(bool, String)>,
     /// The scale of an import.
     scale: f32,
-    tab: usize,
-    swap: Swap,
 }
 
 impl Default for Character {
@@ -77,8 +69,6 @@ impl Default for Character {
             retired: Retired::default(),
             status: None,
             scale: 1.0,
-            tab: 0,
-            swap: Swap::default(),
         }
     }
 }
@@ -208,18 +198,6 @@ impl Module for Character {
             ui.label(egui::RichText::new(message).color(color::ROSE));
             return;
         }
-        ui.horizontal(|ui| {
-            for (place, name) in TABS.iter().enumerate() {
-                if widget::tab_button(ui, name, self.tab == place, false).clicked() {
-                    self.tab = place;
-                }
-            }
-        });
-        ui.add_space(6.0);
-        if self.tab == 1 {
-            self.swap.body(ui, session);
-            return;
-        }
         let sd = session.sd.clone();
         self.load(sd.as_ref());
         let changed_packs = Store::changed_packs(sd.as_ref());
@@ -243,25 +221,23 @@ impl Module for Character {
                             ui.label(widget::title(self.labels.get(self.chosen).map_or("", |s| s.as_str())));
                             ui.label(widget::hint(&format!("{} joints, {} parts, {} pictures, {} motions.", loaded.model.bones.len(), loaded.model.meshes.len(), loaded.textures.len(), loaded.motion_count())));
                         }
-                        ui.label(widget::hint("Drag to turn the model, scroll to zoom."));
-                        ui.add_space(6.0);
-                        ui.label(widget::hint(
-                            "The export gives a GLB file with the skeleton, the meshes, the pictures and one animation for each motion of the character \
-                             (the walk, the run, the jumps, the waves... named motion 12, motion 13...). The import changes the model: the motions of the game \
-                             stay and move the joints by their names, so keep the skeleton of the exported file (move the points, change the pictures, but \
-                             keep the names of the joints).",
-                        ));
                         ui.add_space(6.0);
                         ui.horizontal_wrapped(|ui| {
-                            if self.loaded.is_some() && widget::button(ui, "Export the model (GLB)…") {
-                                self.export(sd.as_ref());
-                            }
-                            if let Some(sd) = sd.as_ref() {
-                                if widget::button(ui, "Import a model (GLB)…") {
-                                    self.import(sd);
+                            ui.add_enabled_ui(self.loaded.is_some(), |ui| {
+                                if widget::button(ui, "Export") {
+                                    self.export(sd.as_ref());
                                 }
-                            }
-                            if changed_packs.contains(&self.chosen) && widget::confirm_button(ui, "Back to the model of the game", "Click again to go back") {
+                            });
+                            ui.add_enabled_ui(sd.is_some(), |ui| {
+                                if widget::button(ui, "Import") {
+                                    if let Some(sd) = sd.as_ref() {
+                                        self.import(sd);
+                                    }
+                                }
+                            });
+                            let changed = changed_packs.contains(&self.chosen);
+                            let reset = ui.add_enabled_ui(changed && sd.is_some(), |ui| widget::confirm_button(ui, "Reset", "Click again to reset")).inner;
+                            if reset {
                                 if let (Some(store), Some(sd)) = (&self.store, sd.as_ref()) {
                                     self.status = Some(match store.reset(sd, self.chosen) {
                                         Ok(()) => {
@@ -273,137 +249,14 @@ impl Module for Character {
                                 }
                             }
                             ui.label(widget::hint("Scale"));
-                            ui.add(egui::DragValue::new(&mut self.scale).speed(0.01).range(0.05..=20.0));
+                            ui.add(egui::DragValue::new(&mut self.scale).speed(0.01).range(0.05..=20.0)).on_hover_text("The size of an imported model");
                         });
-                        if sd.is_none() {
-                            ui.label(widget::hint("Choose the SD card on the Home page to import a model."));
-                        }
                         if let Some((good, message)) = &self.status {
                             ui.label(egui::RichText::new(message).color(if *good { color::GREEN } else { color::ROSE }));
                         }
                     });
                 });
             });
-        });
-    }
-}
-
-/// The Swap tab of the Character page.
-struct Swap {
-    opened_for: Option<PathBuf>,
-    store: Option<Store>,
-    error: Option<String>,
-    labels: Vec<String>,
-    /// The character that gets another model, and the character whose model it gets.
-    target: usize,
-    source: usize,
-    status: Option<(bool, String)>,
-}
-
-impl Default for Swap {
-    fn default() -> Self {
-        Swap { opened_for: None, store: None, error: None, labels: Vec::new(), target: 187, source: 172, status: None }
-    }
-}
-
-impl Swap {
-    fn body(&mut self, ui: &mut egui::Ui, session: &mut Session) {
-        let Some(dump) = session.dump.as_ref() else {
-            widget::missing_card(ui, session.missing().unwrap_or("Choose the dump of the game on the Home page."));
-            return;
-        };
-        if self.opened_for.as_deref() != Some(dump.root()) {
-            self.opened_for = Some(dump.root().to_path_buf());
-            match Store::open(dump) {
-                Ok(store) => {
-                    self.labels = store.labels();
-                    self.store = Some(store);
-                    self.error = None;
-                }
-                Err(message) => {
-                    self.store = None;
-                    self.error = Some(message);
-                }
-            }
-        }
-        if let Some(message) = &self.error {
-            ui.label(egui::RichText::new(message).color(color::ROSE));
-            return;
-        }
-        let Some(sd) = session.sd.clone() else {
-            widget::missing_card(ui, "Choose the SD card on the Home page to swap the models.");
-            return;
-        };
-        let changed = Store::changed_packs(Some(&sd));
-        widget::card(ui, |ui| {
-            ui.label(widget::hint(
-                "Make a character look like another one. Everywhere that the game shows the first character (in the maps, in the cutscenes), it shows the \
-                 model of the second one, with its motions. It works for May and Brendan, the Gym Leaders and every other person of the maps. Restart the \
-                 game after a change.",
-            ));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Show"));
-                let mut target = self.target as u16;
-                let shown = format!("{}{}", self.labels.get(self.target).cloned().unwrap_or_default(), if changed.contains(&self.target) { " (changed)" } else { "" });
-                picker(ui, "swap_target", &shown, 260.0, &mut target, None, || groups(&self.labels, &changed));
-                self.target = target as usize;
-                ui.label(widget::hint("as"));
-                let mut source = self.source as u16;
-                let shown = self.labels.get(self.source).cloned().unwrap_or_default();
-                picker(ui, "swap_source", &shown, 260.0, &mut source, None, || groups(&self.labels, &[]));
-                self.source = source as usize;
-            });
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                if widget::button(ui, "Swap") {
-                    if let Some(store) = &self.store {
-                        self.status = Some(match store.swap(&sd, self.target, self.source) {
-                            Ok(()) => (true, format!("{} now looks like {}. Restart the game.", self.labels[self.target], self.labels[self.source])),
-                            Err(message) => (false, message),
-                        });
-                    }
-                }
-                if widget::button(ui, "Swap both") {
-                    if let Some(store) = &self.store {
-                        // The two characters trade their models: the first model is read before it is replaced.
-                        let result = store.pack(Some(&sd), self.target).ok_or_else(|| "A model is not in the archive.".to_string()).and_then(|first| {
-                            store.swap(&sd, self.target, self.source)?;
-                            sd.write(&store::path(self.source), &first)?;
-                            sd.mark_changed(&store::path(self.source))
-                        });
-                        self.status = Some(match result {
-                            Ok(()) => (true, format!("{} and {} traded their models. Restart the game.", self.labels[self.target], self.labels[self.source])),
-                            Err(message) => (false, message),
-                        });
-                    }
-                }
-            });
-            if let Some((good, message)) = &self.status {
-                ui.label(egui::RichText::new(message).color(if *good { color::GREEN } else { color::ROSE }));
-            }
-        });
-        ui.add_space(6.0);
-        widget::card(ui, |ui| {
-            ui.label(widget::title("Changed characters"));
-            if changed.is_empty() {
-                ui.label(widget::hint("No character is changed: the game has all its models."));
-            }
-            let mut give_back = None;
-            for &pack in &changed {
-                ui.horizontal(|ui| {
-                    ui.label(self.labels.get(pack).map_or("?", |s| s.as_str()));
-                    if widget::confirm_button(ui, "Back to the model of the game", "Click again to go back") {
-                        give_back = Some(pack);
-                    }
-                });
-            }
-            if let (Some(pack), Some(store)) = (give_back, &self.store) {
-                self.status = Some(match store.reset(&sd, pack) {
-                    Ok(()) => (true, "The model of the game is back. Restart the game.".to_string()),
-                    Err(message) => (false, message),
-                });
-            }
         });
     }
 }
