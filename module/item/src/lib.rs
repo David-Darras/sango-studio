@@ -19,6 +19,9 @@ use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
+/// The width of the card of the icon, in points.
+const ICON_CARD_WIDTH: f32 = 230.0;
+
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
 
@@ -743,23 +746,27 @@ impl Item {
         }
     }
 
-    /// The texts of the open item, then its reactions: a new item keeps both in its own file.
-    fn texts_and_reactions(&mut self, ui: &mut egui::Ui, session: &Session) {
+    /// The texts of the open item: a new item keeps them in its own file.
+    fn texts_ui(&mut self, ui: &mut egui::Ui, session: &Session) {
         let id = self.item;
         if let Some(entry) = self.store.find_mut(id) {
             let mut language = self.custom_language;
             custom::texts_ui(ui, entry, &mut language);
             self.custom_language = language;
-            ui.add_space(8.0);
-            custom::reactions_ui(ui, entry);
         } else {
             self.texts.compact_ui(ui, session.sd.as_ref(), id);
-            ui.add_space(8.0);
-            self.game_reactions_tab(ui, session);
         }
     }
 
-    /// The page: one card with the texts and the reactions, the icon, then the groups of the data in one or two columns.
+    /// The reactions of the open item: a new item keeps them in its own file.
+    fn reactions_ui(&mut self, ui: &mut egui::Ui, session: &Session) {
+        match self.store.find_mut(self.item) {
+            Some(entry) => custom::reactions_ui(ui, entry),
+            None => self.game_reactions_tab(ui, session),
+        }
+    }
+
+    /// The page: the texts and the icon, the reactions, then the groups of the data in one or two columns.
     fn page_view(&mut self, ui: &mut egui::Ui, session: &Session) {
         let Some(mut item) = self.data.take() else { return };
         let mut pockets_table = std::mem::take(&mut self.pockets);
@@ -768,16 +775,27 @@ impl Item {
             let width = COLUMN_WIDTH * columns as f32 + 10.0 * (columns - 1) as f32;
             ui.vertical(|ui| {
                 ui.set_width(width);
-                widget::card(ui, |ui| {
-                    ui.set_min_width(width - 36.0);
-                    self.texts_and_reactions(ui, session);
+                // The texts, with the icon on their right.
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(width - ICON_CARD_WIDTH - 10.0);
+                        widget::card(ui, |ui| {
+                            ui.set_min_width(width - ICON_CARD_WIDTH - 46.0);
+                            self.texts_ui(ui, session);
+                        });
+                    });
+                    ui.add_space(10.0);
+                    self.icon_card(ui, session);
                 });
                 ui.add_space(10.0);
-                self.icon_card(ui, session);
+                widget::card(ui, |ui| {
+                    ui.set_min_width(width - 36.0);
+                    self.reactions_ui(ui, session);
+                });
             });
             ui.add_space(10.0);
             let layout: Vec<Vec<Group>> = if columns == 2 {
-                vec![vec![Group::Shop, Group::Use, Group::Friendship], vec![Group::Held, Group::Effects, Group::Evs]]
+                vec![vec![Group::Shop, Group::Use, Group::Friendship, Group::Evs], vec![Group::Held, Group::Effects]]
             } else {
                 vec![Group::ALL.to_vec()]
             };

@@ -265,41 +265,37 @@ impl Item {
         }
     }
 
-    /// The card of the icon of the item: the picture, and the buttons to export or import it.
+    /// The card of the icon of the item, like the card of the icon of a species: the buttons on the left, the picture on the right.
     pub fn icon_card(&mut self, ui: &mut egui::Ui, session: &Session) {
+        let own = crate::icons::ItemIcons::has_own(self.item);
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(widget::title("Icon"));
+                    ui.add_space(6.0);
+                    ui.add_enabled_ui(own, |ui| {
+                        if widget::button(ui, "Export") {
+                            self.export_icon();
+                        }
+                        if widget::button(ui, "Import") {
+                            self.import_icon();
+                        }
+                    });
+                    ui.add_enabled_ui(own && session.sd.is_some(), |ui| {
+                        if widget::button(ui, "Reset") {
+                            self.run_reset(session, Scope::Item, &[Part::Icons]);
+                        }
+                    });
+                })
+                .response
+                .on_disabled_hover_text("This item has no icon of its own.");
+                ui.add_space(12.0);
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(96.0, 96.0), egui::Sense::hover());
                 ui.painter().rect_filled(rect, egui::Rounding::same(10.0), color::SURFACE_STRONG);
                 if let Some(texture) = self.icons.texture(ui.ctx(), self.item) {
                     let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                     ui.painter().image(texture.id(), rect.shrink(3.0), full, egui::Color32::WHITE);
                 }
-                ui.vertical(|ui| {
-                    ui.label(widget::title("Icon"));
-                    let own = crate::icons::ItemIcons::has_own(self.item);
-                    if own {
-                        ui.label(widget::hint("30 × 30 pixels, in the Bag and the shops."));
-                    } else {
-                        ui.label(widget::hint("This item has no icon of its own."));
-                    }
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.add_enabled_ui(own, |ui| {
-                            if widget::button(ui, "Export PNG…") {
-                                self.export_icon();
-                            }
-                            if widget::button(ui, "Import PNG…") {
-                                self.import_icon();
-                            }
-                        });
-                        ui.add_enabled_ui(own && session.sd.is_some(), |ui| {
-                            if widget::button(ui, "Reset icon") {
-                                self.run_reset(session, Scope::Item, &[Part::Icons]);
-                            }
-                        });
-                    });
-                });
             });
         });
     }

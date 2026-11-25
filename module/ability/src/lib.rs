@@ -312,19 +312,25 @@ impl Ability {
             ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
                     ui.set_width(720.0);
-                    // One card: the language, the name, the description, then the reactions.
+                    // The card of the texts, then the card of the reactions.
+                    let custom = self.store.find(self.id).is_some_and(|entry| !entry.is_game());
                     widget::card(ui, |ui| {
                         ui.set_min_width(690.0);
-                        if let Some(entry) = self.store.find_mut(self.id).filter(|entry| !entry.is_game()) {
-                            let mut language = self.custom_language;
-                            custom::texts_ui(ui, entry, &mut language);
-                            self.custom_language = language;
-                            ui.add_space(8.0);
-                            custom::reactions_ui(ui, entry);
-                        } else {
-                            self.texts.compact_ui(ui, session.sd.as_ref(), self.id);
-                            ui.add_space(8.0);
-                            self.game_reactions_tab(ui, session);
+                        match self.store.find_mut(self.id).filter(|_| custom) {
+                            Some(entry) => {
+                                let mut language = self.custom_language;
+                                custom::texts_ui(ui, entry, &mut language);
+                                self.custom_language = language;
+                            }
+                            None => self.texts.compact_ui(ui, session.sd.as_ref(), self.id),
+                        }
+                    });
+                    ui.add_space(10.0);
+                    widget::card(ui, |ui| {
+                        ui.set_min_width(690.0);
+                        match self.store.find_mut(self.id).filter(|_| custom) {
+                            Some(entry) => custom::reactions_ui(ui, entry),
+                            None => self.game_reactions_tab(ui, session),
                         }
                     });
                 });

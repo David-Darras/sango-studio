@@ -652,23 +652,27 @@ impl Move {
         }
     }
 
-    /// The texts of the open move, then its reactions: a new move keeps both in its own file.
-    fn texts_and_reactions(&mut self, ui: &mut egui::Ui, session: &Session) {
+    /// The texts of the open move: a new move keeps them in its own file.
+    fn texts_ui(&mut self, ui: &mut egui::Ui, session: &Session) {
         let id = self.id;
         if let Some(entry) = self.store.find_mut(id) {
             let mut language = self.custom_language;
             custom::texts_ui(ui, entry, &mut language);
             self.custom_language = language;
-            ui.add_space(8.0);
-            custom::reactions_ui(ui, entry);
         } else {
             self.texts.compact_ui(ui, session.sd.as_ref(), id);
-            ui.add_space(8.0);
-            self.game_reactions_tab(ui, session);
         }
     }
 
-    /// The page: one card with the texts and the reactions, then the groups of the data in one or two columns.
+    /// The reactions of the open move: a new move keeps them in its own file.
+    fn reactions_ui(&mut self, ui: &mut egui::Ui, session: &Session) {
+        match self.store.find_mut(self.id) {
+            Some(entry) => custom::reactions_ui(ui, entry),
+            None => self.game_reactions_tab(ui, session),
+        }
+    }
+
+    /// The page: the card of the texts, the card of the reactions, then the groups of the data in one or two columns.
     fn page_view(&mut self, ui: &mut egui::Ui, session: &Session) {
         let Some(mut data) = self.data.take() else { return };
         egui::ScrollArea::vertical().id_salt("move_page").auto_shrink([false, false]).show(ui, |ui| {
@@ -678,7 +682,12 @@ impl Move {
                 ui.set_width(width);
                 widget::card(ui, |ui| {
                     ui.set_min_width(width - 36.0);
-                    self.texts_and_reactions(ui, session);
+                    self.texts_ui(ui, session);
+                });
+                ui.add_space(10.0);
+                widget::card(ui, |ui| {
+                    ui.set_min_width(width - 36.0);
+                    self.reactions_ui(ui, session);
                 });
             });
             ui.add_space(10.0);
