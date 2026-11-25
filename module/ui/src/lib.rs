@@ -3,6 +3,7 @@
 pub mod focus;
 pub mod game_text;
 pub mod item_menu;
+pub mod language;
 pub mod module;
 pub mod picker;
 pub mod retired;

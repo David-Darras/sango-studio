@@ -180,13 +180,7 @@ impl AbilityTexts {
 
 /// A menu of the eight languages, English first. The value is the place of the language in `LANGUAGES`.
 pub(crate) fn language_menu(ui: &mut egui::Ui, id: &str, language: &mut usize) {
-    let chosen = LANGUAGES.get(*language).map_or("?", |l| l.name);
-    egui::ComboBox::from_id_salt(id).selected_text(chosen).show_ui(ui, |ui| {
-        let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
-        for place in order {
-            ui.selectable_value(language, place, LANGUAGES[place].name);
-        }
-    });
+    sango_ui::language::menu(ui, id, language, None);
 }
 
 /// What the CSV functions need to read the texts.

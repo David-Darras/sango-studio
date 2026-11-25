@@ -143,7 +143,8 @@ impl PackContent {
                 }
             });
             if rows.is_empty() {
-                ui.label(widget::hint("This pack has no icons."));
+                self.files_section(ui, library, &id);
+                self.apply_bar(ui, library, sd);
                 self.models_section(ui, library, &id, dump);
                 return;
             }
@@ -207,28 +208,78 @@ impl PackContent {
                 library.set_enabled(&id, &key, on);
                 self.changed = true;
             }
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                ui.add_enabled_ui(self.changed, |ui| {
-                    if widget::button_styled(ui, egui::RichText::new("Apply to the SD card").color(color::WHITE), Some(color::ACCENT)) {
-                        self.status = Some(match library.save(sd).and_then(|_| library.write_icons(sd)) {
-                            Ok(_) => {
-                                self.changed = false;
-                                (true, "The icons that are turned on are on the SD card. Restart the game.".to_string())
-                            }
-                            Err(message) => (false, message),
-                        });
-                    }
-                });
-                if self.changed {
-                    widget::badge(ui, "Not applied", color::AMBER);
-                }
-            });
-            if let Some((ok, message)) = &self.status {
-                ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
-            }
+            self.files_section(ui, library, &id);
+            self.apply_bar(ui, library, sd);
             self.models_section(ui, library, &id, dump);
         });
+    }
+
+    /// The button that writes the choices on the SD card, and what happened.
+    fn apply_bar(&mut self, ui: &mut egui::Ui, library: &mut Library, sd: &SdCard) {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(self.changed, |ui| {
+                if widget::button_styled(ui, egui::RichText::new("Apply to the SD card").color(color::WHITE), Some(color::ACCENT)) {
+                    self.status = Some(match library.save(sd).and_then(|_| library.write_icons(sd)) {
+                        Ok(_) => {
+                            self.changed = false;
+                            (true, "What is turned on is on the SD card. Restart the game.".to_string())
+                        }
+                        Err(message) => (false, message),
+                    });
+                }
+            });
+            if self.changed {
+                widget::badge(ui, "Not applied", color::AMBER);
+            }
+        });
+        if let Some((ok, message)) = &self.status {
+            ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
+        }
+    }
+
+    /// The files of the game that the pack replaces (musics, characters): one check box for each.
+    fn files_section(&mut self, ui: &mut egui::Ui, library: &mut Library, id: &str) {
+        let Some(pack) = library.packs.iter().find(|p| p.id == id) else { return };
+        if pack.files.is_empty() {
+            return;
+        }
+        let files = pack.files.clone();
+        ui.add_space(10.0);
+        ui.separator();
+        let on = files.iter().filter(|f| library.is_enabled(id, &f.key())).count();
+        ui.label(widget::title("Files of the game"));
+        ui.label(widget::hint(&format!("{on} of {} turned on. A file that is turned on replaces the file of the game.", files.len())));
+        let needle = self.search.to_lowercase();
+        let shown: Vec<&sango_pack::pack::PackFile> = files.iter().filter(|f| needle.is_empty() || f.label.to_lowercase().contains(&needle) || f.target.to_lowercase().contains(&needle)).collect();
+        let mut toggles: Vec<(String, bool)> = Vec::new();
+        ui.horizontal(|ui| {
+            ui.label("Search");
+            ui.add(egui::TextEdit::singleline(&mut self.search).desired_width(180.0));
+            if widget::button(ui, "All on") {
+                toggles.extend(shown.iter().map(|f| (f.key(), true)));
+            }
+            if widget::button(ui, "All off") {
+                toggles.extend(shown.iter().map(|f| (f.key(), false)));
+            }
+        });
+        egui::ScrollArea::vertical().id_salt("pack_files").max_height(360.0).auto_shrink([false, true]).show_rows(ui, 24.0, shown.len(), |ui, range| {
+            for file in &shown[range] {
+                ui.horizontal(|ui| {
+                    let mut enabled = library.is_enabled(id, &file.key());
+                    if ui.checkbox(&mut enabled, "").changed() {
+                        toggles.push((file.key(), enabled));
+                    }
+                    widget::badge(ui, file.kind.label(), if file.kind == sango_pack::pack::FileKind::Music { color::ACCENT } else { color::TEAL });
+                    ui.label(egui::RichText::new(if file.label.is_empty() { &file.file } else { &file.label }).strong());
+                    ui.label(widget::hint(&format!("replaces {}", file.target)));
+                });
+            }
+        });
+        for (key, on) in toggles {
+            library.set_enabled(id, &key, on);
+            self.changed = true;
+        }
     }
 
     /// The models of the pack: a list, and the view of the model that the user chooses.

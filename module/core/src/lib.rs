@@ -20,6 +20,7 @@ pub mod file_lists;
 pub mod font;
 pub mod garc;
 pub mod item_icons;
+pub mod language_tags;
 pub mod learnset;
 pub mod lz;
 pub mod mega_evolution;

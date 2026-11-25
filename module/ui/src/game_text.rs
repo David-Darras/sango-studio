@@ -20,6 +20,7 @@ static FONT: Mutex<Option<(PathBuf, Option<Arc<GameFont>>)>> = Mutex::new(None);
 
 /// Reads the font of the game when the dump changes. The app calls this before it draws the pages.
 pub fn set_dump(dump: Option<&Dump>) {
+    crate::language::set_dump(dump);
     let Ok(mut held) = FONT.lock() else { return };
     let root = dump.map(|dump| dump.root().to_path_buf());
     match (&*held, &root) {

@@ -170,14 +170,7 @@ impl TextTab {
             });
             egui::Grid::new("species_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
                 ui.label("Language");
-                let chosen = LANGUAGES.get(self.language).map_or("?", |l| l.name);
-                egui::ComboBox::from_id_salt("species_text_language").selected_text(chosen).show_ui(ui, |ui| {
-                    // English first, then the other languages in the order of the game.
-                    let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
-                    for (index, language) in order.map(|i| (i, &LANGUAGES[i])) {
-                        ui.selectable_value(&mut self.language, index, language.name);
-                    }
-                });
+                sango_ui::language::menu(ui, "species_text_language", &mut self.language, None);
                 ui.end_row();
                 for field in fields {
                     ui.label(field.label).on_hover_text(field.hint);

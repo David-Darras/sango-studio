@@ -11,6 +11,7 @@ pub mod names;
 pub mod mp3;
 pub mod page;
 pub mod wav;
+pub mod xy;
 pub mod waves;
 
 pub use page::MusicPage;

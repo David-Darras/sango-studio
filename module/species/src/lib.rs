@@ -2859,7 +2859,8 @@ mod test {
         let texture = sango_species_base::icon_texture(&mut textures, garc.as_ref(), &ctx, 25).expect("no texture");
         assert_eq!(texture.size(), [40, 30]);
         let _ = sango_species_base::icon_texture(&mut textures, garc.as_ref(), &ctx, 25);
-        assert_eq!(textures.len(), 1);
+        // One texture; the other entry is the mark of the generation of the icons.
+        assert_eq!(textures.values().filter(|t| t.is_some()).count(), 1);
     }
 
     /// With the dump of the game: every icon file of the table is in the archive of

@@ -179,14 +179,7 @@ fn named_menu(ui: &mut egui::Ui, id: &str, value: &mut u32, entries: &[(u32, Str
 
 /// The menu of the languages.
 fn language_menu(ui: &mut egui::Ui, id: &str, language: &mut usize, width: f32) {
-    let combo = egui::ComboBox::from_id_salt(id).selected_text(LANGUAGES[*language].name).width(width).show_ui(ui, |ui| {
-        for (number, item) in LANGUAGES.iter().enumerate() {
-            ui.selectable_value(language, number, item.name);
-        }
-    });
-    if let Some(to) = sango_ui::focus::nav(ui, &combo.response, *language, LANGUAGES.len(), false) {
-        *language = to;
-    }
+    sango_ui::language::menu(ui, id, language, Some(width));
 }
 
 impl Trainer {

@@ -32,6 +32,9 @@ pub const MANIFEST: &str = "manifest.json";
 /// The folder of the pack that holds the pictures of the item icons (see [`PackItemIcon`]).
 pub const ITEM_ICON_FOLDER: &str = "item_icons/";
 
+/// The folder of the pack that has the files of the game that the pack replaces (see [`PackFile`]).
+pub const FILE_FOLDER: &str = "files/";
+
 /// A species: a species of the game (its number), or a species of a pack (its name).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -172,6 +175,98 @@ impl PackItemIcon {
     }
 }
 
+/// What a file of the game is: where the plugin reads the file that replaces it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileKind {
+    /// A music or a jingle: a stream file of the folder `sound` of the game (`bgm_sg_c_01.dspadpcm.bcstm`). The plugin plays the
+    /// file `music/<name>` of the SD card in place of it.
+    Music,
+    /// The overworld model of a character: a pack of the archive 21 (its number). The plugin gives the file
+    /// `overworld/model/<number>.bin` of the SD card in place of it (compressed like the archive).
+    Character,
+    /// A file of a battle model of a trainer of X and Y: a new file of the archive 133 (its number, 75 and after),
+    /// `trainer/xy_model/<number>.bin`.
+    TrainerModel,
+    /// The introduction of a trainer of X and Y: a new file of the archive of the battle animations (34),
+    /// `trainer/xy_sequence/<number>.bin`.
+    TrainerIntro,
+    /// The layout of the introductions of X and Y: a new file of the archive 33, `trainer/xy_layout/<number>.bin`.
+    TrainerLayout,
+    /// A piece of a battle background of X and Y: a new file of the archive 136, `battle/xy_background/<number>.bin`.
+    Background,
+    /// The pieces that the menu of the plugin offers for one kind of piece (G ground, F far ground, B background, O plate):
+    /// `battle/xy_background/choices_<kind>.bin`.
+    BackgroundChoices,
+    /// A list of names for the menus of the plugin: `names/<name>.bin` (the plugin reads this folder before its own).
+    NameList,
+}
+
+impl FileKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            FileKind::Music => "Music",
+            FileKind::Character => "Character",
+            FileKind::TrainerModel => "Battle model",
+            FileKind::TrainerIntro => "Battle intro",
+            FileKind::TrainerLayout => "Intro layout",
+            FileKind::Background => "Background",
+            FileKind::BackgroundChoices => "Background list",
+            FileKind::NameList => "Names",
+        }
+    }
+}
+
+/// A file of the game that the pack replaces: the file `files/<file>` of the pack goes on the SD card where the plugin reads it in
+/// place of the file `target` of the game.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PackFile {
+    pub kind: FileKind,
+    /// The file of the game: the name of a stream file for a music, the number of a pack of the archive 21 for a character.
+    pub target: String,
+    /// The name of the file in the pack: `files/<file>`.
+    pub file: String,
+    /// The name that Studio shows, for example `Bicycle (X and Y)`.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+}
+
+impl PackFile {
+    /// The key of the file for the choices of the user (see `Library::is_enabled`).
+    pub fn key(&self) -> String {
+        format!("file:{}", self.file)
+    }
+
+    /// The place of the file on the SD card, in the folder of Studio.
+    pub fn sd_path(&self) -> String {
+        match self.kind {
+            FileKind::Music => format!("music/{}", self.target),
+            FileKind::Character => format!("overworld/model/{}.bin", self.target),
+            FileKind::TrainerModel => format!("trainer/xy_model/{}.bin", self.target),
+            FileKind::TrainerIntro => format!("trainer/xy_sequence/{}.bin", self.target),
+            FileKind::TrainerLayout => format!("trainer/xy_layout/{}.bin", self.target),
+            FileKind::Background => format!("battle/xy_background/{}.bin", self.target),
+            FileKind::BackgroundChoices => format!("battle/xy_background/choices_{}.bin", self.target),
+            FileKind::NameList => format!("names/{}.bin", self.target),
+        }
+    }
+
+    /// What is wrong with the file, or `None`.
+    pub fn problem(&self) -> Option<String> {
+        let plain = |text: &str| !text.is_empty() && text.chars().count() <= 80 && !text.chars().any(|c| c == '/' || c == '\\' || c == ':' || c.is_control()) && !text.contains("..");
+        if !plain(&self.file) {
+            return Some(format!("The file '{}' has a wrong name.", self.file));
+        }
+        let target_ok = match self.kind {
+            FileKind::Music => plain(&self.target) && self.target.ends_with(".bcstm"),
+            FileKind::Character | FileKind::TrainerModel | FileKind::TrainerIntro | FileKind::TrainerLayout | FileKind::Background => self.target.parse::<u16>().is_ok(),
+            FileKind::BackgroundChoices => ["G", "F", "B", "O"].contains(&self.target.as_str()),
+            FileKind::NameList => !self.target.is_empty() && self.target.len() <= 40 && self.target.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+        };
+        (!target_ok).then(|| format!("The file '{}' replaces '{}': this is not a file of the game.", self.file, self.target))
+    }
+}
+
 /// The description of a pack and its content.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Pack {
@@ -210,6 +305,13 @@ pub struct Pack {
     /// The pictures of the item icons by name (PNG files of 30 × 30 pixels), read from the pack file.
     #[serde(skip)]
     pub item_icon_files: std::collections::BTreeMap<String, Vec<u8>>,
+    /// The files of the game that the pack replaces (musics, characters). The bytes are read from the pack file when they are
+    /// needed (see [`Pack::read_file`]), or are in `file_data` for a pack that is made.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<PackFile>,
+    /// The bytes of the files of a pack that is made, by name: [`Pack::write_zip`] writes them.
+    #[serde(skip)]
+    pub file_data: std::collections::BTreeMap<String, Vec<u8>>,
     /// The file that the pack was read from: the models are read from it when they are needed.
     #[serde(skip)]
     pub file: Option<PathBuf>,
@@ -328,6 +430,19 @@ impl Pack {
                 return Err(format!("The item icon file {} of the game is two times in the pack.", icon.game_file));
             }
         }
+        let mut files = std::collections::HashSet::new();
+        let mut targets = std::collections::HashSet::new();
+        for file in &self.files {
+            if let Some(problem) = file.problem() {
+                return Err(problem);
+            }
+            if !files.insert(file.file.as_str()) {
+                return Err(format!("The file '{}' is two times in the pack.", file.file));
+            }
+            if !targets.insert(file.sd_path()) {
+                return Err(format!("Two files of the pack replace '{}'.", file.target));
+            }
+        }
         let mut names = std::collections::HashSet::new();
         for species in &self.species {
             if species.name.is_empty() || species.name.chars().count() > MAX_NAME {
@@ -428,6 +543,13 @@ impl Pack {
             zip.start_file(format!("{ITEM_ICON_FOLDER}{name}.png"), options).map_err(|e| e.to_string())?;
             zip.write_all(bytes).map_err(|e| e.to_string())?;
         }
+        for file in &self.files {
+            let bytes = self.file_data.get(&file.file).ok_or_else(|| format!("The file '{}' has no bytes.", file.file))?;
+            // Musics and models do not shrink: they are stored.
+            let stored = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored).large_file(true);
+            zip.start_file(format!("{FILE_FOLDER}{}", file.file), stored).map_err(|e| e.to_string())?;
+            zip.write_all(bytes).map_err(|e| e.to_string())?;
+        }
         zip.finish().map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -475,6 +597,19 @@ impl Pack {
         let mut pack = Pack::read_manifest(std::io::BufReader::new(file))?;
         pack.file = Some(path.to_path_buf());
         Ok(pack)
+    }
+
+    /// The bytes of a file of the game that the pack replaces (see [`PackFile`]): from `file_data`, else from the pack file.
+    pub fn read_file(&self, name: &str) -> Result<Vec<u8>, String> {
+        if let Some(bytes) = self.file_data.get(name) {
+            return Ok(bytes.clone());
+        }
+        let path = self.file.as_ref().ok_or_else(|| format!("The pack '{}' was not read from a file.", self.id))?;
+        let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
+        let mut bytes = Vec::new();
+        zip.by_name(&format!("{FILE_FOLDER}{name}")).map_err(|_| format!("The pack '{}' has no file '{name}'.", self.id))?.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
+        Ok(bytes)
     }
 
     /// Reads the 8 files of a model of the pack from the pack file.

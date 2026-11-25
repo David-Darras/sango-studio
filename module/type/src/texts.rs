@@ -127,13 +127,7 @@ impl TypeTexts {
 
     /// The menu of the eight languages, English first.
     pub fn language_menu(&mut self, ui: &mut egui::Ui) {
-        let chosen = LANGUAGES.get(self.language).map_or("?", |l| l.name);
-        egui::ComboBox::from_id_salt("type_text_language").selected_text(chosen).show_ui(ui, |ui| {
-            let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
-            for place in order {
-                ui.selectable_value(&mut self.language, place, LANGUAGES[place].name);
-            }
-        });
+        sango_ui::language::menu(ui, "type_text_language", &mut self.language, None);
     }
 
     /// The name of a type of the game in the chosen language as the romfs has it.

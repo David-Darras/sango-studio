@@ -8,7 +8,7 @@
 //! A new nature works for the statistics only: the game does not know it for the flavors (Pokéblocks, berries that confuse) and for the
 //! names, so the name of a new nature shows only in Sango Studio.
 
-use sango_core::natures::{Nature as Row, NatureColor, NatureTable, GAME_COUNT, GAME_NATURE_NAMES, MAX_CHANGE, MAX_COUNT, NAME_LANGUAGES, STATS};
+use sango_core::natures::{Nature as Row, NatureColor, NatureTable, GAME_COUNT, GAME_NATURE_NAMES, MAX_CHANGE, MAX_COUNT, STATS};
 use sango_core::SdCard;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
@@ -152,16 +152,11 @@ impl Nature {
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Language:");
-                egui::ComboBox::from_id_salt("nature_language_combo")
-                    .selected_text(NAME_LANGUAGES.get(self.language).copied().unwrap_or("English"))
-                    .width(180.0)
-                    .show_ui(ui, |ui| {
-                        for (place, name) in NAME_LANGUAGES.iter().enumerate() {
-                            if ui.selectable_label(self.language == place, *name).clicked() {
-                                self.language = place;
-                            }
-                        }
-                    });
+                // The places of NAME_LANGUAGES in the languages of the game: English, then the order of the game.
+                const GAME_PLACE: [usize; 8] = [2, 0, 1, 3, 4, 5, 6, 7];
+                let mut chosen = GAME_PLACE.get(self.language).copied().unwrap_or(2);
+                sango_ui::language::menu(ui, "nature_language_combo", &mut chosen, Some(180.0));
+                self.language = GAME_PLACE.iter().position(|&p| p == chosen).unwrap_or(0);
             });
             ui.add_space(6.0);
             let language = self.language;

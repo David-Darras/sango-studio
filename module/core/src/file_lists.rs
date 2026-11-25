@@ -23,6 +23,11 @@ pub fn folders() -> Vec<(String, usize)> {
         ("trainer/pokemon".to_string(), 38),
         ("trainer/picture".to_string(), 160),
         ("trainer/model".to_string(), 133),
+        // The battle models of the trainers of X and Y, their introductions and the layout of the introductions: new files of the
+        // archives 133, 34 and 33 (the pack of X and Y writes them).
+        ("trainer/xy_model".to_string(), 133),
+        ("trainer/xy_sequence".to_string(), 34),
+        ("trainer/xy_layout".to_string(), 33),
         ("choreography".to_string(), 34),
         ("effect".to_string(), 31),
         ("script/field".to_string(), 29),
@@ -33,6 +38,8 @@ pub fn folders() -> Vec<(String, usize)> {
         ("font".to_string(), 167),
         ("item/icon".to_string(), 92),
         ("battle/background".to_string(), 136),
+        // The pieces of the battle backgrounds of X and Y: new files of the archive 136 (the pack of X and Y writes them).
+        ("battle/xy_background".to_string(), 136),
     ];
     found.extend(LANGUAGES.iter().map(|language| (format!("game_text/{}", language.folder), language.archive)));
     found

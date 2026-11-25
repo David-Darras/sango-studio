@@ -12,8 +12,9 @@ const RELOAD_PATH_SIZE: usize = 64;
 const RELOAD_MAX_PATHS: usize = 256;
 
 /// The paths in the folder of the studio that the plugin reads: the other files stay on the computer. A folder ends with `/`.
-const PUBLISHED: [&str; 31] = [
+const PUBLISHED: [&str; 32] = [
     "reload.bin",
+    "names/",
     "font/",
     "layout/",
     "battle/",

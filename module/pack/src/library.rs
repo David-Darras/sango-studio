@@ -888,7 +888,51 @@ impl Library {
         let list: Vec<u16> = files.keys().copied().collect();
         sd.write(state_path, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
         self.write_item_icons(sd)?;
+        self.write_files(sd)?;
         Ok(files.len())
+    }
+
+    /// Writes the files of the game that the active packs replace (musics, characters, see [`crate::pack::PackFile`]) where the
+    /// plugin reads them. `write_icons` calls it.
+    ///
+    /// A later pack wins over an earlier one for the same file. The files that an earlier call wrote and that no pack asks for now
+    /// are removed: the game has its own file again (the list is in `pack_files_state.json`, on the computer). A file that the
+    /// Music or the Character page wrote is replaced by the file of a pack. Returns the number of files that the packs ask for.
+    pub fn write_files(&self, sd: &SdCard) -> Result<usize, String> {
+        use std::collections::BTreeMap;
+        // The place on the SD card of each file, and the pack and the file that give it.
+        let mut wanted: BTreeMap<String, (&crate::Pack, &crate::pack::PackFile)> = BTreeMap::new();
+        for pack in &self.packs {
+            if !self.is_active(&pack.id) {
+                continue;
+            }
+            for file in &pack.files {
+                if self.is_enabled(&pack.id, &file.key()) && file.problem().is_none() {
+                    wanted.insert(file.sd_path(), (pack, file));
+                }
+            }
+        }
+        let state_path = "pack_files_state.json";
+        let previous: Vec<String> = sd.read(state_path).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        for old in previous {
+            if !wanted.contains_key(&old) && sd.remove(&old)? {
+                sd.mark_changed(&old)?;
+            }
+        }
+        for (path, (pack, file)) in &wanted {
+            let bytes = pack.read_file(&file.file)?;
+            if sd.read(path).as_deref() != Some(bytes.as_slice()) {
+                sd.write(path, &bytes)?;
+                sd.mark_changed(path)?;
+            }
+        }
+        let list: Vec<&String> = wanted.keys().collect();
+        if list.is_empty() {
+            sd.remove(state_path)?;
+        } else {
+            sd.write(state_path, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
+        }
+        Ok(wanted.len())
     }
 
     /// Writes the item icons of the active packs on the SD card: `item/icon/<file>.bin`, where the Item page also writes the
@@ -947,3 +991,49 @@ impl Library {
         Ok(models)
     }
 }
+
+#[cfg(test)]
+mod files_test {
+    use super::*;
+    use crate::pack::{FileKind, PackFile};
+
+    /// The musics and the characters of the packs go where the plugin reads them, a later pack wins, and a file that is turned
+    /// off or that leaves goes away.
+    #[test]
+    fn the_files_of_the_packs_are_written_and_removed() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_files_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("sd")).unwrap();
+        let sd = SdCard::open(folder.join("sd").to_str().unwrap()).unwrap();
+        let file = |kind, target: &str, name: &str| PackFile { kind, target: target.into(), file: name.into(), label: String::new() };
+        let mut a = crate::Pack { id: "a".into(), name: "a".into(), version: "1".into(), ..crate::Pack::default() };
+        a.files = vec![file(FileKind::Music, "bgm_sg_bicycle.dspadpcm.bcstm", "bike.bcstm"), file(FileKind::Character, "172", "hero.bin")];
+        a.file_data.insert("bike.bcstm".into(), b"music a".to_vec());
+        a.file_data.insert("hero.bin".into(), b"model".to_vec());
+        let mut b = crate::Pack { id: "b".into(), name: "b".into(), version: "1".into(), ..crate::Pack::default() };
+        b.files = vec![file(FileKind::Music, "bgm_sg_bicycle.dspadpcm.bcstm", "other.bcstm")];
+        b.file_data.insert("other.bcstm".into(), b"music b".to_vec());
+        let (fa, fb) = (folder.join("a.sangopack"), folder.join("b.sangopack"));
+        a.save(&fa).unwrap();
+        b.save(&fb).unwrap();
+        // The bytes come back from the pack file.
+        assert_eq!(crate::Pack::open(&fa).unwrap().read_file("hero.bin").unwrap(), b"model");
+        let mut library = Library::default();
+        library.install(crate::Pack::open(&fa).unwrap()).unwrap();
+        library.install(crate::Pack::open(&fb).unwrap()).unwrap();
+        assert_eq!(library.write_files(&sd).unwrap(), 2);
+        assert_eq!(sd.read("music/bgm_sg_bicycle.dspadpcm.bcstm").unwrap(), b"music b", "the later pack wins");
+        assert_eq!(sd.read("overworld/model/172.bin").unwrap(), b"model");
+        library.set_enabled("a", "file:hero.bin", false);
+        library.remove("b").unwrap();
+        assert_eq!(library.write_files(&sd).unwrap(), 1);
+        assert_eq!(sd.read("music/bgm_sg_bicycle.dspadpcm.bcstm").unwrap(), b"music a");
+        assert!(sd.read("overworld/model/172.bin").is_none(), "a file that is turned off goes away");
+        // A wrong target is refused by the check of the pack.
+        let mut wrong = crate::Pack { id: "w".into(), name: "w".into(), version: "1".into(), ..crate::Pack::default() };
+        wrong.files = vec![file(FileKind::Music, "../x.bcstm", "x.bcstm")];
+        assert!(wrong.check().is_err());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+

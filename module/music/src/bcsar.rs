@@ -63,6 +63,9 @@ pub struct Sound {
     pub place: Place,
     /// For a sequence: the places of its banks in the list of the banks.
     pub banks: Vec<usize>,
+    /// For a stream: the loop that the archive gives (the first and the last frame), when the stream has one. The streams of
+    /// Pokémon X and Y (AAC files) keep their loop only here.
+    pub loop_frames: Option<(u32, u32)>,
 }
 
 /// The sounds of an archive.
@@ -127,6 +130,7 @@ impl Archive {
             *block = (r.u32(0x14 + i * 12 + 4)? as usize, r.u32(0x14 + i * 12 + 8)? as usize);
         }
         let (strings, info, file) = (blocks[0].0 + 8, blocks[1].0 + 8, blocks[2].0);
+        let version = r.u32(8)?;
 
         // The strings.
         let table = r.target(strings, strings)?;
@@ -201,7 +205,29 @@ impl Archive {
                     used.push((r.u32(list + 4 + k * 4)? & 0x00FF_FFFF) as usize);
                 }
             }
-            out.push(Sound { index, name, kind, file_id, place: place_of(file_id)?, banks: used });
+            // The loop of a stream. The older archives (version below 2.3.1, Pokémon X and Y) have, at +12 of the details, flags then
+            // one value for each flag: bit 0 the kind of the file (its byte 1 is 1 for a loop), bit 1 the first frame of the loop,
+            // bit 2 the last frame. The newer archives keep the loop in the stream file.
+            let mut loop_frames = None;
+            if kind == Kind::Stream && version < 0x0203_0100 {
+                if let Ok(detail) = r.target(at + 12, at) {
+                    let flags = r.u32(detail + 12)?;
+                    let mut values = [None; 3];
+                    let mut next = detail + 16;
+                    for (bit, value) in values.iter_mut().enumerate() {
+                        if flags & (1 << bit) != 0 {
+                            *value = Some(r.u32(next)?);
+                            next += 4;
+                        }
+                    }
+                    if let [Some(kind), Some(start), Some(end)] = values {
+                        if (kind >> 8) & 0xFF == 1 {
+                            loop_frames = Some((start, end));
+                        }
+                    }
+                }
+            }
+            out.push(Sound { index, name, kind, file_id, place: place_of(file_id)?, banks: used, loop_frames });
         }
         Ok(Archive { sounds: out, banks, wave_archives, file_block: file as u32 })
     }
