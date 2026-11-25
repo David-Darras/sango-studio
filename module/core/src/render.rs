@@ -18,11 +18,14 @@ pub struct Camera {
     pub zoom: f32,
     /// True to draw a dark line around the model and where a part of the model passes in front of another one.
     pub outline: bool,
+    /// True to look from inside the model, with perspective (a place of a battle): the point of view stands in the middle of the
+    /// model, a little above its lowest point, and turns with `yaw` and `pitch`. `zoom` narrows the field of view.
+    pub inside: bool,
 }
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera { yaw: std::f32::consts::PI + 0.55, pitch: 0.15, zoom: 1.0, outline: true }
+        Camera { yaw: std::f32::consts::PI + 0.55, pitch: 0.15, zoom: 1.0, outline: true, inside: false }
     }
 }
 
@@ -121,6 +124,18 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
         let (y, z) = (y * cos_pitch - z * sin_pitch, y * sin_pitch + z * cos_pitch);
         [x, y, z]
     };
+    // Inside: the point of view is in the middle of the model, at 12% of the radius above its lowest point. The positions are
+    // relative to it, and the picture has perspective: a field of view of 70 degrees, narrower with the zoom.
+    let lowest = model.meshes.iter().flat_map(|mesh| mesh.vertices.iter()).map(|v| v.position[1]).fold(f32::MAX, f32::min);
+    let eye = [centre[0], lowest.min(centre[1]) + radius * 0.12, centre[2]];
+    let focal = (width.min(height) as f32 / 2.0) / (35f32.to_radians().tan()) * camera.zoom;
+    let near = radius * 0.002;
+    let turn_inside = |p: [f32; 3]| -> [f32; 3] {
+        let (x, y, z) = (p[0] - eye[0], p[1] - eye[1], p[2] - eye[2]);
+        let (x, z) = (x * cos_yaw + z * sin_yaw, -x * sin_yaw + z * cos_yaw);
+        let (y, z) = (y * cos_pitch - z * sin_pitch, y * sin_pitch + z * cos_pitch);
+        [x, y, z]
+    };
     let turn_direction = |n: [f32; 3]| -> [f32; 3] {
         let (x, z) = (n[0] * cos_yaw + n[2] * sin_yaw, -n[0] * sin_yaw + n[2] * cos_yaw);
         let (y, z) = (n[1] * cos_pitch - z * sin_pitch, n[1] * sin_pitch + z * cos_pitch);
@@ -149,13 +164,25 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
             Some(material) if material.transparent => eye_under(model, textures, mesh),
             _ => None,
         };
-        let moved: Vec<([f32; 3], [f32; 3])> = mesh.vertices.iter().map(|v| (turn(v.position), turn_direction(v.normal))).collect();
+        let moved: Vec<([f32; 3], [f32; 3])> = mesh.vertices.iter().map(|v| (if camera.inside { turn_inside(v.position) } else { turn(v.position) }, turn_direction(v.normal))).collect();
         for triangle in &mesh.triangles {
             let corners = triangle.map(|k| k as usize);
             if corners.iter().any(|&k| k >= moved.len()) {
                 continue;
             }
-            let screen = corners.map(|k| [half_x + moved[k].0[0] * scale, half_y - moved[k].0[1] * scale, moved[k].0[2]]);
+            // The pieces of the triangle that are drawn: the corners on the screen, and the place of each corner in the triangle
+            // (its weights for the three corners of the mesh). From the outside, the whole triangle. From the inside, the part in
+            // front of the point of view, cut in triangles.
+            let pieces: Vec<([[f32; 3]; 3], [[f32; 3]; 3])> = if camera.inside {
+                let points = corners.map(|k| moved[k].0);
+                clip_near(points, near)
+                    .into_iter()
+                    .map(|(piece, weights)| (piece.map(|q| [half_x + q[0] * focal / q[2], half_y - q[1] * focal / q[2], q[2]]), weights))
+                    .collect()
+            } else {
+                vec![(corners.map(|k| [half_x + moved[k].0[0] * scale, half_y - moved[k].0[1] * scale, moved[k].0[2]]), [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])]
+            };
+            for (screen, weights) in pieces {
             let area = (screen[1][0] - screen[0][0]) * (screen[2][1] - screen[0][1]) - (screen[2][0] - screen[0][0]) * (screen[1][1] - screen[0][1]);
             if area.abs() < 1e-6 {
                 continue;
@@ -173,13 +200,24 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
             for y in min_y..=max_y {
                 for x in min_x..=max_x {
                     let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
-                    let w0 = ((screen[1][0] - px) * (screen[2][1] - py) - (screen[2][0] - px) * (screen[1][1] - py)) / area;
-                    let w1 = ((screen[2][0] - px) * (screen[0][1] - py) - (screen[0][0] - px) * (screen[2][1] - py)) / area;
-                    let w2 = 1.0 - w0 - w1;
-                    if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    let s0 = ((screen[1][0] - px) * (screen[2][1] - py) - (screen[2][0] - px) * (screen[1][1] - py)) / area;
+                    let s1 = ((screen[2][0] - px) * (screen[0][1] - py) - (screen[0][0] - px) * (screen[2][1] - py)) / area;
+                    let s2 = 1.0 - s0 - s1;
+                    if s0 < 0.0 || s1 < 0.0 || s2 < 0.0 {
                         continue;
                     }
-                    let z = w0 * screen[0][2] + w1 * screen[1][2] + w2 * screen[2][2];
+                    // With perspective, the weights on the screen are not the weights in the triangle: they are divided by the
+                    // depth of each corner.
+                    let (piece_weights, z) = if camera.inside {
+                        let q = [s0 / screen[0][2], s1 / screen[1][2], s2 / screen[2][2]];
+                        let sum = q[0] + q[1] + q[2];
+                        ([q[0] / sum, q[1] / sum, q[2] / sum], 1.0 / sum)
+                    } else {
+                        ([s0, s1, s2], s0 * screen[0][2] + s1 * screen[1][2] + s2 * screen[2][2])
+                    };
+                    let w0 = piece_weights[0] * weights[0][0] + piece_weights[1] * weights[1][0] + piece_weights[2] * weights[2][0];
+                    let w1 = piece_weights[0] * weights[0][1] + piece_weights[1] * weights[1][1] + piece_weights[2] * weights[2][1];
+                    let w2 = piece_weights[0] * weights[0][2] + piece_weights[1] * weights[1][2] + piece_weights[2] * weights[2][2];
                     let place = y * width + x;
                     if !depth_passes(state.depth_test, z, depth[place]) {
                         continue;
@@ -264,6 +302,7 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                     pixels[place * 4..place * 4 + 4].copy_from_slice(&[(color[0] as f32 * light) as u8, (color[1] as f32 * light) as u8, (color[2] as f32 * light) as u8, 255]);
                 }
             }
+            }
         }
     }
     // The line around the model: after the opaque meshes, before the flames and the gas.
@@ -272,6 +311,33 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
     }
     }
     pixels
+}
+
+/// The part of a triangle (its corners relative to the point of view) that is in front of the plane at the distance `near`, cut in
+/// triangles. Each corner of a piece comes with its weights for the three corners of the triangle.
+fn clip_near(points: [[f32; 3]; 3], near: f32) -> Vec<([[f32; 3]; 3], [[f32; 3]; 3])> {
+    let identity = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
+    if points.iter().all(|p| p[2] >= near) {
+        return vec![(points, identity)];
+    }
+    if points.iter().all(|p| p[2] < near) {
+        return Vec::new();
+    }
+    // The polygon in front of the plane: the corners in front, and the points where the edges cross the plane.
+    let mut polygon: Vec<([f32; 3], [f32; 3])> = Vec::new();
+    for k in 0..3 {
+        let (a, b) = (points[k], points[(k + 1) % 3]);
+        let (wa, wb) = (identity[k], identity[(k + 1) % 3]);
+        if a[2] >= near {
+            polygon.push((a, wa));
+        }
+        if (a[2] >= near) != (b[2] >= near) {
+            let t = (near - a[2]) / (b[2] - a[2]);
+            let mix = |u: [f32; 3], v: [f32; 3]| -> [f32; 3] { std::array::from_fn(|axis| u[axis] + (v[axis] - u[axis]) * t) };
+            polygon.push((mix(a, b), mix(wa, wb)));
+        }
+    }
+    (1..polygon.len().saturating_sub(1)).map(|k| ([polygon[0].0, polygon[k].0, polygon[k + 1].0], [polygon[0].1, polygon[k].1, polygon[k + 1].1])).collect()
 }
 
 /// A dark line of `thickness` pixels around the shape of the model and where a part of the model is in front of another one
@@ -599,6 +665,28 @@ fn sample_wrapped(texture: &Texture, u: f32, v: f32, kinds: [u8; 2]) -> [u8; 4] 
 }
 
 #[cfg(test)]
+mod inside_test {
+    use super::*;
+
+    /// A triangle that crosses the plane in front of the point of view is cut: the pieces are in front of it, and their weights
+    /// give their corners back.
+    #[test]
+    fn a_triangle_is_cut_at_the_near_plane() {
+        let points = [[0.0, 0.0, -1.0], [1.0, 0.0, 1.0], [-1.0, 0.0, 1.0]];
+        let pieces = clip_near(points, 0.1);
+        assert_eq!(pieces.len(), 2);
+        for (corners, weights) in pieces {
+            for (corner, weight) in corners.iter().zip(weights) {
+                assert!(corner[2] >= 0.1 - 1e-5);
+                let back: [f32; 3] = std::array::from_fn(|axis| weight[0] * points[0][axis] + weight[1] * points[1][axis] + weight[2] * points[2][axis]);
+                assert!((0..3).all(|axis| (back[axis] - corner[axis]).abs() < 1e-5));
+            }
+        }
+        assert!(clip_near([[0.0, 0.0, -1.0], [1.0, 0.0, -1.0], [0.0, 1.0, -1.0]], 0.1).is_empty());
+    }
+}
+
+#[cfg(test)]
 mod test {
 
     use super::*;
@@ -616,7 +704,7 @@ mod test {
     #[test]
     fn a_triangle_is_drawn_with_its_picture_and_the_rest_is_transparent() {
         let (model, textures) = triangle();
-        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, outline: false }, 64, 64);
+        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, outline: false, inside: false }, 64, 64);
         assert_eq!(image.len(), 64 * 64 * 4);
         let centre = &image[(32 * 64 + 32) * 4..][..4];
         assert!(centre[0] > 200 && centre[1] == 0 && centre[3] == 255, "{centre:?}");
@@ -636,7 +724,7 @@ mod test {
             vertex.position[2] = -0.5;
         }
         model.meshes.push(front);
-        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, outline: false }, 64, 64);
+        let image = render(&model, &textures, &Camera { yaw: 0.0, pitch: 0.0, zoom: 1.0, outline: false, inside: false }, 64, 64);
         let centre = &image[(32 * 64 + 32) * 4..][..4];
         assert_eq!(centre[0], centre[1], "the grey triangle is in front: {centre:?}");
     }
@@ -661,7 +749,7 @@ mod test {
             assert!(model.meshes.iter().map(|m| m.triangles.len()).sum::<usize>() > 100);
             if let Ok(out) = std::env::var("SANGO_RENDER_OUT") {
                 for (side, yaw) in [("front", 0.0f32), ("side", 1.57), ("back", 3.14), ("three_quarters", 0.6)] {
-                    let image = render(&model, &textures, &Camera { yaw, pitch: 0.15, zoom: 1.0, outline: false }, 400, 400);
+                    let image = render(&model, &textures, &Camera { yaw, pitch: 0.15, zoom: 1.0, outline: false, inside: false }, 400, 400);
                     image::save_buffer(format!("{out}/{name}_{side}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
                 }
             }

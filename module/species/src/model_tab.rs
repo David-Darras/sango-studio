@@ -879,7 +879,7 @@ mod test {
                 }
                 let image = render(&model, &by_name, &Camera::default(), 400, 400);
                 image::save_buffer(format!("{out}/{name}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
-                let front = render(&model, &by_name, &Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0, outline: true }, 800, 800);
+                let front = render(&model, &by_name, &Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0, outline: true, inside: false }, 800, 800);
                 image::save_buffer(format!("{out}/front_{name}.png"), &front, 800, 800, image::ColorType::Rgba8).unwrap();
                 for texture in by_name.values() {
                     image::save_buffer(format!("{out}/tex_{name}_{}.png", texture.name), &texture.rgba, texture.width as u32, texture.height as u32, image::ColorType::Rgba8).unwrap();
@@ -890,7 +890,7 @@ mod test {
                     let Some(pack) = read_motions(&archive, file + if battle { BATTLE_MOTION_OFFSET } else { AMIE_MOTION_OFFSET }) else { continue };
                     let Ok(motion) = pack.motion(index) else { continue };
                     let moved = posed(&model, &pack, &motion.pose(pack.joints.len(), motion.frames as f32 * fraction));
-                    let image = render(&moved, &by_name, &Camera { yaw: std::f32::consts::PI + 0.5, pitch: 0.1, zoom: 1.0, outline: true }, 400, 400);
+                    let image = render(&moved, &by_name, &Camera { yaw: std::f32::consts::PI + 0.5, pitch: 0.1, zoom: 1.0, outline: true, inside: false }, 400, 400);
                     image::save_buffer(format!("{out}/pose_{name}_{label}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
                 }
             }

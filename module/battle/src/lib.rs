@@ -131,9 +131,10 @@ fn sd_path(id: usize) -> String {
     format!("{FOLDER}/{id}.bin")
 }
 
-/// The point of view that the page starts with and goes back to (no outline: the backgrounds have none).
+/// The point of view that the page starts with and goes back to: inside the place, like in a battle, with perspective (no outline: the
+/// places have none).
 fn front_view() -> Camera {
-    Camera { outline: false, ..Camera::default() }
+    Camera { yaw: 0.0, pitch: 0.12, zoom: 1.0, outline: false, inside: true }
 }
 
 /// Turns a picture upside down. The pictures of the models are stored from the bottom row: the decoder gives them in that order, and the
@@ -293,7 +294,7 @@ impl Open {
 
 impl Module for BattlePage {
     fn title(&self) -> &str {
-        "Battle"
+        "Environment"
     }
 
     fn icon(&self) -> &str {
@@ -613,15 +614,17 @@ mod preview {
         let (Ok(path), Ok(out)) = (std::env::var("SANGO_DUMP"), std::env::var("BATTLE_PREVIEW")) else { return };
         let dump = Dump::open(&path).unwrap();
         let garc = Garc::open(&dump.archive(ARCHIVE)).unwrap();
-        for id in [35, 60, 113, 138, 5] {
+        for id in [35, 60, 94, 113] {
             let (raw, _) = unpack(garc.file(id, 0).unwrap()).unwrap();
             let (_, parts) = parts_of(&raw);
             let (a, b) = parts[0];
             let part = &raw[a..b];
             let model = sango_core::model::parse_model(part).unwrap();
             let textures: HashMap<String, sango_core::model::Texture> = sango_core::model::parse_textures(part).unwrap().into_iter().map(|t| (t.name.clone(), t)).collect();
-            let pixels = render(&model, &textures, &Camera::default(), VIEW.0, VIEW.1);
-            image::RgbaImage::from_raw(VIEW.0 as u32, VIEW.1 as u32, pixels).unwrap().save(format!("{out}/bg_{id}.png")).unwrap();
+            for (turn, yaw) in [(0, 0.0f32), (1, std::f32::consts::PI)] {
+                let pixels = render(&model, &textures, &Camera { yaw, ..front_view() }, VIEW.0, VIEW.1);
+                image::RgbaImage::from_raw(VIEW.0 as u32, VIEW.1 as u32, pixels).unwrap().save(format!("{out}/bg_{id}_{turn}.png")).unwrap();
+            }
         }
     }
 }
