@@ -19,30 +19,33 @@ use std::path::Path;
 /// How many undo steps are kept.
 const HISTORY: usize = 20;
 
-/// A kind of data that has its own files and its own tab.
+/// A kind of data that has its own files.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Part {
     Data,
     Texts,
     Icons,
+    Reactions,
 }
 
 impl Part {
-    const ALL: [Part; 3] = [Part::Data, Part::Texts, Part::Icons];
+    const ALL: [Part; 4] = [Part::Data, Part::Texts, Part::Icons, Part::Reactions];
 
     fn label(self) -> &'static str {
         match self {
             Part::Data => "Data",
             Part::Texts => "Texts",
             Part::Icons => "Icon",
+            Part::Reactions => "Reactions",
         }
     }
 
     fn hint(self) -> &'static str {
         match self {
-            Part::Data => "General tab: price, pocket, held effect, effects on a Pokémon and the other fields.",
-            Part::Texts => "Text tab: name, name in messages and description, in every language.",
-            Part::Icons => "The picture of the item (the icon card of the General tab).",
+            Part::Data => "price, pocket, held effect, effects on a Pokémon and the other fields.",
+            Part::Texts => "Name, name in messages and description, in every language.",
+            Part::Icons => "The picture of the item (the card of the icon).",
+            Part::Reactions => "The rules that replace the code of the game are deleted: the game runs its own code again.",
         }
     }
 
@@ -51,6 +54,7 @@ impl Part {
             Part::Data => data::SD_FOLDER,
             Part::Texts => "game_text",
             Part::Icons => crate::icons::SD_FOLDER,
+            Part::Reactions => sango_rules::game_files::ITEMS.folder,
         }
     }
 
@@ -78,15 +82,18 @@ pub struct Tools {
     pub history: Vec<Backup>,
     pub reset_open: bool,
     pub scope: Scope,
-    /// The parts of the reset window: Data, Texts, Icons.
-    pub parts: [bool; 3],
+    /// The parts of the reset window: Data, Texts, Icon, Reactions.
+    pub parts: [bool; 4],
     /// The parts of the CSV files: Data, Texts.
     pub csv_parts: [bool; 2],
+    /// The windows of the buttons Export… and Import….
+    pub export_open: bool,
+    pub import_open: bool,
 }
 
 impl Default for Tools {
     fn default() -> Self {
-        Tools { history: Vec::new(), reset_open: false, scope: Scope::Item, parts: [false; 3], csv_parts: [true; 2] }
+        Tools { history: Vec::new(), reset_open: false, scope: Scope::Item, parts: [true, true, false, false], csv_parts: [true; 2], export_open: false, import_open: false }
     }
 }
 
@@ -106,6 +113,8 @@ impl Item {
         self.loaded = None;
         self.list_names = None;
         self.texts.reload();
+        self.game_rules = sango_rules::game_files::Store::new(&sango_rules::game_files::ITEMS);
+        self.draft = None;
         self.icons_ready = false;
     }
 
@@ -122,7 +131,7 @@ impl Item {
         if self.tools.history.len() > HISTORY {
             self.tools.history.remove(0);
         }
-        self.status = Some((true, format!("{done} {count} file(s) changed. Undo gives them back.")));
+        self.status = Some((true, format!("{done} {count} file(s) changed.")));
     }
 
     /// Puts the files of some parts back to the romfs, for a scope.
@@ -140,9 +149,25 @@ impl Item {
             Scope::All => "all the items".to_string(),
         };
         let backup = snapshot(sd, parts, format!("Reset {} of {place}", names.join(", ")));
-        let result = (|| -> Result<(), String> {
+        let mut reactions: Result<(), String> = Ok(());
+        if parts.contains(&Part::Reactions) {
+            let with_rules = self.game_rules.ids();
+            let ids: Vec<u16> = match scope {
+                Scope::Item => vec![self.item as u16],
+                Scope::All => with_rules.clone(),
+            };
+            for id in ids.into_iter().filter(|id| with_rules.contains(id)) {
+                if let Err(message) = self.game_rules.delete(sd, id) {
+                    reactions = Err(message);
+                    break;
+                }
+            }
+            self.draft = None;
+        }
+        let result = reactions.and_then(|_| (|| -> Result<(), String> {
             for part in parts {
                 match (part, scope) {
+                    (Part::Reactions, _) => {}
                     (Part::Data, Scope::Item) => {
                         sd.remove(&data::sd_path(self.item))?;
                         crate::pockets::reset_item(sd, self.pocket_garc.as_ref(), self.item)?;
@@ -171,7 +196,7 @@ impl Item {
                 }
             }
             Ok(())
-        })();
+        })());
         match result {
             Ok(()) => {
                 let done = format!("Reset of {} ({place}).", names.join(", "));
@@ -216,7 +241,7 @@ impl Item {
                 ui.label(widget::hint(part.hint()));
             }
             ui.add_space(8.0);
-            ui.label(widget::hint("The files of the SD card go back to the data of the romfs. The changes that are not saved are lost. Undo gives the files back."));
+            ui.label(widget::hint("The files of the SD card go back to the data of the romfs. The changes that are not saved are lost."));
             if self.tools.scope == Scope::All {
                 ui.label(egui::RichText::new("This reaches every item.").color(color::ROSE));
             }
@@ -240,7 +265,7 @@ impl Item {
         }
     }
 
-    /// The card of the icon of the item in the General tab: the picture, and the buttons to export or import it.
+    /// The card of the icon of the item: the picture, and the buttons to export or import it.
     pub fn icon_card(&mut self, ui: &mut egui::Ui, session: &Session) {
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
@@ -297,31 +322,49 @@ impl Item {
         });
     }
 
-    /// The card of the CSV files in the General tab: all the items, whatever the item that is open.
-    pub fn csv_card(&mut self, ui: &mut egui::Ui, session: &Session) {
-        widget::card(ui, |ui| {
-            ui.label(widget::title("CSV files of all the items"));
-            ui.label(widget::hint("These buttons work on all the items, not only on the one that is open."));
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
+    /// The windows of the buttons Export… and Import…: the CSV files of all the items, for the parts that the user ticks.
+    pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
+        for import in [false, true] {
+            let shown = if import { self.tools.import_open } else { self.tools.export_open };
+            if !shown {
+                continue;
+            }
+            let mut open = true;
+            let mut run = false;
+            let mut close = false;
+            let title = if import { "Import CSV files" } else { "Export CSV files" };
+            egui::Window::new(title).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
+                ui.set_max_width(460.0);
+                ui.label(widget::hint("For all the items, not only the one that is open."));
+                ui.add_space(6.0);
                 for (place, (_, file, label)) in CSV_PARTS.iter().enumerate() {
-                    widget::chip(ui, label, &mut self.tools.csv_parts[place]).on_hover_text(*file);
+                    ui.checkbox(&mut self.tools.csv_parts[place], format!("{label} ({file})"));
                 }
-            });
-            ui.add_space(6.0);
-            ui.horizontal(|ui| {
-                let any = self.tools.csv_parts.iter().any(|on| *on);
-                ui.add_enabled_ui(any && self.garc.is_some(), |ui| {
-                    if widget::button(ui, "Export CSV…") {
-                        self.export_csv_files(session);
-                    }
-                    if session.sd.is_some() && widget::button(ui, "Import CSV…") {
-                        self.import_csv_files(session);
-                    }
+                ui.add_space(6.0);
+                ui.label(widget::hint(if import { "Choose the folder of the files: they are checked, then the changes go on the SD card." } else { "Choose a folder for the files." }));
+                ui.horizontal(|ui| {
+                    let any = self.tools.csv_parts.iter().any(|on| *on) && (!import || session.sd.is_some());
+                    ui.add_enabled_ui(any, |ui| {
+                        run = widget::button_styled(ui, egui::RichText::new(if import { "Import" } else { "Export" }).color(color::WHITE), Some(color::ACCENT));
+                    });
+                    close = widget::button(ui, "Cancel");
                 });
             });
-            ui.label(widget::hint("Export writes one file for each ticked part in a folder that you choose: items.csv (the data) and item_texts.csv (the name, the name in messages and the description, in the eight languages). Import reads the files with these names from a folder, checks all of them, and writes the changes on the SD card. Undo gives the files back."));
-        });
+            if run {
+                if import {
+                    self.import_csv_files(session);
+                } else {
+                    self.export_csv_files(session);
+                }
+            }
+            if run || close || !open {
+                if import {
+                    self.tools.import_open = false;
+                } else {
+                    self.tools.export_open = false;
+                }
+            }
+        }
     }
 
     /// Writes the CSV files of the ticked parts in a folder that the user chooses.
@@ -347,7 +390,7 @@ impl Item {
                     texts::export(&texts::Library { sd, romfs: &romfs })
                 }
                 // The pictures are PNG files, exported one by one: they are not in the CSV list.
-                Part::Icons => continue,
+                Part::Icons | Part::Reactions => continue,
             };
             let path = folder.join(file);
             if let Err(error) = std::fs::write(&path, &text) {
@@ -415,7 +458,7 @@ impl Item {
                 let romfs = |language: usize, file: usize| self.texts.romfs(language, file);
                 texts::apply(&rows, &texts::Library { sd: Some(sd), romfs: &romfs }, sd)
             }
-            Part::Icons => Ok(0),
+            Part::Icons | Part::Reactions => Ok(0),
         }
     }
 }

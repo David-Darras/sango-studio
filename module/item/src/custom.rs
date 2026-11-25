@@ -23,7 +23,6 @@
 //! The picture is the file `item/custom/<id>.bclim` (30 × 30 pixels).
 
 use crate::data::{ItemData, SIZE};
-use sango_core::text::LANGUAGES;
 use sango_core::SdCard;
 use sango_rules::{read_rules, write_rules, write_text, Context, Reader, Rule};
 use sango_ui::theme::color;
@@ -100,22 +99,6 @@ impl BagAction {
         BagAction { kind, a, b: if kind == BagKind::AddEv { 10 } else { 0 } }
     }
 
-    /// The action as an English phrase.
-    pub fn sentence(&self) -> String {
-        match self.kind {
-            BagKind::ChangeHp if self.a == 32767 => "give all the HP back".into(),
-            BagKind::ChangeHp if self.a >= 0 => format!("give {} HP back", self.a),
-            BagKind::ChangeHp => format!("remove {} HP", -(self.a as i32)),
-            BagKind::SetShiny => match self.a {
-                1 => "make the Pokémon shiny".into(),
-                2 => "make the Pokémon normal".into(),
-                _ => "switch the shiny state of the Pokémon".into(),
-            },
-            BagKind::NextAbility => "give the Pokémon the next ability of its species".into(),
-            BagKind::SetLevel => format!("set the level to {}", self.a),
-            BagKind::AddEv => format!("add {} {} EVs", self.b, EV_STATS.iter().find(|(v, _)| *v == self.a).map(|(_, n)| *n).unwrap_or("?")),
-        }
-    }
 }
 
 /// A new item: the id, the texts, the data, the use in the Bag and the rules of a held item.
@@ -354,41 +337,31 @@ impl Store {
     }
 }
 
-/// The names and the description of a new item in a language, and the message of the Bag: the Text tab of a new item.
+/// The name, the description and the message of the Bag of a new item in a language.
 pub fn texts_ui(ui: &mut egui::Ui, item: &mut CustomItem, language: &mut usize) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-        for (i, entry) in LANGUAGES.iter().enumerate() {
-            if widget::tab_button(ui, entry.name, *language == i, false).clicked() {
-                *language = i;
-            }
-        }
-    });
-    ui.add_space(8.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::hint("A new item starts with the same text in every language: write the text of this language. The message is what the Bag says when the player uses the item; {pokemon} is the name of the Pokémon. Empty: the message of the plugin."));
-        ui.add_space(6.0);
-        let language = (*language).min(7);
-        ui.horizontal(|ui| {
-            ui.label("Name");
-            ui.add(egui::TextEdit::singleline(&mut item.names[language]).desired_width(300.0));
-        });
+    let place = (*language).min(7);
+    egui::Grid::new("custom_item_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
+        ui.label("Language");
+        crate::texts::language_menu(ui, "custom_item_language", language);
+        ui.end_row();
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut item.names[place]).desired_width(300.0)).on_hover_text("A new item starts with the same text in every language: write the text of each language.");
+        ui.end_row();
         ui.label("Description");
-        ui.add(egui::TextEdit::multiline(&mut item.descriptions[language]).desired_rows(3).desired_width(520.0));
-        ui.label("Message of the Bag");
-        ui.add(egui::TextEdit::singleline(&mut item.messages[language]).desired_width(520.0).hint_text("{pokemon} was changed!"));
+        ui.add(egui::TextEdit::multiline(&mut item.descriptions[place]).desired_rows(3).desired_width(520.0));
+        ui.end_row();
+        ui.label("Message of the Bag").on_hover_text("What the Bag says when the player uses the item. {pokemon} is the name of the Pokémon. Empty: the message of the plugin.");
+        ui.add(egui::TextEdit::singleline(&mut item.messages[place]).desired_width(520.0).hint_text("{pokemon} was changed!"));
+        ui.end_row();
     });
 }
 
-/// What a new item does: in the Bag, and when a Pokémon holds it in a battle. The Reactions tab of a new item.
+/// What a new item does: in the Bag, and when a Pokémon holds it in a battle.
 pub fn reactions_ui(ui: &mut egui::Ui, item: &mut CustomItem) {
     let salt = format!("item_{}", item.id);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("Use in the Bag"));
-        ui.label(widget::hint("The player chooses \"Use\" and a Pokémon in the Bag. The actions run in this order, then the game removes one item."));
-        ui.checkbox(&mut item.can_use_in_bag, "The player can use this item on a Pokémon in the Bag");
+    ui.vertical(|ui| {
+        ui.checkbox(&mut item.can_use_in_bag, "The player can use this item on a Pokémon in the Bag")
+            .on_hover_text("The player chooses \"Use\" and a Pokémon in the Bag. The actions run in this order, then the game removes one item.");
         if item.can_use_in_bag {
             let mut remove = None;
             for (i, action) in item.bag_actions.iter_mut().enumerate() {
@@ -456,32 +429,12 @@ pub fn reactions_ui(ui: &mut egui::Ui, item: &mut CustomItem) {
             });
         }
     });
-    ui.add_space(10.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("When a Pokémon holds the item in a battle"));
-        ui.label(widget::hint("Each reaction says: when this happens, if all these are true, do these things. \"This Pokémon\" is the one that holds the item. The item is not used up."));
-        sango_rules::editor::rules_editor(ui, &salt, &mut item.rules, Context::Item);
-    });
-    ui.add_space(10.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("Summary"));
-        if item.can_use_in_bag && !item.bag_actions.is_empty() {
-            let list: Vec<String> = item.bag_actions.iter().map(|a| a.sentence()).collect();
-            ui.label(format!("In the Bag, on a Pokémon: {}.", list.join(", then ")));
-        }
-        for rule in &item.rules {
-            ui.label(sango_rules::rule_sentence(rule));
-        }
-        let problems = item.problems();
-        if !problems.is_empty() {
-            ui.add_space(6.0);
-            for problem in problems {
-                ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
-            }
-        }
-    });
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("When a Pokémon holds the item in a battle").strong());
+    sango_rules::editor::rules_editor(ui, &salt, &mut item.rules, Context::Item);
+    for problem in item.problems() {
+        ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
+    }
 }
 
 #[cfg(test)]

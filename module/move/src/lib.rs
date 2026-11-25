@@ -19,18 +19,6 @@ use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
-/// The tabs of the page.
-const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
-
-/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
-const CSV_TAB: usize = 3;
-
-/// The place of the tab "Reactions" in [`TABS`]: the rules of a new move, or of a move of the game.
-const REACTIONS_TAB: usize = 1;
-
-/// The place of the Text tab.
-const TEXT_TAB: usize = 2;
-
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
 
@@ -65,7 +53,6 @@ pub struct Move {
     from_sd: bool,
     /// The move that `data` is for.
     loaded: Option<usize>,
-    tab: usize,
     /// The move that the user chose while the open one had changes that were not saved: the window asks first.
     pending_open: Option<usize>,
     /// What happened at the last click: true for a success.
@@ -99,7 +86,6 @@ impl Default for Move {
             baseline: None,
             from_sd: false,
             loaded: None,
-            tab: 0,
             pending_open: None,
             status: None,
             list_names: None,
@@ -227,7 +213,7 @@ impl Move {
             Ok(id) => {
                 self.id = id;
                 self.loaded = None;
-                self.status = Some((true, format!("The new move {id} starts like the move that was open. Change its name in the Text tab.")));
+                self.status = Some((true, format!("The new move {id} starts like the move that was open. Change its name at the top of the page.")));
             }
             Err(message) => self.status = Some((false, message)),
         }
@@ -289,7 +275,7 @@ impl Move {
         self.data != self.baseline || self.texts.changed() || self.store.changed() || self.game_rules.changed()
     }
 
-    /// The Reactions tab of a move of the game: the code of the game as rules, or why there are none (see
+    /// The reactions of a move of the game: the code of the game as rules, or why there are none (see
     /// `sango_rules::game_files`).
     fn game_reactions_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
         let id = self.id as u16;
@@ -304,9 +290,9 @@ impl Move {
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let before = self.id;
         let mut save = false;
-        let mut reset_tab = false;
         let mut reset_more = false;
-        let mut undo = false;
+        let mut export = false;
+        let mut import = false;
         let mut add = false;
         let mut delete = false;
         widget::card(ui, |ui| {
@@ -329,22 +315,21 @@ impl Move {
                 })
                 .response
                 .on_hover_text("Deletes this new move.");
-                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset_tab = widget::button(ui, "Reset tab");
+                ui.add_enabled_ui(self.bundle.is_some(), |ui| {
+                    export = widget::button(ui, "Export…");
                 })
                 .response
-                .on_hover_text("Puts the data of this tab for this move back to the romfs. Undo gives it back.");
+                .on_hover_text("Writes the CSV files of all the moves.");
+                ui.add_enabled_ui(has_card, |ui| {
+                    import = widget::button(ui, "Import…");
+                })
+                .response
+                .on_hover_text("Reads the CSV files of all the moves.");
                 ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
                 .on_hover_text("Reset one move or all the moves, for the parts that you choose.");
-                let undo_label = self.tools.history.last().map(|backup| format!("Undo: {}", backup.label));
-                ui.add_enabled_ui(undo_label.is_some() && session.sd.is_some(), |ui| {
-                    undo = widget::button(ui, "Undo");
-                })
-                .response
-                .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = self.data.is_some() && session.sd.is_some() && widget::save_button(ui, self.unsaved());
                 if self.data.is_some() && self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -374,16 +359,14 @@ impl Move {
                 self.loaded = None;
             }
         }
-        if reset_tab {
-            let part = if self.tab == TEXT_TAB { tools::Part::Texts } else { tools::Part::Data };
-            self.run_reset(session, tools::Scope::Move, &[part]);
-        }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [self.tab == 0, self.tab == TEXT_TAB];
         }
-        if undo {
-            self.undo(session);
+        if export {
+            self.tools.export_open = true;
+        }
+        if import {
+            self.tools.import_open = true;
         }
         if save {
             self.save(session);
@@ -669,11 +652,36 @@ impl Move {
         }
     }
 
-    /// The General tab.
-    fn general_tab(&mut self, ui: &mut egui::Ui) {
+    /// The texts of the open move, then its reactions: a new move keeps both in its own file.
+    fn texts_and_reactions(&mut self, ui: &mut egui::Ui, session: &Session) {
+        let id = self.id;
+        if let Some(entry) = self.store.find_mut(id) {
+            let mut language = self.custom_language;
+            custom::texts_ui(ui, entry, &mut language);
+            self.custom_language = language;
+            ui.add_space(8.0);
+            custom::reactions_ui(ui, entry);
+        } else {
+            self.texts.compact_ui(ui, session.sd.as_ref(), id);
+            ui.add_space(8.0);
+            self.game_reactions_tab(ui, session);
+        }
+    }
+
+    /// The page: one card with the texts and the reactions, then the groups of the data in one or two columns.
+    fn page_view(&mut self, ui: &mut egui::Ui, session: &Session) {
         let Some(mut data) = self.data.take() else { return };
-        egui::ScrollArea::vertical().id_salt("move_general").auto_shrink([false, false]).show(ui, |ui| {
+        egui::ScrollArea::vertical().id_salt("move_page").auto_shrink([false, false]).show(ui, |ui| {
             let columns = (((ui.available_width() + 10.0) / (COLUMN_WIDTH + 10.0)).floor() as usize).clamp(1, 2);
+            let width = COLUMN_WIDTH * columns as f32 + 10.0 * (columns - 1) as f32;
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                widget::card(ui, |ui| {
+                    ui.set_min_width(width - 36.0);
+                    self.texts_and_reactions(ui, session);
+                });
+            });
+            ui.add_space(10.0);
             let layout: Vec<Vec<Group>> = if columns == 2 { vec![vec![Group::Basics, Group::Damage, Group::Target], vec![Group::Status, Group::Stats, Group::Properties]] } else { vec![Group::ALL.to_vec()] };
             ui.horizontal_top(|ui| {
                 for column in layout {
@@ -688,7 +696,7 @@ impl Move {
             });
             ui.add_space(10.0);
         });
-        // A reset or an import in the tab reads the files again: the data of this frame is then forgotten.
+        // A reset or an import reads the files again: the data of this frame is then forgotten.
         if self.loaded.is_some() {
             self.data = Some(data);
         }
@@ -778,57 +786,12 @@ impl Module for Move {
             }
         }
         self.reset_window(ui.ctx(), session);
+        self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
-        let mut clicked = None;
-        egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(12.0)).inner_margin(egui::Margin::same(6.0)).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (i, name) in TABS.iter().enumerate() {
-                    let tab_id = egui::Id::new(format!("move_tab_{i}"));
-                    let active = widget::is_active(ui, tab_id);
-                    if active && self.tab != i {
-                        self.tab = i;
-                    }
-                    let response = widget::tab_button(ui, name, self.tab == i, active && widget::page_has_focus(ui));
-                    widget::register_focusable(ui, tab_id, response.rect);
-                    ui.ctx().data_mut(|d| d.insert_temp(tab_id.with("is_button"), true));
-                    if response.clicked() {
-                        clicked = Some((i, tab_id));
-                    }
-                }
-            });
-        });
-        if let Some((i, tab_id)) = clicked {
-            self.tab = i;
-            widget::set_active_id(ui, tab_id);
-        }
-        ui.add_space(6.0);
         if self.data.is_none() && self.loaded.is_some() {
             return;
         }
-        match self.tab {
-            0 => self.general_tab(ui),
-            CSV_TAB => {
-                egui::ScrollArea::vertical().id_salt("move_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
-            }
-            REACTIONS_TAB => {
-                let id = self.id;
-                match self.store.find_mut(id) {
-                    Some(entry) => egui::ScrollArea::vertical().id_salt("move_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
-                    None => self.game_reactions_tab(ui, session),
-                }
-            }
-            _ => {
-                if let Some(entry) = self.store.find_mut(self.id) {
-                    let mut language = self.custom_language;
-                    egui::ScrollArea::vertical().id_salt("move_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
-                    self.custom_language = language;
-                } else {
-                    let sd = session.sd.as_ref();
-                    self.texts.ui(ui, sd, self.id);
-                }
-            }
-        }
+        self.page_view(ui, session);
     }
 }
 
@@ -836,7 +799,7 @@ impl Module for Move {
 mod test {
     use super::*;
 
-    /// With the dump of the game: the page draws for some moves, in both tabs, and the notes find their examples.
+    /// With the dump of the game: the page draws for some moves, with the texts, the reactions and the data, and the notes find their examples.
     #[test]
     fn the_page_draws_for_some_moves() {
         let Ok(root) = std::env::var("SANGO_DUMP") else { return };
@@ -850,9 +813,8 @@ mod test {
                 egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
             });
         };
-        for (id, tab) in [(1, 0), (24, 0), (50, 1), (621, 0), (1, 1)] {
+        for (id, _tab) in [(1, 0), (24, 0), (50, 1), (621, 0), (1, 1)] {
             page.id = id;
-            page.tab = tab;
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }
@@ -869,7 +831,7 @@ mod test {
 mod add_test {
     use super::*;
 
-    /// With the dump of the game: a new move is added from the open move, edited in the same tabs, saved, and found by another
+    /// With the dump of the game: a new move is added from the open move, edited in the same page, saved, and found by another
     /// page; it is deleted.
     #[test]
     fn a_new_move_is_made_and_edited_like_the_others() {
@@ -890,8 +852,7 @@ mod add_test {
         let power = page.data.as_ref().unwrap().get("power").unwrap();
         page.add_move();
         assert_eq!(page.id, 900);
-        for tab in [0, 1, 2] {
-            page.tab = tab;
+        for _ in [0, 1, 2] {
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }

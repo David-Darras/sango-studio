@@ -16,11 +16,10 @@
 //! | … | … | The rules. |
 
 use crate::data::{self, MoveData};
-use sango_core::text::LANGUAGES;
 use sango_core::SdCard;
 use sango_rules::{read_rules, write_rules, write_text, Context, Reader, Rule};
 use sango_ui::theme::color;
-use sango_ui::{egui, widget};
+use sango_ui::egui;
 
 /// The first id and the last id of a new move.
 pub const FIRST_ID: u16 = 900;
@@ -225,54 +224,28 @@ impl Store {
     }
 }
 
-/// The name and the description of a new move in a language: the Text tab of a new move.
+/// The name and the description of a new move in a language.
 pub fn texts_ui(ui: &mut egui::Ui, item: &mut CustomMove, language: &mut usize) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-        for (i, entry) in LANGUAGES.iter().enumerate() {
-            if widget::tab_button(ui, entry.name, *language == i, false).clicked() {
-                *language = i;
-            }
-        }
-    });
-    ui.add_space(8.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::hint("A new move starts with the same text in every language: write the text of this language."));
-        ui.add_space(6.0);
-        let language = (*language).min(7);
-        ui.horizontal(|ui| {
-            ui.label("Name");
-            ui.add(egui::TextEdit::singleline(&mut item.names[language]).desired_width(300.0));
-        });
+    let place = (*language).min(7);
+    egui::Grid::new("custom_move_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
+        ui.label("Language");
+        crate::texts::language_menu(ui, "custom_move_language", language);
+        ui.end_row();
+        ui.label("Name");
+        ui.add(egui::TextEdit::singleline(&mut item.names[place]).desired_width(300.0)).on_hover_text("A new move starts with the same text in every language: write the text of each language.");
+        ui.end_row();
         ui.label("Description");
-        ui.add(egui::TextEdit::multiline(&mut item.descriptions[language]).desired_rows(3).desired_width(520.0));
+        ui.add(egui::TextEdit::multiline(&mut item.descriptions[place]).desired_rows(3).desired_width(520.0));
+        ui.end_row();
     });
 }
 
-/// What a new move does: its reactions. The Reactions tab of a new move.
+/// What a new move does: its reactions, and what is wrong with them. The damage and the status come from the data of the move.
 pub fn reactions_ui(ui: &mut egui::Ui, item: &mut CustomMove) {
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("What the move does"));
-        ui.label(widget::hint("Each reaction says: when this happens, if all these are true, do these things. The damage and the status of the move come from its data (General tab); reactions add effects (a stat change, a weather...). \"This Pokémon\" is the one that used the move."));
-        sango_rules::editor::rules_editor(ui, &format!("move_{}", item.id), &mut item.rules, Context::Move);
-    });
-    ui.add_space(10.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("Summary"));
-        for rule in &item.rules {
-            ui.label(sango_rules::rule_sentence(rule));
-        }
-        let problems = item.problems();
-        if !problems.is_empty() {
-            ui.add_space(6.0);
-            for problem in problems {
-                ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
-            }
-        }
-    });
+    sango_rules::editor::rules_editor(ui, &format!("move_{}", item.id), &mut item.rules, Context::Move);
+    for problem in item.problems() {
+        ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
+    }
 }
 
 #[cfg(test)]

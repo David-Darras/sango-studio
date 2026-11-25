@@ -40,7 +40,7 @@ pub const FIELDS: [Field; 3] = [
 /// The language of the names in the lists of the page: English.
 pub const ENGLISH: usize = 2;
 
-/// The state of the Text tab.
+/// The texts of the items: the files that were read and the changes.
 #[derive(Default)]
 pub struct ItemTexts {
     archives: Vec<Option<Garc>>,
@@ -56,7 +56,7 @@ pub struct ItemTexts {
     errors: HashMap<(usize, usize, usize), String>,
     /// The item that the boxes are for.
     current: Option<usize>,
-    /// The chosen language (0 to 7).
+    /// The chosen language (0 to 7). The page starts with English.
     language: usize,
 }
 
@@ -129,60 +129,43 @@ impl ItemTexts {
         Ok(written)
     }
 
-    /// Draws the tab for an item.
-    pub fn ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, item: usize) {
-        if self.current != Some(item) {
-            self.current = Some(item);
+    /// The texts of a item of the game: a menu of the language, then one box for each field.
+    pub fn compact_ui(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, id: usize) {
+        if self.current != Some(id) {
+            self.current = Some(id);
             self.buffers.clear();
             self.errors.clear();
         }
-        ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-            for (index, language) in LANGUAGES.iter().enumerate() {
-                self.language = language_tab(ui, index, language.name, self.language);
+        egui::Grid::new("item_texts").num_columns(2).spacing(egui::vec2(8.0, 6.0)).show(ui, |ui| {
+            ui.label("Language");
+            language_menu(ui, "item_text_language", &mut self.language);
+            ui.end_row();
+            for field in &FIELDS {
+                ui.label(field.label).on_hover_text(field.hint);
+                ui.vertical(|ui| self.edit(ui, sd, field, id));
+                ui.end_row();
             }
-        });
-        ui.add_space(8.0);
-        egui::ScrollArea::vertical().id_salt("item_text_tab").auto_shrink([false, false]).show(ui, |ui| {
-            widget::card(ui, |ui| {
-                ui.set_width(760.0);
-                for field in &FIELDS {
-                    self.field(ui, sd, field, item);
-                    ui.add_space(10.0);
-                }
-            });
         });
     }
 
-    /// One field: its name, its text box, and what is wrong with the text.
-    fn field(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, field: &Field, item: usize) {
+    /// The text box of a field in the chosen language, and what is wrong with the text.
+    fn edit(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, field: &Field, id: usize) {
         let language = self.language;
         self.load(sd, language, field.file);
-        let key = (language, field.file, item);
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(field.label).strong());
-            let edited = match (self.files.get(&(language, field.file)), self.saved.get(&(language, field.file))) {
-                (Some(now), Some(before)) => now.text(item) != before.text(item),
-                _ => false,
-            };
-            if edited {
-                widget::badge(ui, "Not saved", color::AMBER);
-            }
-        });
-        ui.label(widget::hint(field.hint));
+        let key = (language, field.file, id);
         let Some(file) = self.files.get_mut(&(language, field.file)) else {
             ui.label(widget::hint("This text is not in the files that were read."));
             return;
         };
-        let Some(original) = file.text(item) else {
+        let Some(original) = file.text(id) else {
             ui.label(widget::hint("This item has no line in this file."));
             return;
         };
         let buffer = self.buffers.entry(key).or_insert(original);
         let edit = if field.rows == 1 { egui::TextEdit::singleline(buffer) } else { egui::TextEdit::multiline(buffer).desired_rows(field.rows) };
-        let response = ui.add(edit.id_salt(key).desired_width(f32::INFINITY));
+        let response = ui.add(edit.id_salt(key).desired_width(520.0));
         if response.changed() {
-            match file.set_text(item, buffer) {
+            match file.set_text(id, buffer) {
                 Ok(()) => {
                     self.errors.remove(&key);
                 }
@@ -197,21 +180,15 @@ impl ItemTexts {
     }
 }
 
-/// A tab button of the languages. Returns the chosen place.
-fn language_tab(ui: &mut egui::Ui, place: usize, text: &str, chosen: usize) -> usize {
-    let id = egui::Id::new(("item_text_language", place));
-    let mut chosen = chosen;
-    let active = widget::is_active(ui, id);
-    if active && chosen != place {
-        chosen = place;
-    }
-    let response = widget::tab_button(ui, text, chosen == place, active && widget::page_has_focus(ui));
-    widget::register_focusable(ui, id, response.rect);
-    if response.clicked() {
-        chosen = place;
-        widget::set_active_id(ui, id);
-    }
-    chosen
+/// A menu of the eight languages, English first. The value is the place of the language in `LANGUAGES`.
+pub(crate) fn language_menu(ui: &mut egui::Ui, id: &str, language: &mut usize) {
+    let chosen = LANGUAGES.get(*language).map_or("?", |l| l.name);
+    egui::ComboBox::from_id_salt(id).selected_text(chosen).show_ui(ui, |ui| {
+        let order = std::iter::once(ENGLISH).chain((0..LANGUAGES.len()).filter(|i| *i != ENGLISH));
+        for place in order {
+            ui.selectable_value(language, place, LANGUAGES[place].name);
+        }
+    });
 }
 
 /// What the CSV functions need to read the texts.

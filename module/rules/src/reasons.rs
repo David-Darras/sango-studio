@@ -1,4 +1,4 @@
-//! Why an ability, a move or a held item of the game has no rules in the Reactions tab. Generated from the reading of the code of the game, for
+//! Why an ability, a move or a held item of the game has no rules in the reactions. Generated from the reading of the code of the game, for
 //! each ability, move and item that has code in the game (the levels: A the rules express it, B one small condition or action is
 //! missing, C the plugin needs a specific mechanism, D not editable for now).
 
@@ -679,7 +679,7 @@ pub const ITEM_REASONS: [(u16, char, &str); 183] = [
     (715, 'C', "x1.3 power for one move of its type, then used up (needs to use up the item before the damage)"),
 ];
 
-/// What the Reactions tab says about an ability of the game without rules.
+/// What the page says about an ability of the game without rules.
 pub fn ability_reason(id: u8) -> String {
     if let Some((_, level, why)) = ABILITY_REASONS.iter().find(|(a, _, _)| *a == id) {
         return format!("Level {level}: {why}. {}", level_meaning(*level));
@@ -690,15 +690,15 @@ pub fn ability_reason(id: u8) -> String {
     "This ability has no reaction in the battle code of the game.".into()
 }
 
-/// What the Reactions tab says about a move of the game without rules.
+/// What the page says about a move of the game without rules.
 pub fn move_reason(id: u16) -> String {
     match MOVE_REASONS.iter().find(|(m, _, _)| *m == id) {
         Some((_, level, why)) => format!("Level {level}: {why}. {}", level_meaning(*level)),
-        None => "This move has no code of its own in the game: its data (power, accuracy, secondary effect, stat changes) does everything. Change it in the General tab.".into(),
+        None => "This move has no code of its own in the game: its data (power, accuracy, secondary effect, stat changes) does everything. Change it in the data below.".into(),
     }
 }
 
-/// What the Reactions tab says about a held item of the game without rules.
+/// What the page says about a held item of the game without rules.
 pub fn item_reason(id: u16) -> String {
     match ITEM_REASONS.iter().find(|(i, _, _)| *i == id) {
         Some((_, level, why)) => format!("Level {level}: {why}. {}", level_meaning(*level)),

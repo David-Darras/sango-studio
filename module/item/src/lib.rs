@@ -19,18 +19,6 @@ use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::PathBuf;
 
-/// The tabs of the page.
-const TABS: [&str; 4] = ["General", "Reactions", "Text", "CSV"];
-
-/// The place of the tab "CSV" in [`TABS`]: the import and the export of all the entries.
-const CSV_TAB: usize = 3;
-
-/// The place of the tab "Reactions" in [`TABS`]: only a new item has reactions.
-const REACTIONS_TAB: usize = 1;
-
-/// The place of the Text tab.
-const TEXT_TAB: usize = 2;
-
 /// The width of one column of groups, in points.
 const COLUMN_WIDTH: f32 = 470.0;
 
@@ -69,7 +57,6 @@ pub struct Item {
     from_sd: bool,
     /// The item that `data` is for.
     loaded: Option<usize>,
-    tab: usize,
     /// The item that the user chose while the open one had changes that were not saved: the window asks first.
     pending_open: Option<usize>,
     /// What happened at the last click: true for a success.
@@ -107,7 +94,6 @@ impl Default for Item {
             pockets_baseline: Vec::new(),
             from_sd: false,
             loaded: None,
-            tab: 0,
             pending_open: None,
             status: None,
             list_names: None,
@@ -200,7 +186,7 @@ impl Item {
             Ok(id) => {
                 self.item = id;
                 self.loaded = None;
-                self.status = Some((true, format!("The new item {id} starts like the item that was open. Change its name in the Text tab, and its icon in the General tab.")));
+                self.status = Some((true, format!("The new item {id} starts like the item that was open. Change its name and its icon in the page.")));
                 let _ = session;
             }
             Err(message) => self.status = Some((false, message)),
@@ -236,7 +222,7 @@ impl Item {
         self.list_names.clone().unwrap_or_default()
     }
 
-    /// The Reactions tab of a held item of the game: the code of the game as rules, or why there are none (see
+    /// The reactions of a held item of the game: the code of the game as rules, or why there are none (see
     /// `sango_rules::game_files`).
     fn game_reactions_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
         let id = self.item as u16;
@@ -337,9 +323,9 @@ impl Item {
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let before = self.item;
         let mut save = false;
-        let mut reset_tab = false;
         let mut reset_more = false;
-        let mut undo = false;
+        let mut export = false;
+        let mut import = false;
         let mut add = false;
         let mut delete = false;
         widget::card(ui, |ui| {
@@ -363,22 +349,21 @@ impl Item {
                 })
                 .response
                 .on_hover_text("Deletes this new item.");
-                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset_tab = widget::button(ui, "Reset tab");
+                ui.add_enabled_ui(self.garc.is_some(), |ui| {
+                    export = widget::button(ui, "Export…");
                 })
                 .response
-                .on_hover_text("Puts the data of this tab for this item back to the romfs. Undo gives it back.");
+                .on_hover_text("Writes the CSV files of all the items.");
+                ui.add_enabled_ui(has_card, |ui| {
+                    import = widget::button(ui, "Import…");
+                })
+                .response
+                .on_hover_text("Reads the CSV files of all the items.");
                 ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
                     reset_more = widget::button(ui, "Reset…");
                 })
                 .response
                 .on_hover_text("Reset one item or all the items, for the parts that you choose.");
-                let undo_label = self.tools.history.last().map(|backup| format!("Undo: {}", backup.label));
-                ui.add_enabled_ui(undo_label.is_some() && session.sd.is_some(), |ui| {
-                    undo = widget::button(ui, "Undo");
-                })
-                .response
-                .on_hover_text(undo_label.unwrap_or_else(|| "Nothing to undo.".into()));
                 save = self.data.is_some() && session.sd.is_some() && widget::save_button(ui, self.unsaved());
                 if self.data.is_some() && self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
@@ -408,16 +393,14 @@ impl Item {
                 self.loaded = None;
             }
         }
-        if reset_tab {
-            let part = if self.tab == TEXT_TAB { tools::Part::Texts } else { tools::Part::Data };
-            self.run_reset(session, tools::Scope::Item, &[part]);
-        }
         if reset_more {
             self.tools.reset_open = true;
-            self.tools.parts = [self.tab == 0, self.tab == TEXT_TAB, false];
         }
-        if undo {
-            self.undo(session);
+        if export {
+            self.tools.export_open = true;
+        }
+        if import {
+            self.tools.import_open = true;
         }
         if save {
             self.save(session);
@@ -760,14 +743,39 @@ impl Item {
         }
     }
 
-    /// The General tab.
-    fn general_tab(&mut self, ui: &mut egui::Ui, session: &Session) {
+    /// The texts of the open item, then its reactions: a new item keeps both in its own file.
+    fn texts_and_reactions(&mut self, ui: &mut egui::Ui, session: &Session) {
+        let id = self.item;
+        if let Some(entry) = self.store.find_mut(id) {
+            let mut language = self.custom_language;
+            custom::texts_ui(ui, entry, &mut language);
+            self.custom_language = language;
+            ui.add_space(8.0);
+            custom::reactions_ui(ui, entry);
+        } else {
+            self.texts.compact_ui(ui, session.sd.as_ref(), id);
+            ui.add_space(8.0);
+            self.game_reactions_tab(ui, session);
+        }
+    }
+
+    /// The page: one card with the texts and the reactions, the icon, then the groups of the data in one or two columns.
+    fn page_view(&mut self, ui: &mut egui::Ui, session: &Session) {
         let Some(mut item) = self.data.take() else { return };
         let mut pockets_table = std::mem::take(&mut self.pockets);
-        egui::ScrollArea::vertical().id_salt("item_general").auto_shrink([false, false]).show(ui, |ui| {
-            self.icon_card(ui, session);
-            ui.add_space(10.0);
+        egui::ScrollArea::vertical().id_salt("item_page").auto_shrink([false, false]).show(ui, |ui| {
             let columns = (((ui.available_width() + 10.0) / (COLUMN_WIDTH + 10.0)).floor() as usize).clamp(1, 2);
+            let width = COLUMN_WIDTH * columns as f32 + 10.0 * (columns - 1) as f32;
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                widget::card(ui, |ui| {
+                    ui.set_min_width(width - 36.0);
+                    self.texts_and_reactions(ui, session);
+                });
+                ui.add_space(10.0);
+                self.icon_card(ui, session);
+            });
+            ui.add_space(10.0);
             let layout: Vec<Vec<Group>> = if columns == 2 {
                 vec![vec![Group::Shop, Group::Use, Group::Friendship], vec![Group::Held, Group::Effects, Group::Evs]]
             } else {
@@ -786,7 +794,7 @@ impl Item {
             });
             ui.add_space(10.0);
         });
-        // A reset or an import in the tab reads the files again: the data of this frame is then forgotten.
+        // A reset or an import reads the files again: the data of this frame is then forgotten.
         if self.loaded.is_some() {
             self.data = Some(item);
             self.pockets = pockets_table;
@@ -927,57 +935,12 @@ impl Module for Item {
             }
         }
         self.reset_window(ui.ctx(), session);
+        self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
-        let mut clicked = None;
-        egui::Frame::none().fill(color::SURFACE).stroke(egui::Stroke::new(1.0_f32, color::BORDER)).rounding(egui::Rounding::same(12.0)).inner_margin(egui::Margin::same(6.0)).show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                for (i, name) in TABS.iter().enumerate() {
-                    let tab_id = egui::Id::new(format!("item_tab_{i}"));
-                    let active = widget::is_active(ui, tab_id);
-                    if active && self.tab != i {
-                        self.tab = i;
-                    }
-                    let response = widget::tab_button(ui, name, self.tab == i, active && widget::page_has_focus(ui));
-                    widget::register_focusable(ui, tab_id, response.rect);
-                    ui.ctx().data_mut(|d| d.insert_temp(tab_id.with("is_button"), true));
-                    if response.clicked() {
-                        clicked = Some((i, tab_id));
-                    }
-                }
-            });
-        });
-        if let Some((i, tab_id)) = clicked {
-            self.tab = i;
-            widget::set_active_id(ui, tab_id);
-        }
-        ui.add_space(6.0);
         if self.data.is_none() && self.loaded.is_some() {
             return;
         }
-        match self.tab {
-            0 => self.general_tab(ui, session),
-            CSV_TAB => {
-                egui::ScrollArea::vertical().id_salt("item_csv_tab").auto_shrink([false, false]).show(ui, |ui| self.csv_card(ui, session));
-            }
-            REACTIONS_TAB => {
-                let item = self.item;
-                match self.store.find_mut(item) {
-                    Some(entry) => egui::ScrollArea::vertical().id_salt("item_reactions").auto_shrink([false, false]).show(ui, |ui| custom::reactions_ui(ui, entry)).inner,
-                    None => self.game_reactions_tab(ui, session),
-                }
-            }
-            _ => {
-                if let Some(entry) = self.store.find_mut(self.item) {
-                    let mut language = self.custom_language;
-                    egui::ScrollArea::vertical().id_salt("item_custom_texts").auto_shrink([false, false]).show(ui, |ui| custom::texts_ui(ui, entry, &mut language));
-                    self.custom_language = language;
-                } else {
-                    let sd = session.sd.as_ref();
-                    self.texts.ui(ui, sd, self.item);
-                }
-            }
-        }
+        self.page_view(ui, session);
     }
 }
 
@@ -985,7 +948,7 @@ impl Module for Item {
 mod test {
     use super::*;
 
-    /// With the dump of the game: the page draws for some items, in both tabs, and the notes find their examples.
+    /// With the dump of the game: the page draws for some items, with the texts, the reactions and the data, and the notes find their examples.
     #[test]
     fn the_page_draws_for_some_items() {
         let Ok(root) = std::env::var("SANGO_DUMP") else { return };
@@ -999,9 +962,8 @@ mod test {
                 egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
             });
         };
-        for (item, tab) in [(1, 0), (17, 0), (50, 1), (775, 0), (1, 1)] {
+        for (item, _tab) in [(1, 0), (17, 0), (50, 1), (775, 0), (1, 1)] {
             page.item = item;
-            page.tab = tab;
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }
@@ -1018,7 +980,7 @@ mod test {
 mod add_test {
     use super::*;
 
-    /// With the dump of the game: a new item is added from the open item, edited in the same tabs, saved, and found by another
+    /// With the dump of the game: a new item is added from the open item, edited in the same page, saved, and found by another
     /// page; it is deleted.
     #[test]
     fn a_new_item_is_made_and_edited_like_the_others() {
@@ -1039,15 +1001,14 @@ mod add_test {
         let potion_price = page.data.as_ref().unwrap().get("price").unwrap();
         page.add_item(&session);
         assert_eq!(page.item, 900);
-        for tab in [0, 1, 2] {
-            page.tab = tab;
+        for _ in [0, 1, 2] {
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }
         // The new item starts with the data of the Potion, and shows its picture.
         assert_eq!(page.data.as_ref().unwrap().get("price"), Some(potion_price));
         assert!(page.icons.rgba(900).is_some());
-        // It is edited like the others: a field of the General tab, then Save.
+        // It is edited like the others: a field of the data, then Save.
         page.data.as_mut().unwrap().set("price", 77);
         page.save(&session);
         assert!(matches!(page.status, Some((true, _))), "{:?}", page.status);

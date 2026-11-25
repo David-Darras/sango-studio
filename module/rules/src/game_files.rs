@@ -1,7 +1,7 @@
 //! The rules that replace the code of a move or of an item of the game in battle.
 //!
 //! The game runs its own code for the special effects of some moves (Hex, Weather Ball...) and of some held items (Leftovers, Life
-//! Orb...). The Reactions tab shows this code as rules when the rules can do the same thing (see [`crate::presets`]), and else says
+//! Orb...). The page shows this code as rules when the rules can do the same thing (see [`crate::presets`]), and else says
 //! why (see [`crate::reasons`]). Without a file, the game runs its code. When the user changes the rules and saves, the Studio writes
 //! the file and the plugin runs the rules in place of the code of the game.
 //!
@@ -22,7 +22,7 @@
 //! The plugin cannot list a folder: this file lists the ids that have a file. The magic text (`SMLS` for the moves, `SILS` for the
 //! items), the version 1, three bytes 0, then 128 bytes with one bit for each id (the bit `id % 8` of the byte `id / 8`).
 
-use crate::{read_rules, rule_sentence, write_rules, Context, Reader, Rule};
+use crate::{read_rules, write_rules, Context, Reader, Rule};
 use sango_core::SdCard;
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -212,73 +212,42 @@ impl Store {
     }
 }
 
-/// The editor of the rules of an id of the game, and the summary.
+/// The editor of the rules of an id of the game, and what is wrong with them.
 pub fn rules_ui(ui: &mut egui::Ui, kind: &Kind, id: u16, rules: &mut Vec<Rule>) {
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title(&format!("What the {} does", kind.what)));
-        let owner = match kind.context {
-            Context::Item => "the Pokémon that holds the item",
-            _ => "the Pokémon that uses the move",
-        };
-        ui.label(widget::hint(&format!("Each reaction says: when this happens, if all these are true, do these things. \"This Pokémon\" is {owner}.")));
-        crate::editor::rules_editor(ui, &format!("game_{}_{id}", kind.what), rules, kind.context);
-    });
-    ui.add_space(10.0);
-    widget::card(ui, |ui| {
-        ui.set_min_width(700.0);
-        ui.label(widget::title("Summary"));
-        for rule in rules.iter() {
-            ui.label(rule_sentence(rule));
-        }
-        for problem in kind.problems(id, rules) {
-            ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
-        }
-    });
+    crate::editor::rules_editor(ui, &format!("game_{}_{id}", kind.what), rules, kind.context);
+    for problem in kind.problems(id, rules) {
+        ui.label(egui::RichText::new(problem).color(color::ROSE).size(13.5));
+    }
 }
 
-/// The Reactions tab of a move or of an item of the game. Without a file, the game runs its own code: the tab shows `preset`, the
+/// The reactions of a move or of an item of the game. Without a file, the game runs its own code: the page shows `preset`, the
 /// code of the game as rules, or else `reason`. The first change of the preset puts the rules in the store: "Save" writes the file,
 /// and then the plugin runs the rules in place of the code of the game. Gives a message for the status line, when there is one.
 pub fn reactions_tab(ui: &mut egui::Ui, store: &mut Store, draft: &mut Option<(u16, Vec<Rule>)>, id: u16, preset: Option<Vec<Rule>>, reason: &str, sd: Option<&SdCard>) -> Option<(bool, String)> {
     let kind = store.kind;
     let mut back_to_game = false;
     let mut own_rules = false;
-    egui::ScrollArea::vertical().id_salt(format!("{}_game_reactions", kind.what)).auto_shrink([false, false]).show(ui, |ui| {
-        if let Some(rules) = store.find_mut(id) {
-            widget::card(ui, |ui| {
-                ui.set_min_width(700.0);
-                ui.label(widget::title("Your rules replace the code of the game"));
-                ui.label(widget::hint(&format!("The file {} is on the SD card (or is written at the next \"Save\"): in battle, the plugin runs these rules and not the code of the game. The data of the {} stays. Omega Ruby and Alpha Sapphire only.", kind.path(id), kind.what)));
-                ui.add_space(4.0);
-                back_to_game = sd.is_some() && widget::button(ui, "Back to the code of the game");
-            });
-            ui.add_space(10.0);
-            rules_ui(ui, kind, id, rules);
-            return;
-        }
+    if let Some(rules) = store.find_mut(id) {
+        // The rules of the file replace the code of the game.
+        ui.horizontal(|ui| {
+            ui.label(widget::hint("These rules replace the code of the game."));
+            back_to_game = sd.is_some() && ui.small_button("Back to the code of the game").clicked();
+        });
+        rules_ui(ui, kind, id, rules);
+    } else {
         if draft.as_ref().map(|d| d.0) != Some(id) {
             *draft = preset.clone().map(|rules| (id, rules));
         }
-        widget::card(ui, |ui| {
-            ui.set_min_width(700.0);
-            if preset.is_some() {
-                ui.label(widget::title("The game runs its own code"));
-                ui.label(widget::hint(&format!("Below is what the code of the game does, written as rules. Change a value: at the next \"Save\", the Studio writes the file {} and the plugin runs the rules in place of the code of the game.", kind.path(id))));
-            } else {
-                ui.label(widget::title(&format!("No reaction as rules for this {}", kind.what)));
+        match draft.as_mut() {
+            // The code of the game as rules: a change makes a file at the next "Save".
+            Some((_, rules)) => rules_ui(ui, kind, id, rules),
+            None => {
                 ui.label(egui::RichText::new(reason).color(color::AMBER));
-                ui.add_space(4.0);
-                ui.label(widget::hint(&format!("You can give the {} your own rules. With code of the game, it then loses this code; its data stays.", kind.what)));
-                ui.add_space(4.0);
-                own_rules = sd.is_some() && widget::button(ui, "Add my own rules");
+                let hover = format!("The {} then loses the code of the game. Its data stays.", kind.what);
+                own_rules = sd.is_some() && ui.small_button("Replace with my own rules").on_hover_text(hover).clicked();
             }
-        });
-        if let Some((_, rules)) = draft.as_mut() {
-            ui.add_space(10.0);
-            rules_ui(ui, kind, id, rules);
         }
-    });
+    }
     if let (Some((draft_id, rules)), Some(preset)) = (draft.as_ref(), &preset) {
         if *draft_id == id && rules != preset {
             store.insert(id, rules.clone());
