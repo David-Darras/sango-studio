@@ -56,6 +56,10 @@ pub struct Item {
     /// The battle pockets of all the items (one byte each), as the user has them, and as they were loaded or saved.
     pockets: Vec<u8>,
     pockets_baseline: Vec<u8>,
+    /// The battle pockets of all the items as the romfs has them.
+    pockets_game: Vec<u8>,
+    /// Undo and redo of the open item: its data and its battle pockets.
+    history: sango_ui::history::History<(ItemData, Vec<u8>)>,
     /// True when the data came from the SD card.
     from_sd: bool,
     /// The item that `data` is for.
@@ -95,6 +99,8 @@ impl Default for Item {
             baseline: None,
             pockets: Vec::new(),
             pockets_baseline: Vec::new(),
+            pockets_game: Vec::new(),
+            history: Default::default(),
             from_sd: false,
             loaded: None,
             pending_open: None,
@@ -120,6 +126,7 @@ impl Item {
         self.root = Some(dump.root().to_path_buf());
         self.garc = Garc::open(&dump.archive(data::ARCHIVE)).ok();
         self.pocket_garc = Garc::open(&dump.archive(pockets::ARCHIVE)).ok();
+        self.pockets_game = pockets::romfs(self.pocket_garc.as_ref());
         self.texts.open(dump);
         self.icons.open(dump);
         self.icons_ready = false;
@@ -415,15 +422,47 @@ impl Item {
         DEFS.iter().find(|d| d.key == key).expect("a field of the table")
     }
 
-    /// The name of a field with its note: what it means, how the game reads it, examples, and Bulbapedia.
-    fn label(&self, ui: &mut egui::Ui, item: &ItemData, def: &Def) {
+    /// The data of the open item as the game has it. None for a new item of the user.
+    fn game(&self) -> Option<&ItemData> {
+        if self.is_custom() {
+            return None;
+        }
+        self.index.as_ref()?.items.get(self.item)?.as_ref()
+    }
+
+    /// True when one of the fields `keys` is not as in the game.
+    fn changed(&self, item: &ItemData, keys: &[&str]) -> bool {
+        self.game().is_some_and(|game| keys.iter().any(|k| Self::def(k).get(&game.bytes) != Self::def(k).get(&item.bytes)))
+    }
+
+    /// Puts back the values of the game in the fields `keys`.
+    fn put_back(&self, item: &mut ItemData, keys: &[&str]) {
+        if let Some(game) = self.game() {
+            for k in keys {
+                let def = Self::def(k);
+                def.set(&mut item.bytes, def.get(&game.bytes));
+            }
+        }
+    }
+
+    /// The name of a field with its note: what it means, how the game reads it, examples, and Bulbapedia. The name is blue when the
+    /// field (and the fields `with`, that the same line shows) is not as in the game, and ↺ puts back the values of the game.
+    fn label(&self, ui: &mut egui::Ui, item: &mut ItemData, def: &Def, with: &[&str]) {
         let current = self.item;
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(widget::hint(def.label));
-            let info = if def.url.is_empty() { ui.label(egui::RichText::new("ℹ").color(color::ACCENT)) } else { ui.hyperlink_to("ℹ", def.url) };
-            info.on_hover_ui(|ui| self.note(ui, item, def, current));
-        });
+        let keys: Vec<&str> = std::iter::once(def.key).chain(with.iter().copied()).collect();
+        let changed = self.changed(item, &keys);
+        let back = ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let (_, back) = widget::field_name(ui, def.label, changed);
+                let info = if def.url.is_empty() { ui.label(egui::RichText::new("ℹ").color(color::ACCENT)) } else { ui.hyperlink_to("ℹ", def.url) };
+                info.on_hover_ui(|ui| self.note(ui, item, def, current));
+                back
+            })
+            .inner;
+        if back {
+            self.put_back(item, &keys);
+        }
     }
 
     /// The text of the note of a field.
@@ -454,7 +493,7 @@ impl Item {
     /// changed.
     fn line(&self, ui: &mut egui::Ui, item: &mut ItemData, key: &str, add: impl FnOnce(&mut egui::Ui, &mut i32, &Def)) {
         let def = Self::def(key);
-        self.label(ui, item, def);
+        self.label(ui, item, def, &[]);
         ui.horizontal(|ui| {
             let mut value = def.get(&item.bytes);
             let before = value;
@@ -525,6 +564,9 @@ impl Item {
                 let response = widget::chip(ui, def.label, &mut on);
                 response.on_hover_ui(|ui| self.note(ui, item, def, self.item));
                 def.set(&mut item.bytes, on as i32);
+                if widget::reset_mark(ui, self.changed(item, &[key])) {
+                    self.put_back(item, &[key]);
+                }
             }
         });
     }
@@ -600,10 +642,22 @@ impl Item {
                 // The pockets of the battle Bag are in an archive with one byte for each item of the game.
                 return;
             }
-            ui.label(egui::RichText::new("Pockets of the battle Bag").strong()).on_hover_text("The game reads the battle pockets in their own archive (one byte for each item), not in the file of the item. An item can be in two pockets.");
+            let game_byte = self.pockets_game.get(item_number).copied();
+            let byte = pockets_table.get(item_number).copied().unwrap_or(0);
+            let changed = game_byte.is_some_and(|g| g != byte);
+            let back = ui
+                .horizontal(|ui| {
+                    ui.label(egui::RichText::new("Pockets of the battle Bag").strong().color(if changed { color::ACCENT } else { ui.visuals().strong_text_color() }))
+                        .on_hover_text("The game reads the battle pockets in their own archive (one byte for each item), not in the file of the item. An item can be in two pockets.");
+                    widget::reset_mark(ui, changed)
+                })
+                .inner;
+            if let (true, Some(game), Some(slot)) = (back, game_byte, pockets_table.get_mut(item_number)) {
+                *slot = game;
+            }
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                let byte = self.pockets.get(item_number).copied().unwrap_or(0);
+                let byte = pockets_table.get(item_number).copied().unwrap_or(0);
                 let mut now = byte;
                 for (bit, (name, text)) in pockets::BITS.iter().enumerate() {
                     let mut on = byte & (1 << bit) != 0;
@@ -652,7 +706,7 @@ impl Item {
     fn hp_line(&self, ui: &mut egui::Ui, item: &mut ItemData) {
         let hp = Self::def("hp_restore");
         let flag = Self::def("restore_hp");
-        self.label(ui, item, hp);
+        self.label(ui, item, hp, &["restore_hp"]);
         ui.horizontal(|ui| {
             let mut on = flag.get(&item.bytes) != 0;
             widget::chip(ui, "Restores HP", &mut on);
@@ -678,7 +732,7 @@ impl Item {
     fn pp_line(&self, ui: &mut egui::Ui, item: &mut ItemData) {
         const MODES: [&str; 3] = ["No PP", "One move", "All moves"];
         let pp = Self::def("pp_restore");
-        self.label(ui, item, pp);
+        self.label(ui, item, pp, &["restore_pp", "restore_all_pp"]);
         ui.horizontal(|ui| {
             let mode = if Self::def("restore_all_pp").get(&item.bytes) != 0 { 2 } else { Self::def("restore_pp").get(&item.bytes) as usize };
             let mut chosen = mode;
@@ -814,7 +868,15 @@ impl Item {
         });
         // A reset or an import reads the files again: the data of this frame is then forgotten.
         if self.loaded.is_some() {
-            self.data = Some(item);
+            // Ctrl+Z and Ctrl+Y: the data and the battle pockets of the open item.
+            let number = self.item;
+            let mut state = (item, pockets_table.get(number).copied().map_or_else(Vec::new, |b| vec![b]));
+            if self.history.track(ui, number as u64, &mut state) {
+                if let (Some(&b), Some(slot)) = (state.1.first(), pockets_table.get_mut(number)) {
+                    *slot = b;
+                }
+            }
+            self.data = Some(state.0);
             self.pockets = pockets_table;
         }
     }
@@ -894,6 +956,17 @@ fn type_picker(ui: &mut egui::Ui, id: &str, value: &mut u8) {
 }
 
 impl Module for Item {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        self.save(session);
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        let item = self.item;
+        *self = Self::default();
+        self.item = item;
+        true
+    }
+
     fn unsaved(&self) -> bool {
         self.data.is_some() && self.dirty()
     }

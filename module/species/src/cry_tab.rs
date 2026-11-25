@@ -179,10 +179,11 @@ impl CryTab {
                     if widget::button(ui, "Export") {
                         self.status = Some(self.export(species, form));
                     }
-                    egui::ComboBox::from_id_salt("cry_export_format").width(96.0).selected_text(if !self.wav { "MP3" } else { "WAV" }).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt("cry_export_format").width(96.0).selected_text(if !self.wav { "MP3" } else { "WAV" }).show_ui(ui, |ui| {
                         ui.selectable_value(&mut self.wav, true, "WAV");
                         ui.selectable_value(&mut self.wav, false, "MP3");
                     });
+                    sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.wav, &[true, false]);
                 });
                 if widget::button(ui, "Import") {
                     if let Some(path) = rfd::FileDialog::new().set_title("Sound for the cry").add_filter("Sound", &["wav", "mp3"]).pick_file() {

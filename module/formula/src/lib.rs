@@ -28,6 +28,8 @@ pub struct Formula {
     opened_for: Option<PathBuf>,
     formulas: Formulas,
     saved: Formulas,
+    /// Undo and redo of the formulas.
+    history: sango_ui::history::History<Formulas>,
     from_card: bool,
     status: Option<(bool, String)>,
     tab: usize,
@@ -40,6 +42,7 @@ impl Default for Formula {
             opened_for: None,
             formulas: Formulas::game(),
             saved: Formulas::game(),
+            history: Default::default(),
             from_card: false,
             status: None,
             tab: 0,
@@ -162,18 +165,13 @@ impl Formula {
         for stat in 0..6 {
             widget::card(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(widget::title(STATS[stat].0));
-                    let is_game = Formulas::is_game_text(stat, &self.formulas.texts[stat]);
-                    if is_game {
-                        widget::badge(ui, "Like the game", color::GREEN);
-                    } else {
-                        widget::badge(ui, "Changed", color::AMBER);
+                    // Blue with ↺ when the formula is not the one of the game.
+                    let changed = !Formulas::is_game_text(stat, &self.formulas.texts[stat]);
+                    let title = widget::title(STATS[stat].0);
+                    ui.label(if changed { title.color(color::ACCENT) } else { title });
+                    if widget::reset_mark(ui, changed) {
+                        self.formulas.texts[stat] = STATS[stat].1.to_string();
                     }
-                    ui.add_enabled_ui(!is_game, |ui| {
-                        if widget::button(ui, "Reset") {
-                            self.formulas.texts[stat] = STATS[stat].1.to_string();
-                        }
-                    });
                 });
                 ui.add(egui::TextEdit::singleline(&mut self.formulas.texts[stat]).font(egui::TextStyle::Monospace).desired_width(f32::INFINITY).id_salt(("formula", stat)));
                 match expr::compile(&self.formulas.texts[stat]) {
@@ -199,7 +197,11 @@ impl Formula {
             ));
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Chance"));
+                let game = shiny_game_percent();
+                let (_, back) = widget::field_name(ui, "Chance", self.formulas.shiny_percent != game);
+                if back {
+                    self.formulas.shiny_percent = game;
+                }
                 ui.add(egui::DragValue::new(&mut self.formulas.shiny_percent).speed(0.01).range(0.0..=100.0).max_decimals(6).suffix(" %"));
                 let threshold = self.formulas.threshold();
                 if threshold == 0 {
@@ -214,9 +216,6 @@ impl Formula {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(widget::hint("Quick choice"));
-                if widget::button(ui, "Reset") {
-                    self.formulas.shiny_percent = shiny_game_percent();
-                }
                 for percent in [0.1, 1.0, 5.0, 10.0, 25.0, 50.0, 100.0] {
                     if widget::button(ui, format!("{percent} %")) {
                         self.formulas.shiny_percent = percent;
@@ -238,6 +237,17 @@ impl Module for Formula {
 
     fn icon(&self) -> &str {
         "🧮"
+    }
+
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            self.save(sd);
+        }
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        self.formulas = self.saved.clone();
+        true
     }
 
     fn unsaved(&self) -> bool {
@@ -277,6 +287,8 @@ impl Module for Formula {
                 self.shiny_tab(ui);
             }
         });
+        // Ctrl+Z and Ctrl+Y on the formulas.
+        self.history.track(ui, 0, &mut self.formulas);
     }
 }
 

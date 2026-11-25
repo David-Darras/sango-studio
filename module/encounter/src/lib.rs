@@ -22,8 +22,6 @@ use std::path::PathBuf;
 const SUMMARY: usize = METHODS.len();
 const DEXNAV: usize = SUMMARY + 1;
 
-/// How many changes the undo remembers.
-const UNDO_LIMIT: usize = 100;
 
 /// The Encounter page.
 pub struct EncounterPage {
@@ -44,7 +42,10 @@ pub struct EncounterPage {
     saved: Option<Encounter>,
     from_sd: bool,
     tab: usize,
-    undo: Vec<Encounter>,
+    /// The table of the open map as the game has it, to show the places that are not as in the game.
+    game: Option<Encounter>,
+    /// Undo and redo of the table of the open map.
+    history: sango_ui::history::History<Option<Encounter>>,
     status: Option<(bool, String)>,
     icons: SpeciesIcons,
     /// The Pokémon for the button "Fill the table".
@@ -71,7 +72,8 @@ impl Default for EncounterPage {
             saved: None,
             from_sd: false,
             tab: 0,
-            undo: Vec::new(),
+            game: None,
+            history: Default::default(),
             status: None,
             icons: SpeciesIcons::default(),
             fill_species: form_key(1, 0),
@@ -118,7 +120,7 @@ impl EncounterPage {
         self.zones = None;
         self.table = None;
         self.saved = None;
-        self.undo.clear();
+        self.history.clear();
         let (Some(dump), Some(sd)) = (session.dump.as_ref(), session.sd.as_ref()) else {
             self.opened_for = session.dump.as_ref().map(|d| (d.root().to_path_buf(), PathBuf::new()));
             if let Some(dump) = session.dump.as_ref() {
@@ -146,7 +148,8 @@ impl EncounterPage {
     fn load(&mut self, zone: usize) {
         let Some(zones) = self.zones.as_ref() else { return };
         self.zone = zone;
-        self.undo.clear();
+        self.history.clear();
+        self.game = zones.game_table(zone).ok().flatten();
         match zones.pack(zone).and_then(|pack| zones.table(zone).map(|table| (table, pack.from_sd))) {
             Ok((table, from_sd)) => {
                 self.table = table.clone();
@@ -203,16 +206,10 @@ impl EncounterPage {
         }
     }
 
-    /// Changes the table of the open map through `edit`, and remembers the old one for the undo.
+    /// Changes the table of the open map through `edit` (the history of the page sees the change).
     fn change(&mut self, edit: impl FnOnce(&mut Encounter)) {
-        let Some(table) = self.table.as_mut() else { return };
-        let before = table.clone();
-        edit(table);
-        if *table != before {
-            self.undo.push(before);
-            if self.undo.len() > UNDO_LIMIT {
-                self.undo.remove(0);
-            }
+        if let Some(table) = self.table.as_mut() {
+            edit(table);
         }
     }
 
@@ -352,6 +349,8 @@ impl EncounterPage {
     fn rate_row(&mut self, ui: &mut egui::Ui, method: &data::Method) {
         let Some(rate) = self.table.as_ref().map(|t| t.rates[method.rate_at]) else { return };
         let mut value = rate;
+        let game_rate = self.game.as_ref().map(|g| g.rates[method.rate_at]);
+        let mut back = false;
         ui.horizontal(|ui| match method.rate_kind() {
             RateKind::Chance => {
                 ui.label(widget::hint("Chance of a meeting at each step (0 for no wild Pokémon here)"));
@@ -359,6 +358,7 @@ impl EncounterPage {
                 if value > 0 {
                     ui.label(widget::hint("%"));
                 }
+                back = widget::reset_mark(ui, game_rate.is_some_and(|g| g != rate));
             }
             RateKind::Table(names) => {
                 ui.label(widget::hint(if method.rate_at == 2 { "The game adds these places to" } else { "The rocks give" }));
@@ -368,8 +368,12 @@ impl EncounterPage {
                     vec![Group { title: "Choice".to_string(), entries: names.iter().enumerate().map(|(i, n)| (i as u16 + 1, n.to_string())).collect() }]
                 });
                 value = choice.min(names.len() as u16) as u8;
+                back = widget::reset_mark(ui, game_rate.is_some_and(|g| g != rate));
             }
         });
+        if let (true, Some(game)) = (back, game_rate) {
+            value = game;
+        }
         if value != rate {
             self.change(|t| t.rates[method.rate_at] = value);
         }
@@ -394,9 +398,12 @@ impl EncounterPage {
                 ui.label(egui::RichText::new(format!("Horde {} — chance {} %", at / method.group + 1, method.chance(at / method.group))).strong());
             }
             let mut edited = *slot;
+            let game_slot = self.game.as_ref().and_then(|g| g.places(&method).get(at).copied());
+            let changed = game_slot.is_some_and(|g| g != *slot);
             ui.horizontal(|ui| {
                 let chance = if method.group == method.count { format!("{:>3} %", method.chance(at)) } else { "     ".to_string() };
-                ui.add_sized([46.0, 22.0], egui::Label::new(egui::RichText::new(chance).monospace()));
+                let text = egui::RichText::new(chance).monospace();
+                ui.add_sized([46.0, 22.0], egui::Label::new(if changed { text.color(color::ACCENT) } else { text }));
                 match self.icons.get(ui.ctx(), edited.species as usize) {
                     Some(texture) if edited.species != 0 => {
                         ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(40.0, 30.0)));
@@ -428,6 +435,9 @@ impl EncounterPage {
                             edited.min_level = edited.max_level;
                         }
                     }
+                }
+                if let (true, Some(game)) = (widget::reset_mark(ui, changed), game_slot) {
+                    edited = game;
                 }
             });
             if edited != *slot {
@@ -505,6 +515,20 @@ impl EncounterPage {
 }
 
 impl Module for EncounterPage {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if self.dirty() {
+            self.save(session);
+        }
+        self.navi.save_changes(session);
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        let zone = self.zone;
+        self.load(zone);
+        self.navi = Default::default();
+        true
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty() || self.navi.unsaved()
     }
@@ -574,5 +598,7 @@ impl Module for EncounterPage {
                 }
             });
         });
+        // Ctrl+Z and Ctrl+Y on the table of the open map.
+        self.history.track(ui, self.zone as u64, &mut self.table);
     }
 }

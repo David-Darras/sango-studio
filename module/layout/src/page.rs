@@ -384,6 +384,12 @@ impl Module for LayoutPage {
         "🖼"
     }
 
+    fn save_changes(&mut self, ctx: &egui::Context, session: &mut Session) {
+        if let Some(open) = self.open.as_mut() {
+            apply_action(ctx, open, Action::Save, session, &mut self.status, &mut self.confirm_delete);
+        }
+    }
+
     fn unsaved(&self) -> bool {
         self.open.as_ref().map(|o| o.dirty).unwrap_or(false)
     }

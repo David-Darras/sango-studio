@@ -374,6 +374,17 @@ impl Ability {
 }
 
 impl Module for Ability {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        self.save(session);
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        let id = self.id;
+        *self = Self::default();
+        self.id = id;
+        true
+    }
+
     fn unsaved(&self) -> bool {
         self.texts.changed() || self.store.changed()
     }

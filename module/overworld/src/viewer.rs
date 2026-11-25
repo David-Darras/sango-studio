@@ -1618,11 +1618,13 @@ impl Viewer {
             self.newmap_template = self.newmap_template.min(self.ev.maps.len() - 1);
             let text = |z: &events::MapAt| format!("{} [{}]", events_view::map_name(z.map as u16), z.map);
             let before = self.newmap_template;
-            egui::ComboBox::from_label("Map to put here").selected_text(text(&self.ev.maps[self.newmap_template])).width(260.0).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_label("Map to put here").selected_text(text(&self.ev.maps[self.newmap_template])).width(260.0).show_ui(ui, |ui| {
                 for (i, z) in self.ev.maps.iter().enumerate() {
                     ui.selectable_value(&mut self.newmap_template, i, text(z));
                 }
             });
+            let values: Vec<usize> = (0..self.ev.maps.len()).collect();
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.newmap_template, &values);
             if self.newmap_template != before || self.newmap_block.is_none() {
                 // The ground follows: the block of the first cell of this map.
                 let wanted = self.ev.maps[self.newmap_template].map as u16;
@@ -1643,11 +1645,13 @@ impl Viewer {
             let world = self.newmap_world.unwrap_or(current_world);
             let mut picked_world = world;
             let world_text = self.worlds.iter().find(|w| w.matrix == world).map_or(format!("world {world}"), |w| format!("{} [{}]", Self::world_label(w), w.matrix));
-            egui::ComboBox::from_label("Ground from the world").selected_text(world_text).width(260.0).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_label("Ground from the world").selected_text(world_text).width(260.0).show_ui(ui, |ui| {
                 for w in &self.worlds {
                     ui.selectable_value(&mut picked_world, w.matrix, format!("{} [{}]", Self::world_label(w), w.matrix));
                 }
             });
+            let values: Vec<_> = self.worlds.iter().map(|w| w.matrix).collect();
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut picked_world, &values);
             if picked_world != world || self.newmap_world.is_none() && self.newmap_other.is_none() {
                 self.newmap_other = if picked_world == current_world { None } else { events::read_matrix(&self.arc_dir, &self.export_dir, picked_world).ok().map(|l| (picked_world, l)) };
             }
@@ -1669,11 +1673,12 @@ impl Viewer {
                 if zone == 0xFFFF { format!("block {id}") } else { format!("block {id} ({})", events_view::map_name(zone)) }
             };
             let mut picked = chosen as u16;
-            egui::ComboBox::from_label("Ground: the block to copy or to share").selected_text(label(picked)).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_label("Ground: the block to copy or to share").selected_text(label(picked)).show_ui(ui, |ui| {
                 for id in &blocks {
                     ui.selectable_value(&mut picked, *id, label(*id));
                 }
             });
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut picked, &blocks);
             self.newmap_block = Some(picked as usize);
             if picked_world != current_world {
                 ui.label(egui::RichText::new("This block is from another world: it has the pictures of that world, so some textures can be wrong here.").weak());

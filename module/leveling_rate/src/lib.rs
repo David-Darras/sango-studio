@@ -142,6 +142,8 @@ pub struct LevelingRate {
     saved: Option<ExperienceTable>,
     /// The tables of the romfs: what Reset gives back.
     romfs: Option<ExperienceTable>,
+    /// Undo and redo of the tables.
+    history: sango_ui::history::History<Option<ExperienceTable>>,
     /// The rates that were read from the SD card.
     from_card: Vec<usize>,
     /// The Leveling rate of each species, from the species 1 on.
@@ -181,6 +183,7 @@ impl Default for LevelingRate {
             table: None,
             saved: None,
             romfs: None,
+            history: Default::default(),
             from_card: Vec::new(),
             rates: Vec::new(),
             form_rates: Vec::new(),
@@ -579,6 +582,7 @@ impl LevelingRate {
     fn numbers(&mut self, ui: &mut egui::Ui) {
         let view = self.current_view();
         let rate = self.rate;
+        let game = self.romfs.as_ref().and_then(|romfs| romfs.curve(rate)).cloned();
         let Some(curve) = self.table.as_mut().and_then(|table| table.curves_mut().get_mut(rate)) else { return };
         let editable = view.editable();
         if !editable.is_empty() {
@@ -598,7 +602,13 @@ impl LevelingRate {
                         let mut changed = false;
                         match view {
                             View::Total => {
-                                ui.label(widget::hint("Experience"));
+                                // Blue with ↺ when the point is not the one of the game.
+                                let game_value = game.as_ref().and_then(|g| g.experience(self.selected));
+                                let now = curve.experience(self.selected);
+                                let (_, back) = widget::field_name(ui, "Experience", game_value.is_some() && game_value != now);
+                                if let (true, Some(value)) = (back, game_value) {
+                                    changed = curve.set_experience(self.selected, value, TOTAL_CAP, false);
+                                }
                                 let mut value = curve.experience(self.selected).unwrap_or(0);
                                 if widget::spin(ui, &mut value, 0.0, TOTAL_CAP as f64) {
                                     changed = curve.set_experience(self.selected, value, TOTAL_CAP, true);
@@ -607,7 +617,12 @@ impl LevelingRate {
                                 ui.label(widget::hint(&format!("To the next level: {}", next.map_or("-".to_string(), thousands))));
                             }
                             _ => {
-                                ui.label(widget::hint("Experience to the next level"));
+                                let game_value = game.as_ref().and_then(|g| g.between(self.selected, self.selected + 1));
+                                let now = curve.between(self.selected, self.selected + 1);
+                                let (_, back) = widget::field_name(ui, "Experience to the next level", game_value.is_some() && game_value != now);
+                                if let (true, Some(value)) = (back, game_value) {
+                                    changed = curve.set_gain(self.selected, value, TOTAL_CAP);
+                                }
                                 let mut value = curve.between(self.selected, self.selected + 1).unwrap_or(0);
                                 if widget::spin(ui, &mut value, 0.0, TOTAL_CAP as f64) {
                                     changed = curve.set_gain(self.selected, value, TOTAL_CAP);
@@ -797,6 +812,15 @@ fn tab(ui: &mut egui::Ui, id: (&str, usize), text: &str, place: usize, chosen: u
 }
 
 impl Module for LevelingRate {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        self.save(session);
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        self.table = self.saved.clone();
+        true
+    }
+
     fn unsaved(&self) -> bool {
         (0..self.rate_count()).any(|rate| self.changed(rate))
     }
@@ -886,6 +910,10 @@ impl Module for LevelingRate {
                 self.species_list(ui);
             }
         });
+        // Ctrl+Z and Ctrl+Y on the tables (not while a point is dragged).
+        if self.dragging.is_none() {
+            self.history.track(ui, 0, &mut self.table);
+        }
     }
 }
 

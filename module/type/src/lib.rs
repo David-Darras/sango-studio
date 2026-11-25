@@ -36,6 +36,8 @@ pub struct Type {
     loaded: bool,
     /// The chart as the user has it, and as it was loaded or saved.
     chart: Chart,
+    /// Undo and redo of the chart and of the new types.
+    history: sango_ui::history::History<(Chart, types::TypeList)>,
     chart_baseline: Chart,
     /// The new types, and as they were loaded or saved.
     list: TypeList,
@@ -57,6 +59,7 @@ impl Default for Type {
             root: None,
             loaded: false,
             chart: Chart::original(),
+            history: Default::default(),
             chart_baseline: Chart::original(),
             list: TypeList::default(),
             list_baseline: TypeList::default(),
@@ -297,8 +300,13 @@ impl Type {
             self.texts.is_changed(sd, id)
         };
         let hint = if self.list.find(id).is_some() { "Shows the English name in this language again" } else { "Puts the name of the game back, in this language" };
-        if ui.add_enabled(changed, egui::Button::new("↺").small()).on_hover_text(hint).clicked() {
-            *asked = Some(RowAction::ResetName(id));
+        if changed {
+            let back = ui.add(egui::Button::new(egui::RichText::new("↺").color(color::ACCENT)).small().frame(false)).on_hover_text(hint);
+            if back.clicked() {
+                *asked = Some(RowAction::ResetName(id));
+            }
+        } else {
+            ui.add_space(18.0);
         }
     }
 
@@ -368,11 +376,8 @@ impl Type {
                 ui.painter().rect_stroke(swatch, 3.0, egui::Stroke::new(1.0_f32, ink));
                 ui.label(widget::hint(label));
             }
-            ui.label(egui::RichText::new("•").color(color::AMBER));
+            ui.label(egui::RichText::new("•").color(color::ACCENT));
             ui.label(widget::hint("different from the game"));
-            if widget::button(ui, "Put the chart of the game back") {
-                self.chart = Chart::original();
-            }
         });
     }
 
@@ -419,7 +424,7 @@ impl Type {
                     ui.painter().text(cell.center(), egui::Align2::CENTER_CENTER, chart::text(value).trim_start_matches('×'), egui::FontId::proportional(13.0), ink);
                 }
                 if self.chart.is_changed(attacking, defending) {
-                    ui.painter().circle_filled(cell.right_top() + egui::vec2(-4.0, 4.0), 2.5, color::AMBER);
+                    ui.painter().circle_filled(cell.right_top() + egui::vec2(-4.0, 4.0), 2.5, color::ACCENT);
                 }
                 if hovered == Some((row, column)) {
                     ui.painter().rect_stroke(cell, 3.0, egui::Stroke::new(1.5_f32, color::ACCENT));
@@ -506,6 +511,10 @@ enum IconAction {
 }
 
 impl Module for Type {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        self.save(session);
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty()
     }
@@ -542,6 +551,10 @@ impl Module for Type {
         self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
         self.page_view(ui, session);
+        // Ctrl+Z and Ctrl+Y on the chart and the new types.
+        let mut state = (std::mem::replace(&mut self.chart, Chart::original()), std::mem::take(&mut self.list));
+        self.history.track(ui, 0, &mut state);
+        (self.chart, self.list) = state;
     }
 }
 

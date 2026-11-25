@@ -540,6 +540,15 @@ impl ScriptPage {
 }
 
 impl Module for ScriptPage {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            if self.dirty() {
+                self.save(sd);
+            }
+            self.creator.save_changes(sd);
+        }
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty() || self.creator.unsaved()
     }

@@ -74,6 +74,8 @@ pub struct Move {
     /// The reaction of the game as rules, for the open move of the game that has no file yet. It goes in `game_rules` at the
     /// first change.
     draft: Option<(u16, Vec<sango_rules::Rule>)>,
+    /// Undo and redo of the data of the open move.
+    history: sango_ui::history::History<MoveData>,
 }
 
 impl Default for Move {
@@ -98,6 +100,7 @@ impl Default for Move {
             custom_language: 2,
             game_rules: sango_rules::game_files::Store::new(&sango_rules::game_files::MOVES),
             draft: None,
+            history: Default::default(),
         }
     }
 }
@@ -378,14 +381,36 @@ impl Move {
         DEFS.iter().find(|d| d.key == key).expect("a field of the table")
     }
 
-    /// The name of a field with its note: what it means, how the game reads it, examples, and Bulbapedia.
-    fn label(&self, ui: &mut egui::Ui, data: &MoveData, def: &Def) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(widget::hint(def.label));
-            let info = if def.url.is_empty() { ui.label(egui::RichText::new("ℹ").color(color::ACCENT)) } else { ui.hyperlink_to("ℹ", def.url) };
-            info.on_hover_ui(|ui| self.note(ui, data, def));
-        });
+    /// The data of the open move as the game has it. None for a new move of the user.
+    fn game(&self) -> Option<&MoveData> {
+        if self.is_custom() {
+            return None;
+        }
+        self.index.as_ref()?.moves.get(self.id)?.as_ref()
+    }
+
+    /// The value of the game of a field, when it is not the value now.
+    fn game_value(&self, data: &MoveData, def: &Def) -> Option<i32> {
+        let game = def.get(&self.game()?.bytes);
+        (game != def.get(&data.bytes)).then_some(game)
+    }
+
+    /// The name of a field with its note: what it means, how the game reads it, examples, and Bulbapedia. The name is blue when the
+    /// value is not as in the game, and ↺ puts back the value of the game.
+    fn label(&self, ui: &mut egui::Ui, data: &mut MoveData, def: &Def) {
+        let game = self.game_value(data, def);
+        let back = ui
+            .horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let (_, back) = widget::field_name(ui, def.label, game.is_some());
+                let info = if def.url.is_empty() { ui.label(egui::RichText::new("ℹ").color(color::ACCENT)) } else { ui.hyperlink_to("ℹ", def.url) };
+                info.on_hover_ui(|ui| self.note(ui, data, def));
+                back
+            })
+            .inner;
+        if let (true, Some(value)) = (back, game) {
+            def.set(&mut data.bytes, value);
+        }
     }
 
     /// The text of the note of a field.
@@ -507,6 +532,10 @@ impl Move {
                 let response = widget::chip(ui, def.label, &mut on);
                 response.on_hover_ui(|ui| self.note(ui, data, def));
                 def.set(&mut data.bytes, on as i32);
+                let game = self.game_value(data, def);
+                if let (true, Some(value)) = (widget::reset_mark(ui, game.is_some()), game) {
+                    def.set(&mut data.bytes, value);
+                }
             }
         });
     }
@@ -707,6 +736,8 @@ impl Move {
         });
         // A reset or an import reads the files again: the data of this frame is then forgotten.
         if self.loaded.is_some() {
+            // Ctrl+Z and Ctrl+Y on the data of the open move.
+            self.history.track(ui, self.id as u64, &mut data);
             self.data = Some(data);
         }
     }
@@ -739,6 +770,17 @@ fn focus_combo(ui: &egui::Ui, response: &egui::Response, value: &mut i32, last: 
 }
 
 impl Module for Move {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        self.save(session);
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        let id = self.id;
+        *self = Self::default();
+        self.id = id;
+        true
+    }
+
     fn unsaved(&self) -> bool {
         self.data.is_some() && self.dirty()
     }

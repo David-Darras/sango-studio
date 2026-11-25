@@ -20,8 +20,10 @@ struct App {
     side_bar_focus: bool,
     /// The next page that is drawn out of sight to load its data (see `warm_up`).
     warmed: usize,
-    /// True while the window asks if it can close with changes that are not saved.
+    /// True while the window asks, page after page, if it can close with changes that are not saved.
     confirm_close: bool,
+    /// The page that the user asked for while the open page has changes that are not saved: the window asks first.
+    pending_page: Option<usize>,
     /// The title of the page that the settings file has (it is written when the page changes).
     remembered: String,
 }
@@ -37,7 +39,8 @@ impl App {
         // The page of the last run opens, then SANGO_PAGE=2 opens the third page at once (to test a page without clicking).
         let last = sango_core::remembered_page().and_then(|title| modules.iter().position(|m| m.title() == title));
         let current = std::env::var("SANGO_PAGE").ok().and_then(|v| v.parse::<usize>().ok()).filter(|&i| i < modules.len()).or(last).unwrap_or(0);
-        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false, remembered: String::new() }
+        App { modules, current, session: Session::restore(), frames: 0, side_bar_focus: true, warmed: 0, confirm_close: false,
+            pending_page: None, remembered: String::new() }
     }
 
     /// All the pages, new and empty. The first one is Home. The pages go by section (see [`SECTIONS`]): what a Pokémon is, the battle,
@@ -99,6 +102,7 @@ impl App {
             ui.add_space(14.0);
             // The buttons scroll when the window is too low for all the pages; the version stays at the bottom.
             let height = (ui.available_height() - 26.0).max(80.0);
+            let mut clicked = None;
             egui::ScrollArea::vertical().id_salt("side_bar_scroll").max_height(height).auto_shrink([false, false]).show(ui, |ui| {
                 for (i, module) in self.modules.iter().enumerate() {
                     if let Some((_, title)) = SECTIONS.iter().find(|(first, _)| *first == i) {
@@ -109,10 +113,7 @@ impl App {
                     let selected = i == self.current;
                     let response = widget::side_button(ui, module.icon(), module.title(), selected);
                     if response.clicked() {
-                        self.current = i;
-                        self.side_bar_focus = true;
-                        ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
-                        ctx.request_repaint();
+                        clicked = Some(i);
                     }
                     if selected && self.side_bar_focus {
                         widget::glow(ui, response.rect, 10.0);
@@ -126,6 +127,10 @@ impl App {
             ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                 ui.label(widget::hint(&format!("v{}", sango_core::VERSION)));
             });
+            if let Some(i) = clicked {
+                self.side_bar_focus = true;
+                self.go_to(ctx, i);
+            }
         });
     }
 
@@ -163,50 +168,84 @@ impl App {
         self.modules.iter().filter(|module| module.unsaved()).map(|module| module.title()).collect()
     }
 
-    /// When the user closes the window with changes that are not saved, the window stays and asks: "Cancel" is the first choice.
+    /// Opens another page. When the open page has changes that are not saved, the window asks first (see [`App::page_guard`]).
+    fn go_to(&mut self, ctx: &egui::Context, target: usize) {
+        if target == self.current || target >= self.modules.len() {
+            return;
+        }
+        if self.modules[self.current].unsaved() {
+            self.pending_page = Some(target);
+        } else {
+            self.current = target;
+            ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+        }
+        ctx.request_repaint();
+    }
+
+    /// Forgets the changes of a page: the page reads its files again, or it is made again from zero.
+    fn discard(&mut self, place: usize) {
+        if !self.modules[place].discard_changes() {
+            let mut fresh = Self::pages();
+            self.modules[place] = fresh.swap_remove(place);
+        }
+    }
+
+    /// Asks a question about a page with changes that are not saved: Save, Don't save or Cancel. Gives the answer, then None while
+    /// the window waits. Save writes the page; when a problem stops it, the answer is Cancel (the page shows the problem).
+    fn ask(&mut self, ctx: &egui::Context, place: usize) -> Option<widget::Unsaved> {
+        let title = self.modules[place].title().to_string();
+        let answer = widget::unsaved_window(ctx, &format!("the page {title}"))?;
+        match answer {
+            widget::Unsaved::Save => {
+                self.modules[place].save_changes(ctx, &mut self.session);
+                if self.modules[place].unsaved() {
+                    return Some(widget::Unsaved::Stay);
+                }
+            }
+            widget::Unsaved::Discard => self.discard(place),
+            widget::Unsaved::Stay => {}
+        }
+        Some(answer)
+    }
+
+    /// The question before another page opens (see [`App::go_to`]).
+    fn page_guard(&mut self, ctx: &egui::Context) {
+        let Some(target) = self.pending_page else { return };
+        match self.ask(ctx, self.current) {
+            Some(widget::Unsaved::Stay) => self.pending_page = None,
+            Some(_) => {
+                self.pending_page = None;
+                self.current = target;
+                ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
+                ctx.request_repaint();
+            }
+            None => {}
+        }
+    }
+
+    /// When the user closes the window with changes that are not saved, the window stays and asks for each page in turn (the page
+    /// is shown behind the question): Save, Don't save or Cancel. Cancel stops the closing.
     fn close_guard(&mut self, ctx: &egui::Context) {
         if ctx.input(|i| i.viewport().close_requested()) && !self.unsaved_pages().is_empty() && !self.confirm_close {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
+            self.pending_page = None;
         }
         if !self.confirm_close {
             return;
         }
-        let pages = self.unsaved_pages();
-        if pages.is_empty() {
+        let Some(place) = self.modules.iter().position(|module| module.unsaved()) else {
+            // Every page is saved or left: the window closes.
             self.confirm_close = false;
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_close_now"), true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             return;
+        };
+        self.current = place;
+        if let Some(widget::Unsaved::Stay) = self.ask(ctx, place) {
+            self.confirm_close = false;
         }
-        let mut answer = None;
-        egui::Area::new(egui::Id::new("close_shade")).order(egui::Order::Foreground).fixed_pos(egui::pos2(0.0, 0.0)).show(ctx, |ui| {
-            let screen = ctx.screen_rect();
-            ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(90));
-            ui.allocate_rect(screen, egui::Sense::click_and_drag());
-        });
-        egui::Window::new("Changes not saved").order(egui::Order::Tooltip).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0)).show(ctx, |ui| {
-            ui.set_width(380.0);
-            ui.label(format!("These pages have changes that are not saved: {}.", pages.join(", ")));
-            ui.label(widget::hint("If you close now, you lose these changes. Press Cancel, then Save on each page."));
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                if widget::button_styled(ui, egui::RichText::new("Cancel").color(color::WHITE), Some(color::ACCENT)) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-                    answer = Some(false);
-                }
-                if widget::button(ui, "Close without saving") {
-                    answer = Some(true);
-                }
-            });
-        });
-        match answer {
-            Some(true) => {
-                self.confirm_close = false;
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                // The check is over: the next request closes the window.
-                ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_close_now"), true));
-            }
-            Some(false) => self.confirm_close = false,
-            None => {}
-        }
+        ctx.request_repaint();
     }
 
     fn update_ctx(&mut self, ctx: &egui::Context) {
@@ -241,9 +280,8 @@ impl App {
                     s
                 });
                 if step != 0 {
-                    self.current = ((self.current as isize + step).rem_euclid(self.modules.len() as isize)) as usize;
-                    ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
-                    ctx.request_repaint();
+                    let target = ((self.current as isize + step).rem_euclid(self.modules.len() as isize)) as usize;
+                    self.go_to(ctx, target);
                 }
                 let enter_page = ctx.input_mut(|i| {
                     i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
@@ -268,11 +306,10 @@ impl App {
         }
 
         if let Some(target) = ctx.data_mut(|d| d.remove_temp::<usize>(egui::Id::new("sango_switch_module"))) {
-            self.current = target;
             self.side_bar_focus = false;
-            ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
-            ctx.request_repaint();
+            self.go_to(ctx, target);
         }
+        self.page_guard(ctx);
 
         self.forget_erased_files();
         self.session.focus_page = !self.side_bar_focus;
@@ -285,12 +322,19 @@ impl App {
         sango_species::menus::set_source(&self.session);
         // The text fields of the game texts read the font of the game from the dump.
         sango_ui::game_text::set_dump(self.session.dump.as_ref());
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+        let page = egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             widget::update_navigation(ui);
             if let Some(module) = self.modules.get_mut(self.current) {
                 module.ui(ui, &mut self.session);
             }
+            widget::focus_from_clicks(ui);
         });
+        // A click in the page takes the focus from the side bar.
+        let click_in_page = ctx.input(|i| i.pointer.primary_pressed() && i.pointer.interact_pos().is_some_and(|p| page.response.rect.contains(p)));
+        if click_in_page && self.side_bar_focus && ctx.layer_id_at(ctx.input(|i| i.pointer.interact_pos()).unwrap_or_default()) == Some(page.response.layer_id) {
+            self.side_bar_focus = false;
+            ctx.request_repaint();
+        }
 
         if widget::take_sidebar_focus_request(ctx) {
             self.side_bar_focus = true;
@@ -302,10 +346,8 @@ impl App {
         // A page asked for another page by its title.
         if let Some(title) = widget::take_open_page(ctx) {
             if let Some(target) = self.modules.iter().position(|module| module.title() == title) {
-                self.current = target;
                 self.side_bar_focus = false;
-                ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sango_active_widget")));
-                ctx.request_repaint();
+                self.go_to(ctx, target);
             }
         }
 
@@ -437,6 +479,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
         let ctx = egui::Context::default();
@@ -450,6 +493,59 @@ mod test {
             assert_eq!(app.warmed, 3, "the two other pages were drawn, one at each frame, and then no more");
         }
         assert_eq!(app.current, 0);
+    }
+
+    /// A page with a change that is not saved; "Don't save" forgets it.
+    #[derive(Default)]
+    struct Changed {
+        changed: bool,
+        saved: bool,
+    }
+
+    impl Module for Changed {
+        fn title(&self) -> &str {
+            "Changed"
+        }
+        fn icon(&self) -> &str {
+            "C"
+        }
+        fn unsaved(&self) -> bool {
+            self.changed
+        }
+        fn save_changes(&mut self, _ctx: &egui::Context, _session: &mut Session) {
+            self.changed = false;
+            self.saved = true;
+        }
+        fn discard_changes(&mut self) -> bool {
+            self.changed = false;
+            true
+        }
+        fn ui(&mut self, _ui: &mut egui::Ui, _session: &mut Session) {}
+    }
+
+    /// Another page does not open while the open page has a change that is not saved: the window asks first.
+    #[test]
+    fn another_page_waits_for_the_answer_about_the_changes() {
+        let mut app = App {
+            modules: vec![Box::new(sango_home::Home::default()), Box::new(Changed { changed: true, saved: false })],
+            current: 1,
+            session: Session::restore(),
+            frames: 20,
+            warmed: 0,
+            side_bar_focus: true,
+            confirm_close: false,
+            pending_page: None,
+            remembered: String::new(),
+        };
+        let ctx = egui::Context::default();
+        app.go_to(&ctx, 0);
+        assert_eq!((app.current, app.pending_page), (1, Some(0)), "the page stays and the question waits");
+        assert_eq!(app.unsaved_pages(), ["Changed"]);
+        app.discard(1);
+        assert!(app.unsaved_pages().is_empty(), "Don't save forgets the change");
+        app.pending_page = None;
+        app.go_to(&ctx, 0);
+        assert_eq!((app.current, app.pending_page), (0, None), "a page without changes lets the other page open at once");
     }
 
     #[test]
@@ -478,6 +574,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
 
@@ -521,6 +618,7 @@ mod test {
             warmed: 0,
             side_bar_focus: true,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
 
@@ -574,6 +672,7 @@ mod test {
             warmed: 0,
             side_bar_focus: true,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
 
@@ -632,6 +731,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
         let ctx = egui::Context::default();
@@ -683,6 +783,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
         let ctx = egui::Context::default();
@@ -733,6 +834,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
 
@@ -780,6 +882,7 @@ mod test {
             warmed: 0,
             side_bar_focus: true,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
 
@@ -850,6 +953,7 @@ mod test {
             warmed: 0,
             side_bar_focus: false,
             confirm_close: false,
+            pending_page: None,
             remembered: String::new(),
         };
 

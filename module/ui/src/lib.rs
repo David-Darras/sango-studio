@@ -2,6 +2,7 @@
 
 pub mod focus;
 pub mod game_text;
+pub mod history;
 pub mod item_menu;
 pub mod language;
 pub mod module;

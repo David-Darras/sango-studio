@@ -51,6 +51,8 @@ pub struct AbilityTexts {
     buffers: HashMap<(usize, usize, usize), String>,
     /// What is wrong in a box: the same key.
     errors: HashMap<(usize, usize, usize), String>,
+    /// The files of texts of the romfs that were read, to show what is not as in the game. The key is the language and the file.
+    game: HashMap<(usize, usize), Option<TextFile>>,
     /// The ability that the boxes are for.
     current: Option<usize>,
     /// The chosen language (0 to 7).
@@ -73,6 +75,7 @@ impl AbilityTexts {
         self.buffers.clear();
         self.errors.clear();
         self.current = None;
+        self.game.clear();
     }
 
     /// A file of texts as the romfs has it.
@@ -139,11 +142,53 @@ impl AbilityTexts {
             language_menu(ui, "ability_text_language", &mut self.language);
             ui.end_row();
             for field in &FIELDS {
-                ui.label(field.label).on_hover_text(field.hint);
+                // The name of the field is blue when the text is not as in the game, and ↺ puts back the text of the game.
+                let language = self.language;
+                let game = self.game_text(language, field.file, id);
+                let now = self.text_now(sd, language, field.file, id);
+                let changed = game.is_some() && now.is_some() && game != now;
+                let back = ui
+                    .horizontal(|ui| {
+                        let (name, back) = widget::field_name(ui, field.label, changed);
+                        name.on_hover_text(field.hint);
+                        back
+                    })
+                    .inner;
+                if let (true, Some(text)) = (back, game) {
+                    self.put_back(language, field.file, id, text);
+                }
                 ui.vertical(|ui| self.edit(ui, sd, field, id));
                 ui.end_row();
             }
         });
+    }
+
+    /// A text as the romfs has it: the language, the file and the line.
+    fn game_text(&mut self, language: usize, file: usize, line: usize) -> Option<String> {
+        if !self.game.contains_key(&(language, file)) {
+            let found = self.romfs(language, file);
+            self.game.insert((language, file), found);
+        }
+        self.game.get(&(language, file))?.as_ref()?.text(line)
+    }
+
+    /// A text as the user has it now: the text box when it was touched, else the file.
+    fn text_now(&mut self, sd: Option<&SdCard>, language: usize, file: usize, line: usize) -> Option<String> {
+        if let Some(buffer) = self.buffers.get(&(language, file, line)) {
+            return Some(buffer.clone());
+        }
+        self.load(sd, language, file);
+        self.files.get(&(language, file))?.text(line)
+    }
+
+    /// Puts a text back in the file and in its text box.
+    fn put_back(&mut self, language: usize, file: usize, line: usize, text: String) {
+        if let Some(found) = self.files.get_mut(&(language, file)) {
+            if found.set_text(line, &text).is_ok() {
+                self.errors.remove(&(language, file, line));
+                self.buffers.insert((language, file, line), text);
+            }
+        }
     }
 
     /// The text box of a field in the chosen language, and what is wrong with the text.

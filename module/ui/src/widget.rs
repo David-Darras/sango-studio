@@ -1316,7 +1316,7 @@ pub fn save_button(ui: &mut egui::Ui, changed: bool) -> bool {
         clicked = button_styled(ui, egui::RichText::new("Save").color(ink), Some(if changed { color::ACCENT } else { color::SURFACE }));
     })
     .response
-    .on_hover_text(if changed { "Writes the changes on the SD card." } else { "Nothing changed: there is nothing to save." });
+    .on_hover_text(if changed { "Writes the changes on the SD card.  (Ctrl+S)" } else { "Nothing changed: there is nothing to save.  (Ctrl+S)" });
     clicked && changed
 }
 
@@ -1339,7 +1339,7 @@ pub fn unsaved_window(ctx: &egui::Context, what: &str) -> Option<Unsaved> {
     egui::Window::new("Changes not saved").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(ctx, |ui| {
         ui.set_max_width(420.0);
         ui.label(format!("The changes of {what} are not saved."));
-        ui.label(hint("Save them before you open another one, or leave them."));
+        ui.label(hint("Save them, or leave them: \"Don't save\" loses them."));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
             if button_styled(ui, egui::RichText::new("Save").color(color::WHITE), Some(color::ACCENT)) {
@@ -1385,28 +1385,76 @@ pub struct ActionClicks {
     pub save: bool,
 }
 
-/// Draws the buttons of the top bar (see [`ActionBar`]) in the current row. Gives the buttons that were clicked.
+/// The keyboard shortcuts of the top bar: Ctrl+N (+ New), Ctrl+E (Export…), Ctrl+I (Import…), Ctrl+S (Save).
+pub const SHORTCUT_NEW: &str = "Ctrl+N";
+pub const SHORTCUT_EXPORT: &str = "Ctrl+E";
+pub const SHORTCUT_IMPORT: &str = "Ctrl+I";
+pub const SHORTCUT_SAVE: &str = "Ctrl+S";
+
+/// True when the shortcut Ctrl (or Cmd) + `key` was pressed in this frame. The key is used. Nothing while a window of the page (or a
+/// menu) is open over the page.
+pub fn shortcut(ui: &egui::Ui, key: egui::Key) -> bool {
+    ui.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, key))
+}
+
+/// Draws the buttons of the top bar (see [`ActionBar`]) in the current row. Gives the buttons that were clicked, or whose shortcut was
+/// pressed (Ctrl+N, Ctrl+E, Ctrl+I, Ctrl+S: the text over a button gives its shortcut).
 pub fn action_bar(ui: &mut egui::Ui, bar: ActionBar) -> ActionClicks {
     let mut clicks = ActionClicks::default();
+    let hover = |r: egui::InnerResponse<()>, text: &str| {
+        r.response.on_hover_text(text);
+    };
     if let Some((text, enabled)) = bar.new {
-        ui.add_enabled_ui(enabled, |ui| clicks.new = button_styled(ui, egui::RichText::new(text).color(color::WHITE), Some(color::ACCENT)));
+        hover(ui.add_enabled_ui(enabled, |ui| clicks.new = button_styled(ui, egui::RichText::new(text).color(color::WHITE), Some(color::ACCENT))), SHORTCUT_NEW);
+        clicks.new |= enabled && shortcut(ui, egui::Key::N);
     }
     if let Some(enabled) = bar.delete {
         ui.add_enabled_ui(enabled, |ui| clicks.delete = confirm_button(ui, "Delete", "Click again to delete"));
     }
     if let Some(enabled) = bar.export {
-        ui.add_enabled_ui(enabled, |ui| clicks.export = button(ui, "Export…"));
+        hover(ui.add_enabled_ui(enabled, |ui| clicks.export = button(ui, "Export…")), SHORTCUT_EXPORT);
+        clicks.export |= enabled && shortcut(ui, egui::Key::E);
     }
     if let Some(enabled) = bar.import {
-        ui.add_enabled_ui(enabled, |ui| clicks.import = button(ui, "Import…"));
+        hover(ui.add_enabled_ui(enabled, |ui| clicks.import = button(ui, "Import…")), SHORTCUT_IMPORT);
+        clicks.import |= enabled && shortcut(ui, egui::Key::I);
     }
     if let Some(enabled) = bar.reset {
         ui.add_enabled_ui(enabled, |ui| clicks.reset = button(ui, "Reset…"));
     }
     if let Some(changed) = bar.save {
         clicks.save = save_button(ui, changed);
+        clicks.save |= changed && shortcut(ui, egui::Key::S);
     }
     clicks
+}
+
+/// The text of the name of a field: blue when the value is not the one of the game, grey otherwise.
+pub fn field_text(name: &str, changed: bool) -> egui::RichText {
+    if changed {
+        egui::RichText::new(name).color(color::ACCENT).size(13.0)
+    } else {
+        hint(name)
+    }
+}
+
+/// The small ↺ button after a field that is not as in the game. Gives true at the click: the page then puts back the value of the game.
+/// Draws nothing when `changed` is false.
+pub fn reset_mark(ui: &mut egui::Ui, changed: bool) -> bool {
+    if !changed {
+        return false;
+    }
+    ui.add(egui::Button::new(egui::RichText::new("↺").color(color::ACCENT)).small().frame(false))
+        .on_hover_text("Changed. Click to put back the value of the game.")
+        .clicked()
+}
+
+/// The name of a field ([`field_text`]) and its ↺ button ([`reset_mark`]), in the current row. Gives the response of the name (for a note
+/// on hover) and true when the user clicks ↺.
+pub fn field_name(ui: &mut egui::Ui, name: &str, changed: bool) -> (egui::Response, bool) {
+    let response = ui.label(field_text(name, changed));
+    let back = reset_mark(ui, changed);
+    (response, back)
 }
 
 /// The window of the button `Reset…` of a page: what is reset, check boxes for the parts when there are some, and the buttons Reset and
@@ -1434,4 +1482,46 @@ pub fn reset_window(ctx: &egui::Context, open: &mut bool, what: &str, parts: &mu
         *open = false;
     }
     run
+}
+
+/// The widget that has the focus after a click and that is not in the navigation of the page by itself (a text box, a menu, a number,
+/// a check box…). The page puts it in the navigation while it is the active one.
+const CLICK_FOCUS_KEY: &str = "sango_click_focus";
+
+/// Gives the focus to the widget of a click when the page does not do it: text boxes, menus, numbers, sliders, check boxes, radio
+/// buttons and selectable labels. Buttons (Save, Export…, Import…) do not take the focus. Call it after the page, in the same panel.
+pub fn focus_from_clicks(ui: &egui::Ui) {
+    use egui::WidgetType as T;
+    let ctx = ui.ctx();
+    let clicked = ctx.interaction_snapshot(|s| s.clicked.or(s.drag_started));
+    let typ = ctx.output(|o| {
+        o.events.iter().rev().find_map(|e| match e {
+            egui::output::OutputEvent::Clicked(info) | egui::output::OutputEvent::FocusGained(info) | egui::output::OutputEvent::ValueChanged(info) => Some(info.typ),
+            _ => None,
+        })
+    });
+    let takes_focus = matches!(typ, Some(T::TextEdit | T::ComboBox | T::DragValue | T::Slider | T::Checkbox | T::RadioButton | T::SelectableLabel | T::ColorButton));
+    let registered = |d: &mut egui::util::IdTypeMap| d.get_temp::<Vec<FocusableWidget>>(egui::Id::new(FOCUSABLE_WIDGETS_NEXT_KEY)).unwrap_or_default();
+    if let (Some(id), true) = (clicked, takes_focus) {
+        let place = ctx.input(|i| i.pointer.interact_pos());
+        let widgets = ctx.data_mut(registered);
+        // A widget of the page (or a part of one) does its focus by itself.
+        let inside = widgets.iter().any(|w| w.id == id || place.is_some_and(|p| w.rect.is_positive() && w.rect.contains(p)));
+        if !inside && ctx.read_response(id).is_some_and(|r| r.layer_id == ui.layer_id()) {
+            set_active_id(ui, id);
+            ctx.data_mut(|d| d.insert_temp(egui::Id::new(CLICK_FOCUS_KEY), id));
+        }
+    }
+    let Some(id) = ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new(CLICK_FOCUS_KEY))) else { return };
+    let response = ctx.read_response(id).filter(|r| r.layer_id == ui.layer_id());
+    match response {
+        Some(response) if is_active(ui, id) => {
+            register_focusable(ui, id, response.rect);
+            // No glow when a scroll area hides a part of the widget.
+            if page_has_focus(ui) && response.interact_rect == response.rect {
+                glow(ui, response.rect, 4.0);
+            }
+        }
+        _ => ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new(CLICK_FOCUS_KEY))),
+    }
 }

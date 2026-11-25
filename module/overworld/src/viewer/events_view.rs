@@ -765,7 +765,7 @@ impl Viewer {
         ui.label(egui::RichText::new("The plugin runs these scripts from a text file. Give a sign, a trigger or a character the number 32000 to 32011 as its script.").weak());
         let labels = self.scripts.labels();
         let selected = self.script_sel.min(COUNT - 1);
-        egui::ComboBox::from_id_salt("data_script").selected_text({
+        let combo = egui::ComboBox::from_id_salt("data_script").selected_text({
             let text = format!("{}: {}", FIRST as usize + selected, labels[selected].1);
             if text.chars().count() > 38 { format!("{}...", text.chars().take(36).collect::<String>()) } else { text }
         }).width(300.0).show_ui(ui, |ui| {
@@ -775,6 +775,8 @@ impl Viewer {
                 }
             }
         });
+        let values: Vec<usize> = (0..labels.len()).collect();
+        sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.script_sel, &values);
         let selected = self.script_sel.min(COUNT - 1);
         for i in 0..STEPS {
             let step = &mut self.scripts.scripts[selected][i];
@@ -782,7 +784,7 @@ impl Viewer {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(format!("Step {}", i + 1));
-                    egui::ComboBox::from_id_salt(("script_action", i)).selected_text(ACTIONS[step.action as usize]).width(230.0).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt(("script_action", i)).selected_text(ACTIONS[step.action as usize]).width(230.0).show_ui(ui, |ui| {
                         for (k, name) in ACTIONS.iter().enumerate() {
                             if ui.selectable_label(step.action as usize == k, *name).clicked() && step.action as usize != k {
                                 step.action = k as u8;
@@ -790,6 +792,8 @@ impl Viewer {
                             }
                         }
                     });
+                    let values: Vec<u8> = (0..ACTIONS.len() as u8).collect();
+                    changed |= sango_ui::focus::combo_arrows(ui, &combo.response, &mut step.action, &values);
                 });
                 match step.action {
                     1 => {
@@ -1740,13 +1744,15 @@ impl Viewer {
         if self.ev.maps.len() > 1 {
             let before = self.ev.map;
             let text = |z: &MapAt| format!("{} [{}]", map_name(z.map as u16), z.map);
-            egui::ComboBox::from_label("Map")
+            let combo = egui::ComboBox::from_label("Map")
                 .selected_text(self.ev.at().map_or("-".to_string(), |z| text(z)))
                 .show_ui(ui, |ui| {
                     for (i, z) in self.ev.maps.iter().enumerate() {
                         ui.selectable_value(&mut self.ev.map, i, text(z));
                     }
                 });
+            let values: Vec<usize> = (0..self.ev.maps.len()).collect();
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.ev.map, &values);
             if self.ev.map != before {
                 let target = self.ev.map;
                 self.ev.map = before;
@@ -1916,7 +1922,7 @@ fn choice(ui: &mut egui::Ui, label: &str, value: &mut u16, options: &[(u16, Stri
     let mut changed = false;
     ui.horizontal(|ui| {
         ui.label(label);
-        egui::ComboBox::from_id_salt(label).selected_text(current).width(190.0).show_ui(ui, |ui| {
+        let combo = egui::ComboBox::from_id_salt(label).selected_text(current).width(190.0).show_ui(ui, |ui| {
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 for (v, name) in options {
                     if ui.selectable_label(*value == *v, format!("{v}: {name}")).clicked() {
@@ -1926,6 +1932,8 @@ fn choice(ui: &mut egui::Ui, label: &str, value: &mut u16, options: &[(u16, Stri
                 }
             });
         });
+        let values: Vec<u16> = options.iter().map(|(v, _)| *v).collect();
+        changed |= sango_ui::focus::combo_arrows(ui, &combo.response, value, &values);
         // The number can also be typed, for a value that the list does not have.
         changed |= super::chrome::spin(ui, value);
     });

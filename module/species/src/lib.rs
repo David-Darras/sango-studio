@@ -85,6 +85,8 @@ pub struct Species {
     form: usize,
     /// The data in the form.
     data: Option<SpeciesData>,
+    /// Undo and redo of the data of the open species and form.
+    history: sango_ui::history::History<SpeciesData>,
     /// The data of the game (or of the pack) of the open species and form: the fields that differ from it show a mark and a button
     /// that puts the value of the game back.
     game: Option<SpeciesData>,
@@ -159,6 +161,7 @@ pub struct Species {
 impl Default for Species {
     fn default() -> Self {
         Species {
+            history: Default::default(),
             root: None,
             garc: None,
             species: 1,
@@ -1512,7 +1515,7 @@ fn height_field(ui: &mut egui::Ui, id_salt: &str, cm_value: &mut u16) {
             HeightUnit::Inches => "in",
         };
         let mut new_unit = unit;
-        egui::ComboBox::from_id_salt(unit_id)
+        let combo = egui::ComboBox::from_id_salt(unit_id)
             .selected_text(unit_label)
             .width(42.0)
             .show_ui(ui, |ui| {
@@ -1520,6 +1523,7 @@ fn height_field(ui: &mut egui::Ui, id_salt: &str, cm_value: &mut u16) {
                 ui.selectable_value(&mut new_unit, HeightUnit::Centimeters, "cm");
                 ui.selectable_value(&mut new_unit, HeightUnit::Inches, "in");
             });
+        sango_ui::focus::combo_arrows(ui, &combo.response, &mut new_unit, &[HeightUnit::Meters, HeightUnit::Centimeters, HeightUnit::Inches]);
         if new_unit != unit {
             unit = new_unit;
             ui.data_mut(|d| d.insert_temp(unit_id, unit));
@@ -1569,13 +1573,14 @@ fn weight_field(ui: &mut egui::Ui, id_salt: &str, hg_value: &mut u16) {
             WeightUnit::Lbs => "lbs",
         };
         let mut new_unit = unit;
-        egui::ComboBox::from_id_salt(unit_id)
+        let combo = egui::ComboBox::from_id_salt(unit_id)
             .selected_text(unit_label)
             .width(46.0)
             .show_ui(ui, |ui| {
                 ui.selectable_value(&mut new_unit, WeightUnit::Kg, "kg");
                 ui.selectable_value(&mut new_unit, WeightUnit::Lbs, "lbs");
             });
+        sango_ui::focus::combo_arrows(ui, &combo.response, &mut new_unit, &[WeightUnit::Kg, WeightUnit::Lbs]);
         if new_unit != unit {
             unit = new_unit;
             ui.data_mut(|d| d.insert_temp(unit_id, unit));
@@ -1704,13 +1709,10 @@ fn line_with_note(ui: &mut egui::Ui, label: &str, note: Option<FieldNote>, add: 
     let is_modified = modified.contains(&key);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 4.0;
-        ui.label(if is_modified { egui::RichText::new(label).color(color::ACCENT).size(13.0) } else { widget::hint(label) });
-        if is_modified {
-            // The value is not the one of the game: a button puts it back.
-            let back = ui.add(egui::Button::new(egui::RichText::new("↺").color(color::ACCENT)).small().frame(false)).on_hover_text("Changed. Click to put back the value of the game.");
-            if back.clicked() {
-                ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(REVERT_ID), key.clone()));
-            }
+        // The value is not the one of the game: the name is blue and ↺ puts it back.
+        let (_, back) = widget::field_name(ui, label, is_modified);
+        if back {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(REVERT_ID), key.clone()));
         }
         if let Some(n) = note {
             let info = ui.hyperlink_to("ℹ", n.url);
@@ -2073,10 +2075,11 @@ fn group_characteristics(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8)
                     } else {
                         number(ui, &mut d.hatch_time, 255.0);
                     }
-                    egui::ComboBox::from_id_salt("hatch_unit_menu").width(72.0).selected_text(if steps_unit { "steps" } else { "cycles" }).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt("hatch_unit_menu").width(72.0).selected_text(if steps_unit { "steps" } else { "cycles" }).show_ui(ui, |ui| {
                         ui.selectable_value(&mut steps_unit, false, "cycles");
                         ui.selectable_value(&mut steps_unit, true, "steps");
                     });
+                    sango_ui::focus::combo_arrows(ui, &combo.response, &mut steps_unit, &[false, true]);
                     ui.data_mut(|data| data.insert_temp(unit_id, steps_unit));
                 },
             );
@@ -2301,6 +2304,17 @@ fn general_tab(ui: &mut egui::Ui, d: &mut SpeciesData, shape: &mut u8, side: imp
 }
 
 impl Module for Species {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        self.save(session);
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        let (species, form, tab) = (self.species, self.form, self.tab);
+        *self = Self::default();
+        (self.species, self.form, self.tab) = (species, form, tab);
+        true
+    }
+
     fn unsaved(&self) -> bool {
         self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed())
     }
@@ -2495,6 +2509,9 @@ impl Module for Species {
                         }
                     }
                     if self.loaded.is_some() {
+                        // Ctrl+Z and Ctrl+Y on the data of the open species and form.
+                        let key = (self.species as u64) << 8 | self.form as u64;
+                        self.history.track(ui, key, &mut data);
                         self.data = Some(data);
                         self.shape = shape;
                     }

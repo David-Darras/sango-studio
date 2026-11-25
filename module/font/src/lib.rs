@@ -222,7 +222,7 @@ impl FontPage {
         let mut picked = false;
         let label = |e: &Entry| format!("{} · {}", e.id, role(e.id, e.language, e.variants));
         let shown = self.entries.iter().find(|e| (e.id, e.language) == self.chosen).map_or("Choose a font".to_string(), label);
-        egui::ComboBox::from_id_salt("font_game_choice").selected_text(shown).width(340.0).height(420.0).show_ui(ui, |ui| {
+        let combo = egui::ComboBox::from_id_salt("font_game_choice").selected_text(shown).width(340.0).height(420.0).show_ui(ui, |ui| {
             ui.add(egui::TextEdit::singleline(&mut self.game_filter).hint_text("Search").desired_width(300.0));
             let filter = self.game_filter.to_lowercase();
             for entry in self.entries.iter().filter(|e| filter.is_empty() || label(e).to_lowercase().contains(&filter)) {
@@ -232,6 +232,10 @@ impl FontPage {
                 }
             }
         });
+        let values: Vec<_> = self.entries.iter().map(|e| (e.id, e.language)).collect();
+        if sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.chosen, &values) {
+            picked = true;
+        }
         picked
     }
 
@@ -398,7 +402,7 @@ impl FontPage {
         let mut made = false;
         ui.horizontal_wrapped(|ui| {
             let shown = self.pc_choice.and_then(|i| system.get(i)).map_or("Choose a font".to_string(), |f| f.name.clone());
-            egui::ComboBox::from_id_salt("font_pc_choice").selected_text(shown).width(260.0).height(360.0).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("font_pc_choice").selected_text(shown).width(260.0).height(360.0).show_ui(ui, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.pc_filter).hint_text("Search").desired_width(230.0));
                 let filter = self.pc_filter.to_lowercase();
                 if ui.selectable_label(false, "A .ttf or .otf file…").clicked() {
@@ -413,6 +417,8 @@ impl FontPage {
                     ui.selectable_value(&mut self.pc_choice, Some(i), &font.name);
                 }
             });
+            let values: Vec<_> = (0..system.len()).map(Some).collect();
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.pc_choice, &values);
             ui.add(egui::DragValue::new(&mut self.pc_settings.size).range(4.0..=120.0).speed(0.25).suffix(" px")).on_hover_text("The size of the letters");
             if ui.small_button("Game size").clicked() {
                 self.pc_settings.size = f32::from(height) * 0.8;

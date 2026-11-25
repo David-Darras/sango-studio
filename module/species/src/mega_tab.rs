@@ -273,7 +273,7 @@ impl Species {
                             // Column 1: Method
                             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(method_rect), |ui| {
                                 let mut kind = current_kind;
-                                egui::ComboBox::from_id_salt(format!("game_mega_kind_{form}_{entry_index}"))
+                                let combo = egui::ComboBox::from_id_salt(format!("game_mega_kind_{form}_{entry_index}"))
                                     .selected_text(shown)
                                     .width(170.0)
                                     .show_ui(ui, |ui| {
@@ -281,6 +281,8 @@ impl Species {
                                             ui.selectable_value(&mut kind, value, name);
                                         }
                                     });
+                                let values: Vec<_> = GAME_KINDS.iter().map(|(v, _)| *v).collect();
+                                sango_ui::focus::combo_arrows(ui, &combo.response, &mut kind, &values);
                                 if kind != current_kind {
                                     match kind {
                                         2 => {
@@ -353,7 +355,7 @@ impl Species {
                             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(method_rect), |ui| {
                                 let mut kind = kind_of(condition);
                                 let shown = KINDS.iter().find(|(k, _)| *k == kind).map_or("?", |(_, name)| *name);
-                                egui::ComboBox::from_id_salt(format!("pack_mega_kind_{form}"))
+                                let combo = egui::ComboBox::from_id_salt(format!("pack_mega_kind_{form}"))
                                     .selected_text(shown)
                                     .width(170.0)
                                     .show_ui(ui, |ui| {
@@ -361,6 +363,8 @@ impl Species {
                                             ui.selectable_value(&mut kind, value, name);
                                         }
                                     });
+                                let values: Vec<_> = KINDS.iter().map(|(v, _)| *v).collect();
+                                sango_ui::focus::combo_arrows(ui, &combo.response, &mut kind, &values);
                                 if kind != kind_of(condition) {
                                     new_condition = with_kind(kind, condition);
                                 }

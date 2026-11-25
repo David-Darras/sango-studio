@@ -30,6 +30,8 @@ pub struct Store {
     dump: Dump,
     /// The files of texts that were read: the language and the number of the file.
     texts: HashMap<(usize, usize), Option<TextFile>>,
+    /// The files of texts of the game (the romfs only): the language and the file.
+    game_texts: HashMap<(usize, usize), Option<TextFile>>,
 }
 
 impl Store {
@@ -45,6 +47,7 @@ impl Store {
             languages: HashMap::new(),
             dump: dump.clone(),
             texts: HashMap::new(),
+            game_texts: HashMap::new(),
         })
     }
 
@@ -232,6 +235,16 @@ impl Store {
     /// A line of a file of texts, or an empty text.
     pub fn line(&mut self, sd: Option<&SdCard>, language: usize, file: usize, line: usize) -> String {
         self.text_file(sd, language, file).and_then(|file| file.text(line)).unwrap_or_default()
+    }
+
+    /// A line of a file of texts as the game has it (the romfs), or an empty text.
+    pub fn game_line(&mut self, language: usize, file: usize, line: usize) -> String {
+        if !self.game_texts.contains_key(&(language, file)) {
+            let archive = self.languages.entry(language).or_insert_with(|| Garc::open(&self.dump.archive(LANGUAGES[language].archive)).ok());
+            let loaded = archive.as_ref().and_then(|archive| archive.first_file(file)).and_then(|bytes| TextFile::from_bytes(bytes).ok());
+            self.game_texts.insert((language, file), loaded);
+        }
+        self.game_texts.get(&(language, file)).and_then(|file| file.as_ref()).and_then(|file| file.text(line)).unwrap_or_default()
     }
 
     /// Changes a line of a text file in a language and writes the file on the SD card.

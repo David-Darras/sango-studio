@@ -720,7 +720,7 @@ impl ModelTab {
                 return;
             }
             let selected = self.playing.as_ref().map_or("Rest pose".to_string(), |p| short_motion(p.battle, p.index));
-            egui::ComboBox::from_id_salt("model_motion").selected_text(selected).width(340.0).height(360.0).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("model_motion").selected_text(selected).width(340.0).height(360.0).show_ui(ui, |ui| {
                 if ui.selectable_label(self.playing.is_none(), "Rest pose").clicked() {
                     chosen = Some(None);
                 }
@@ -738,6 +738,13 @@ impl ModelTab {
                     }
                 }
             });
+            // The arrows go to the motion before or after (the rest pose is the first).
+            let mut values: Vec<Option<(bool, usize)>> = vec![None];
+            values.extend(entries.iter().map(|&e| Some(e)));
+            let mut now = self.playing.as_ref().map(|p| (p.battle, p.index));
+            if sango_ui::focus::combo_arrows(ui, &combo.response, &mut now, &values) {
+                chosen = Some(now);
+            }
             if let Some(playing) = &self.playing {
                 let last = playing.motion.frames.saturating_sub(1) as f32;
                 ui.horizontal(|ui| {

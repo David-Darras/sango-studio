@@ -167,6 +167,7 @@ impl Formulas {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::defaults::HP;
 
     #[test]
     fn the_game_formulas_write_nothing() {

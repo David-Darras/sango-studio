@@ -303,6 +303,12 @@ impl Module for BattlePage {
         "⚔"
     }
 
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(open) = self.open.as_mut() {
+            save(open, session.sd.as_ref(), &mut self.status);
+        }
+    }
+
     fn unsaved(&self) -> bool {
         self.open.as_ref().map(|o| o.dirty).unwrap_or(false)
     }

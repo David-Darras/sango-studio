@@ -11,11 +11,13 @@ use sango_ui::{egui, widget};
 fn pick(ui: &mut egui::Ui, salt: impl std::hash::Hash, value: &mut i16, list: &[(i16, &str)]) -> bool {
     let before = *value;
     let shown = list.iter().find(|(v, _)| v == value).map(|(_, name)| *name).unwrap_or("?");
-    egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt(salt).selected_text(shown).show_ui(ui, |ui| {
         for (v, name) in list {
             ui.selectable_value(value, *v, *name);
         }
     });
+    let values: Vec<i16> = list.iter().map(|(v, _)| *v).collect();
+    sango_ui::focus::combo_arrows(ui, &combo.response, value, &values);
     *value != before
 }
 
@@ -107,11 +109,13 @@ fn rule_ui(ui: &mut egui::Ui, id: &str, number: usize, rule: &mut Rule, context:
     let salt = |part: &str, i: usize| format!("{id}_{number}_{part}_{i}");
     ui.horizontal(|ui| {
         ui.label("When");
-        egui::ComboBox::from_id_salt(salt("moment", 0)).width(280.0).selected_text(moment_label(rule.moment)).show_ui(ui, |ui| {
+        let combo = egui::ComboBox::from_id_salt(salt("moment", 0)).width(280.0).selected_text(moment_label(rule.moment)).show_ui(ui, |ui| {
             for moment in moments(context) {
                 ui.selectable_value(&mut rule.moment, moment.value, moment.label).on_hover_text(moment.help);
             }
         });
+        let values: Vec<_> = moments(context).iter().map(|m| m.value).collect();
+        sango_ui::focus::combo_arrows(ui, &combo.response, &mut rule.moment, &values);
     });
     if let Some(moment) = moments(context).iter().find(|m| m.value == rule.moment) {
         ui.label(widget::hint(moment.help));
@@ -123,11 +127,12 @@ fn rule_ui(ui: &mut egui::Ui, id: &str, number: usize, rule: &mut Rule, context:
     for (i, condition) in rule.conditions.iter_mut().enumerate() {
         ui.horizontal(|ui| {
             let mut kind = condition.kind;
-            egui::ComboBox::from_id_salt(salt("condition", i)).width(260.0).selected_text(kind.label()).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt(salt("condition", i)).width(260.0).selected_text(kind.label()).show_ui(ui, |ui| {
                 for option in ConditionKind::ALL {
                     ui.selectable_value(&mut kind, option, option.label()).on_hover_text(option.help());
                 }
             });
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut kind, &ConditionKind::ALL);
             if kind != condition.kind {
                 *condition = Condition { kind, arg: kind.default_argument() };
             }
@@ -155,21 +160,24 @@ fn rule_ui(ui: &mut egui::Ui, id: &str, number: usize, rule: &mut Rule, context:
     for (i, action) in rule.actions.iter_mut().enumerate() {
         ui.horizontal_wrapped(|ui| {
             let mut kind = action.kind;
-            egui::ComboBox::from_id_salt(salt("action", i)).width(200.0).selected_text(kind.label()).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt(salt("action", i)).width(200.0).selected_text(kind.label()).show_ui(ui, |ui| {
                 for option in ActionKind::ALL {
                     ui.selectable_value(&mut kind, option, option.label()).on_hover_text(option.help());
                 }
             });
+            sango_ui::focus::combo_arrows(ui, &combo.response, &mut kind, &ActionKind::ALL);
             if kind != action.kind {
                 *action = Action { target: action.target, banner: action.banner, ..Action::new(kind) };
             }
             if action.kind.has_target() {
                 ui.label("for");
-                egui::ComboBox::from_id_salt(salt("target", i)).width(230.0).selected_text(target_label(action.target)).show_ui(ui, |ui| {
+                let combo = egui::ComboBox::from_id_salt(salt("target", i)).width(230.0).selected_text(target_label(action.target)).show_ui(ui, |ui| {
                     for (value, name, help) in TARGETS {
                         ui.selectable_value(&mut action.target, value, name).on_hover_text(help);
                     }
                 });
+                let values: Vec<_> = TARGETS.iter().map(|t| t.0).collect();
+                sango_ui::focus::combo_arrows(ui, &combo.response, &mut action.target, &values);
             }
             argument_ui(ui, salt("first", i), action.kind.first(), &mut action.a);
             argument_ui(ui, salt("second", i), action.kind.second(), &mut action.b);

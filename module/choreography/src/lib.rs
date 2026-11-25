@@ -452,6 +452,12 @@ fn param_widget(ui: &mut egui::Ui, id: &str, kind: ParamKind, value: &mut Value)
 }
 
 impl Module for Choreography {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            self.save(sd);
+        }
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty()
     }

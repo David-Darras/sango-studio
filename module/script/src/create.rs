@@ -60,6 +60,15 @@ impl Creator {
         self.chosen = self.events.iter().position(|e| !e.is_empty()).unwrap_or(0);
     }
 
+    /// Writes every event that changed.
+    pub fn save_changes(&mut self, sd: &SdCard) {
+        for number in 0..self.events.len() {
+            if self.events[number] != self.saved[number] {
+                self.save(sd, number);
+            }
+        }
+    }
+
     fn save(&mut self, sd: &SdCard, number: usize) {
         let event = self.events[number].clone();
         let result = if event.is_empty() && event.name.trim().is_empty() {
@@ -223,13 +232,15 @@ fn flag_field(ui: &mut egui::Ui, flag: &mut u32, save: &mut bool) {
 
 fn condition_fields(ui: &mut egui::Ui, condition: &mut Condition) {
     let mut kind = condition.kind();
-    egui::ComboBox::from_id_salt("condition").selected_text(condition.label()).show_ui(ui, |ui| {
+    let combo = egui::ComboBox::from_id_salt("condition").selected_text(condition.label()).show_ui(ui, |ui| {
         for place in 0..Condition::KINDS {
             if ui.selectable_label(kind == place, Condition::of_kind(place).label()).clicked() {
                 kind = place;
             }
         }
     });
+    let kinds: Vec<_> = (0..Condition::KINDS).collect();
+    sango_ui::focus::combo_arrows(ui, &combo.response, &mut kind, &kinds);
     if kind != condition.kind() {
         *condition = Condition::of_kind(kind);
     }
@@ -242,11 +253,12 @@ fn condition_fields(ui: &mut egui::Ui, condition: &mut Condition) {
         Condition::Money { amount } => number_field(ui, "money or more:", amount, 999_999),
         Condition::Variable { variable, compare, value } => {
             number_field(ui, "variable", variable, 511);
-            egui::ComboBox::from_id_salt("compare").selected_text(compare.label()).show_ui(ui, |ui| {
+            let combo = egui::ComboBox::from_id_salt("compare").selected_text(compare.label()).show_ui(ui, |ui| {
                 for option in Compare::ALL {
                     ui.selectable_value(compare, option, option.label());
                 }
             });
+            sango_ui::focus::combo_arrows(ui, &combo.response, compare, &Compare::ALL);
             number_field(ui, "", value, 65535);
         }
         Condition::Ask => {

@@ -729,6 +729,12 @@ fn particles_card(ui: &mut egui::Ui, effect: &mut Effect, layer: usize) {
 }
 
 impl Module for EffectPage {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            self.save(sd);
+        }
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty()
     }

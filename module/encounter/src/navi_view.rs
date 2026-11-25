@@ -85,6 +85,23 @@ fn read_png(path: &Path) -> Result<(usize, usize, Vec<u8>), String> {
 }
 
 impl NaviView {
+    /// Writes the DexNav when it changed (the button Save does the same).
+    pub fn save_changes(&mut self, session: &sango_core::Session) {
+        if !self.unsaved() {
+            return;
+        }
+        let Some(navi) = self.navi.as_mut() else { return };
+        self.status = Some(match navi.save() {
+            Ok(_) => {
+                if let Some(sd) = session.sd.as_ref() {
+                    let _ = sd.mark_changed("dexnav/0.bin");
+                }
+                (true, "Saved. Restart the game to see the change.".to_string())
+            }
+            Err(e) => (false, e),
+        });
+    }
+
     /// True when the DexNav has changes that are not saved.
     pub fn unsaved(&self) -> bool {
         self.navi.as_ref().is_some_and(|n| n.unsaved())

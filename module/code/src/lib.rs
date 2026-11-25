@@ -678,6 +678,12 @@ impl Code {
 }
 
 impl Module for Code {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            self.save(sd);
+        }
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty()
     }

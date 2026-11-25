@@ -25,6 +25,8 @@ pub struct Nature {
     reset_open: bool,
     opened_for: Option<PathBuf>,
     table: NatureTable,
+    /// Undo and redo of the table.
+    history: sango_ui::history::History<NatureTable>,
     saved: NatureTable,
     from_card: bool,
     status: Option<(bool, String)>,
@@ -34,7 +36,7 @@ pub struct Nature {
 
 impl Default for Nature {
     fn default() -> Self {
-        Nature { opened_for: None, reset_open: false, table: NatureTable::game(), saved: NatureTable::game(), from_card: false, status: None, language: 0 }
+        Nature { opened_for: None, reset_open: false, history: Default::default(), table: NatureTable::game(), saved: NatureTable::game(), from_card: false, status: None, language: 0 }
     }
 }
 
@@ -191,7 +193,7 @@ impl Nature {
                         NatureColor::Green => egui::RichText::new("Green").color(egui::Color32::from_rgb(0, 192, 0)),
                         NatureColor::Default => egui::RichText::new("None").color(egui::Color32::from_rgb(180, 180, 180)),
                     };
-                    egui::ComboBox::from_id_salt(("nature_color", number))
+                    let combo = egui::ComboBox::from_id_salt(("nature_color", number))
                         .selected_text(color_text)
                         .width(75.0)
                         .show_ui(ui, |ui| {
@@ -205,6 +207,7 @@ impl Nature {
                                 ui.selectable_value(color, c, label);
                             }
                         });
+                    sango_ui::focus::combo_arrows(ui, &combo.response, color, &NatureColor::ALL);
 
                     for stat in 0..5 {
                         widget::spin(ui, &mut self.table.natures[number].change[stat], -f64::from(MAX_CHANGE), f64::from(MAX_CHANGE));
@@ -215,7 +218,7 @@ impl Nature {
                             || self.table.natures[number].other_names != game.other_names
                             || self.table.natures[number].color != game.color));
                     if changed {
-                        if widget::button(ui, "Reset") {
+                        if widget::reset_mark(ui, true) {
                             reset = Some(number);
                         }
                     } else {
@@ -239,7 +242,7 @@ impl Nature {
             if let Some(number) = reset {
                 let game = if number >= GAME_COUNT { None } else { Some(Row::game(number)) };
                 self.table.natures[number].change = game.as_ref().map_or([0; 5], |g| g.change);
-                self.table.natures[number].color = NatureColor::Blue;
+                self.table.natures[number].color = game.as_ref().map_or(NatureColor::Blue, |g| g.color);
                 if let Some(game) = game {
                     self.table.natures[number].name = game.name;
                     self.table.natures[number].other_names = game.other_names;
@@ -262,6 +265,17 @@ impl Module for Nature {
 
     fn icon(&self) -> &str {
         "🍃"
+    }
+
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            self.save(sd);
+        }
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        self.table = self.saved.clone();
+        true
     }
 
     fn unsaved(&self) -> bool {
@@ -289,5 +303,7 @@ impl Module for Nature {
         egui::ScrollArea::both().id_salt("nature_scroll").auto_shrink([false, false]).show(ui, |ui| {
             self.table_card(ui);
         });
+        // Ctrl+Z and Ctrl+Y on the table.
+        self.history.track(ui, 0, &mut self.table);
     }
 }

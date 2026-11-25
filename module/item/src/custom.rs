@@ -367,11 +367,12 @@ pub fn reactions_ui(ui: &mut egui::Ui, item: &mut CustomItem) {
             for (i, action) in item.bag_actions.iter_mut().enumerate() {
                 ui.horizontal_wrapped(|ui| {
                     let mut kind = action.kind;
-                    egui::ComboBox::from_id_salt((&salt, "bag_kind", i)).width(220.0).selected_text(kind.label()).show_ui(ui, |ui| {
+                    let combo = egui::ComboBox::from_id_salt((&salt, "bag_kind", i)).width(220.0).selected_text(kind.label()).show_ui(ui, |ui| {
                         for option in BagKind::ALL {
                             ui.selectable_value(&mut kind, option, option.label());
                         }
                     });
+                    sango_ui::focus::combo_arrows(ui, &combo.response, &mut kind, &BagKind::ALL);
                     if kind != action.kind {
                         *action = BagAction::new(kind);
                     }
@@ -391,11 +392,12 @@ pub fn reactions_ui(ui: &mut egui::Ui, item: &mut CustomItem) {
                             }
                         }
                         BagKind::SetShiny => {
-                            egui::ComboBox::from_id_salt((&salt, "bag_shiny", i)).selected_text(["Switch", "Make shiny", "Make normal"][action.a.clamp(0, 2) as usize]).show_ui(ui, |ui| {
+                            let combo = egui::ComboBox::from_id_salt((&salt, "bag_shiny", i)).selected_text(["Switch", "Make shiny", "Make normal"][action.a.clamp(0, 2) as usize]).show_ui(ui, |ui| {
                                 for (value, name) in [(0i16, "Switch"), (1, "Make shiny"), (2, "Make normal")] {
                                     ui.selectable_value(&mut action.a, value, name);
                                 }
                             });
+                            sango_ui::focus::combo_arrows(ui, &combo.response, &mut action.a, &[0, 1, 2]);
                         }
                         BagKind::NextAbility => {}
                         BagKind::SetLevel => {
@@ -404,11 +406,13 @@ pub fn reactions_ui(ui: &mut egui::Ui, item: &mut CustomItem) {
                             action.a = value as i16;
                         }
                         BagKind::AddEv => {
-                            egui::ComboBox::from_id_salt((&salt, "bag_ev", i)).selected_text(EV_STATS.iter().find(|(v, _)| *v == action.a).map(|(_, n)| *n).unwrap_or("?")).show_ui(ui, |ui| {
+                            let combo = egui::ComboBox::from_id_salt((&salt, "bag_ev", i)).selected_text(EV_STATS.iter().find(|(v, _)| *v == action.a).map(|(_, n)| *n).unwrap_or("?")).show_ui(ui, |ui| {
                                 for (value, name) in EV_STATS {
                                     ui.selectable_value(&mut action.a, value, name);
                                 }
                             });
+                            let values: Vec<i16> = EV_STATS.iter().map(|(v, _)| *v).collect();
+                            sango_ui::focus::combo_arrows(ui, &combo.response, &mut action.a, &values);
                             let mut value = action.b as i32;
                             ui.add(egui::DragValue::new(&mut value).range(1..=252).suffix(" EVs"));
                             action.b = value as i16;

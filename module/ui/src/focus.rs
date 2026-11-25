@@ -54,6 +54,24 @@ pub fn nav(ui: &egui::Ui, response: &egui::Response, at: usize, len: usize, hori
     }
 }
 
+/// The arrows of a menu (`egui::ComboBox`): a click on the menu gives it the focus, then Up and Down choose the value before or after in
+/// `values` (the values of the menu, in its order). The arrows stay with a text box that has the keys (the search box of a menu). Gives
+/// true when the value changed.
+pub fn combo_arrows<T: PartialEq + Clone>(ui: &egui::Ui, response: &egui::Response, value: &mut T, values: &[T]) -> bool {
+    if ui.ctx().wants_keyboard_input() {
+        focus(ui, response.id, response.rect, response.clicked(), true, Some(response));
+        return false;
+    }
+    let at = values.iter().position(|v| v == value).unwrap_or(0);
+    match nav(ui, response, at, values.len(), false) {
+        Some(to) => {
+            *value = values[to].clone();
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

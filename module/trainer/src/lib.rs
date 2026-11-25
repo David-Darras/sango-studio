@@ -30,6 +30,19 @@ mod showdown;
 const TABS: [&str; 4] = ["General", "Team", "Class", "Messages"];
 
 
+/// The name of a line of a grid: blue when the value at `$path` of the open trainer is not the one of the game, with ↺ that puts the
+/// value of the game back (see `widget::field_name`).
+macro_rules! name {
+    ($ui:expr, $label:expr, $open:expr, $game:expr, $($path:tt)+) => {{
+        let game_value = $game.as_ref().map(|g: &Open| g.$($path)+.clone());
+        let changed = game_value.as_ref().is_some_and(|v| *v != $open.$($path)+);
+        let back = $ui.horizontal(|ui| widget::field_name(ui, $label, changed).1).inner;
+        if let (true, Some(v)) = (back, game_value) {
+            $open.$($path)+ = v;
+        }
+    }};
+}
+
 /// A line of the list of the trainers.
 struct Row {
     id: usize,
@@ -76,6 +89,12 @@ pub struct Trainer {
     open: Option<Open>,
     /// The trainer, the class and the names as they were loaded or saved: to know what changed.
     saved: Option<Open>,
+    /// The open trainer as the game has it (the romfs), to show the fields that are not as in the game.
+    game: Option<Open>,
+    /// The class of the open trainer as the game has it: its number, its data and its names.
+    game_class: Option<(usize, TrainerClass, Vec<String>)>,
+    /// Undo and redo of the open trainer.
+    history: sango_ui::history::History<Open>,
     status: Option<(bool, String)>,
     item_list: Arc<Mutex<sango_ui::item_menu::ItemList>>,
     /// The windows of the buttons Export…, Import… and Reset…, and the parts of a reset: the data and the team, the class.
@@ -111,6 +130,9 @@ impl Default for Trainer {
             language: 2,
             open: None,
             saved: None,
+            game: None,
+            game_class: None,
+            history: Default::default(),
             status: None,
             item_list: Default::default(),
             export_open: false,
@@ -131,6 +153,12 @@ impl Default for Trainer {
 impl Clone for Open {
     fn clone(&self) -> Open {
         Open { id: self.id, trainer: self.trainer, team: self.team.clone(), extras: self.extras.clone(), class: self.class, names: self.names.clone(), class_names: self.class_names.clone(), messages: self.messages.clone() }
+    }
+}
+
+impl PartialEq for Open {
+    fn eq(&self, other: &Open) -> bool {
+        self.id == other.id && self.same(other)
     }
 }
 
@@ -258,6 +286,14 @@ impl Trainer {
                     .map(|(kind, line)| Message { kind, line, texts: (0..LANGUAGES.len()).map(|language| store.line(sd, language, data::MESSAGE_TEXT, line)).collect() })
                     .collect();
                 let open = Open { id, trainer, team, extras, class, names, class_names, messages };
+                // The same trainer as the game has it.
+                self.game = store.trainer(None, id).ok().map(|(trainer, team)| {
+                    let names = (0..LANGUAGES.len()).map(|language| store.game_line(language, data::TRAINER_NAMES, id)).collect();
+                    let extras = store.extras(None, id, team.pokemon.len());
+                    let messages = open.messages.iter().map(|m| Message { texts: (0..LANGUAGES.len()).map(|language| store.game_line(language, data::MESSAGE_TEXT, m.line)).collect(), ..m.clone() }).collect();
+                    Open { id, trainer, team, extras, class: open.class, names, class_names: open.class_names.clone(), messages }
+                });
+                self.game_class = None;
                 self.saved = Some(open.clone());
                 self.open = Some(open);
                 self.status = None;
@@ -268,6 +304,25 @@ impl Trainer {
                 self.status = Some((false, message));
             }
         }
+    }
+
+    /// The open trainer as the game has it, with the class of the game for the class that is chosen now.
+    fn game_view(&mut self) -> Option<Open> {
+        let class = self.open.as_ref()?.trainer.class as usize;
+        if self.game_class.as_ref().map(|g| g.0) != Some(class) {
+            let store = self.store.as_mut()?;
+            self.game_class = store.class(None, class).ok().map(|data| (class, data, (0..LANGUAGES.len()).map(|language| store.game_line(language, data::CLASS_NAMES, class)).collect()));
+        }
+        let mut game = self.game.clone()?;
+        if let Some((_, data, names)) = &self.game_class {
+            game.class = *data;
+            game.class_names = names.clone();
+        } else {
+            // A class that the game does not have: nothing to compare.
+            game.class = self.open.as_ref()?.class;
+            game.class_names = self.open.as_ref()?.class_names.clone();
+        }
+        Some(game)
     }
 
     /// True when the open trainer has something that was not saved.
@@ -428,20 +483,21 @@ impl Trainer {
 
     /// The General tab.
     fn general_tab(&mut self, ui: &mut egui::Ui) {
+        let game = self.game_view();
         let (Some(open), Some(sd_item_list)) = (self.open.as_mut(), Some(self.item_list.clone())) else { return };
         let language = self.language;
         widget::card(ui, |ui| {
             ui.label(widget::title("The trainer"));
             ui.add_space(4.0);
             egui::Grid::new("trainer_general").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
-                ui.label("Name");
+                name!(ui, "Name", open, game, names[language]);
                 ui.horizontal(|ui| {
                     language_menu(ui, "trainer_language", &mut self.language, 150.0);
                     ui.add(egui::TextEdit::singleline(&mut open.names[language]).desired_width(240.0));
                 });
                 ui.end_row();
 
-                ui.label("Class");
+                name!(ui, "Class", open, game, trainer.class);
                 ui.horizontal(|ui| {
                     let names: Vec<&str> = self.class_menu.iter().map(String::as_str).collect();
                     let mut class = open.trainer.class;
@@ -450,22 +506,22 @@ impl Trainer {
                 });
                 ui.end_row();
 
-                ui.label("Kind of battle");
+                name!(ui, "Kind of battle", open, game, trainer.fight_type);
                 choice(ui, "trainer_fight", &mut open.trainer.fight_type, &data::FIGHT_TYPES, 160.0);
                 ui.end_row();
 
-                ui.label("Prize money");
+                name!(ui, "Prize money", open, game, trainer.money);
                 ui.horizontal(|ui| {
                     spin(ui, &mut open.trainer.money, 0.0, 255.0);
                     ui.label(widget::hint("The game multiplies it by the level of the last Pokémon."));
                 });
                 ui.end_row();
 
-                ui.label("Heal after the battle");
+                name!(ui, "Heal after the battle", open, game, trainer.heal_after);
                 ui.checkbox(&mut open.trainer.heal_after, "The Pokémon of the player get their HP back");
                 ui.end_row();
 
-                ui.label("Item given after the battle");
+                name!(ui, "Item given after the battle", open, game, trainer.gift_item);
                 let mut gift = open.trainer.gift_item as usize;
                 if sango_ui::item_menu::shared_menu(ui, "trainer_gift", &mut gift, 240.0, &sd_item_list, true) {
                     open.trainer.gift_item = gift as u16;
@@ -478,9 +534,9 @@ impl Trainer {
             ui.label(widget::title("Start of the battle"));
             ui.label(widget::hint("What is on the field when the battle with this trainer starts. The plugin adds it: restart the game after a change."));
             ui.add_space(4.0);
-            let extras = &mut open.extras;
             ui.horizontal_wrapped(|ui| {
-                ui.label("Weather");
+                name!(ui, "Weather", open, game, extras.weather);
+                let extras = &mut open.extras;
                 let shown = data::WEATHERS.iter().find(|(value, _)| *value == extras.weather).map_or("?", |(_, name)| *name);
                 let combo = egui::ComboBox::from_id_salt("trainer_weather").selected_text(shown).width(190.0).show_ui(ui, |ui| {
                     for (value, name) in data::WEATHERS {
@@ -491,12 +547,13 @@ impl Trainer {
                 if let Some(to) = sango_ui::focus::nav(ui, &combo.response, at, data::WEATHERS.len(), false) {
                     extras.weather = data::WEATHERS[to].0;
                 }
-                ui.label("Terrain");
-                choice(ui, "trainer_terrain", &mut extras.terrain, &data::TERRAINS, 160.0);
+                name!(ui, "Terrain", open, game, extras.terrain);
+                choice(ui, "trainer_terrain", &mut open.extras.terrain, &data::TERRAINS, 160.0);
             });
             ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 for (bit, (name, help)) in data::FIELD_EFFECTS.iter().enumerate() {
+                    let extras = &mut open.extras;
                     let mut on = extras.field & (1 << bit) != 0;
                     widget::chip(ui, name, &mut on).on_hover_text(*help);
                     if on {
@@ -565,60 +622,60 @@ impl Trainer {
 
     /// The data of the class.
     fn class_data_card(&mut self, ui: &mut egui::Ui, users: usize) {
+        let game = self.game_view();
         let Some(open) = self.open.as_mut() else { return };
         let language = self.language;
-        let class = &mut open.class;
         widget::card(ui, |ui| {
             ui.label(widget::title(&format!("Class {}", open.trainer.class)));
             ui.label(widget::hint(&format!("{users} trainer(s) have this class: a change here changes all of them.")));
             ui.add_space(6.0);
             egui::Grid::new("trainer_class_grid").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
-                ui.label("Name");
+                name!(ui, "Name", open, game, class_names[language]);
                 ui.horizontal(|ui| {
                     language_menu(ui, "class_language", &mut self.language, 150.0);
                     ui.add(egui::TextEdit::singleline(&mut open.class_names[language]).desired_width(240.0));
                 });
                 ui.end_row();
-                ui.label("Gender");
-                choice(ui, "class_gender", &mut class.gender, &["Male", "Female", "None"], 140.0);
+                name!(ui, "Gender", open, game, class.gender);
+                choice(ui, "class_gender", &mut open.class.gender, &["Male", "Female", "None"], 140.0);
                 ui.end_row();
-                ui.label("Group");
-                choice(ui, "class_group", &mut class.group, &data::GROUPS, 160.0);
+                name!(ui, "Group", open, game, class.group);
+                choice(ui, "class_group", &mut open.class.group, &data::GROUPS, 160.0);
                 ui.end_row();
-                ui.label("Several trainers");
-                let mut plural = class.plural != 0;
+                name!(ui, "Several trainers", open, game, class.plural);
+                let mut plural = open.class.plural != 0;
                 ui.checkbox(&mut plural, "The class is a group (Twins, a team...): the texts use the plural");
-                class.plural = u8::from(plural);
+                open.class.plural = u8::from(plural);
                 ui.end_row();
-                ui.label("Start of the battle");
-                let mut effect = u32::from(class.battle_effect);
+                name!(ui, "Start of the battle", open, game, class.battle_effect);
+                let mut effect = u32::from(open.class.battle_effect);
                 let effects: Vec<(u32, String)> = lists::BATTLE_EFFECTS.iter().map(|&(value, name)| (u32::from(value), name.to_string())).collect();
                 named_menu(ui, "class_effect", &mut effect, &effects, 260.0);
-                class.battle_effect = effect as u8;
+                open.class.battle_effect = effect as u8;
                 ui.end_row();
-                ui.label("3D model of the battle");
-                let mut model = u32::from(class.model_3d);
+                name!(ui, "3D model of the battle", open, game, class.model_3d);
+                let mut model = u32::from(open.class.model_3d);
                 let models: Vec<(u32, String)> = lists::MODELS_3D.iter().map(|&(value, name)| (u32::from(value), name.to_string())).chain([(255, "None (a 2D picture)".to_string())]).collect();
                 named_menu(ui, "class_model", &mut model, &models, 260.0);
-                class.model_3d = model as u8;
+                open.class.model_3d = model as u8;
                 ui.end_row();
-                ui.label("Sequence of the 3D model");
-                choice(ui, "class_sequence", &mut class.sequence, &["The usual one", "The added one"], 200.0);
+                name!(ui, "Sequence of the 3D model", open, game, class.sequence);
+                choice(ui, "class_sequence", &mut open.class.sequence, &["The usual one", "The added one"], 200.0);
                 ui.end_row();
-                ui.label("2D picture");
+                name!(ui, "2D picture", open, game, class.picture_2d);
                 let pictures: Vec<(u32, String)> = self.picture_users.iter().enumerate().map(|(at, users)| (at as u32, if users.is_empty() { format!("Picture {at} (no class)") } else { format!("{users} (picture {at})") })).collect();
-                named_menu(ui, "class_picture", &mut class.picture_2d, &pictures, 330.0);
+                named_menu(ui, "class_picture", &mut open.class.picture_2d, &pictures, 330.0);
                 ui.end_row();
-                ui.label("Character on the map");
+                name!(ui, "Character on the map", open, game, class.overworld_model);
                 let characters: Vec<(u32, String)> = sango_overworld::names::MODEL_NAMES.iter().enumerate().map(|(at, name)| (at as u32, name.to_string())).collect();
-                named_menu(ui, "class_character", &mut class.overworld_model, &characters, 260.0);
+                named_menu(ui, "class_character", &mut open.class.overworld_model, &characters, 260.0);
                 ui.end_row();
-                ui.label("Music of the sight");
+                name!(ui, "Music of the sight", open, game, class.eye_music);
                 let music: Vec<(u32, String)> = lists::MUSIC.iter().map(|&(value, name)| (u32::from(value), name.to_string())).collect();
                 // The high half of the number is a flag of the game (1): it stays as it is.
-                let mut track = class.eye_music & 0xFFFF;
+                let mut track = open.class.eye_music & 0xFFFF;
                 named_menu(ui, "class_music", &mut track, &music, 260.0);
-                class.eye_music = (class.eye_music & 0xFFFF_0000) | track;
+                open.class.eye_music = (open.class.eye_music & 0xFFFF_0000) | track;
                 ui.end_row();
             });
         });
@@ -627,6 +684,7 @@ impl Trainer {
     /// The Messages tab: what the trainer says. A trainer has only some of the kinds of messages, and the list of the game cannot get
     /// more here.
     fn messages_tab(&mut self, ui: &mut egui::Ui) {
+        let game = self.game_view();
         let Some(open) = self.open.as_mut() else { return };
         let language = self.language;
         widget::card(ui, |ui| {
@@ -638,8 +696,14 @@ impl Trainer {
             if open.messages.is_empty() {
                 ui.label(widget::hint("This trainer has no message."));
             }
-            for message in open.messages.iter_mut() {
-                ui.label(egui::RichText::new(data::MESSAGE_KINDS.get(message.kind).copied().unwrap_or("Another message")).strong());
+            for (at, message) in open.messages.iter_mut().enumerate() {
+                let title = data::MESSAGE_KINDS.get(message.kind).copied().unwrap_or("Another message");
+                let game_text = game.as_ref().and_then(|g| g.messages.get(at)).map(|m| m.texts[language].clone());
+                let changed = game_text.as_ref().is_some_and(|t| *t != message.texts[language]);
+                let back = ui.horizontal(|ui| widget::field_name(ui, title, changed).1).inner;
+                if let (true, Some(text)) = (back, game_text) {
+                    message.texts[language] = text;
+                }
                 ui.add(egui::TextEdit::multiline(&mut message.texts[language]).desired_rows(3).desired_width(ui.available_width().min(620.0)));
                 ui.add_space(6.0);
             }
@@ -851,6 +915,17 @@ impl Trainer {
 }
 
 impl Module for Trainer {
+    fn save_changes(&mut self, _ctx: &egui::Context, session: &mut Session) {
+        if let Some(sd) = session.sd.as_ref() {
+            self.save(sd);
+        }
+    }
+
+    fn discard_changes(&mut self) -> bool {
+        self.open = self.saved.clone();
+        true
+    }
+
     fn unsaved(&self) -> bool {
         self.dirty()
     }
@@ -919,6 +994,10 @@ impl Module for Trainer {
                     _ => self.messages_tab(ui),
                 });
             });
+        }
+        // Ctrl+Z and Ctrl+Y on the open trainer.
+        if let Some(open) = self.open.as_mut() {
+            self.history.track(ui, open.id as u64, open);
         }
     }
 }
