@@ -60,8 +60,16 @@ mod test {
         egui::ColorImage::new([2, 2], egui::Color32::WHITE)
     }
 
+    /// The list of the textures is one for the whole program, which has one context. Each test has its own context: a sweep of one
+    /// test would count the frames of the textures of the other one. So the tests run one at a time.
+    fn alone() -> std::sync::MutexGuard<'static, ()> {
+        static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+        ONE_AT_A_TIME.lock().unwrap_or_else(|broken| broken.into_inner())
+    }
+
     #[test]
     fn a_texture_that_a_page_dropped_lives_on_for_a_few_frames() {
+        let _alone = alone();
         let ctx = egui::Context::default();
         let handle = load(&ctx, "test_texture", image(), egui::TextureOptions::LINEAR);
         let id = handle.id();
@@ -79,6 +87,7 @@ mod test {
 
     #[test]
     fn a_texture_that_a_page_holds_is_never_dropped() {
+        let _alone = alone();
         let ctx = egui::Context::default();
         let handle = load(&ctx, "held_texture", image(), egui::TextureOptions::LINEAR);
         for _ in 0..FRAMES * 3 {

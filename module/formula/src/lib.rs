@@ -123,6 +123,7 @@ impl Formula {
             ui.horizontal_wrapped(|ui| {
                 let changed = self.formulas != self.saved;
                 let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(!self.formulas.is_game()), save: Some(changed && sd.is_some()), ..Default::default() });
+                self.history.buttons(ui, true);
                 if clicks.export {
                     self.export_file();
                 }

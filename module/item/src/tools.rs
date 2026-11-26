@@ -270,7 +270,7 @@ impl Item {
         let own = crate::icons::ItemIcons::has_own(self.item);
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.vertical(|ui| {
+                let zone = ui.vertical(|ui| {
                     ui.label(widget::title("Icon"));
                     ui.add_space(6.0);
                     ui.add_enabled_ui(own, |ui| {
@@ -287,8 +287,10 @@ impl Item {
                         }
                     });
                 })
-                .response
-                .on_disabled_hover_text("This item has no icon of its own.");
+                .response;
+                if !own {
+                    widget::zone_hint(ui, &zone, "This item has no icon of its own.");
+                }
                 ui.add_space(12.0);
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(96.0, 96.0), egui::Sense::hover());
                 ui.painter().rect_filled(rect, egui::Rounding::same(10.0), color::SURFACE_STRONG);

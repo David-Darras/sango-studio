@@ -308,32 +308,27 @@ impl Move {
                     ui.label(widget::hint("new move"));
                 }
                 let has_card = session.sd.is_some() && self.bundle.is_some();
-                ui.add_enabled_ui(has_card, |ui| {
-                    add = widget::button_styled(ui, egui::RichText::new("+ New move").color(color::WHITE), Some(color::ACCENT));
-                })
-                .response
-                .on_hover_text("Adds a move that starts like this one (the same data). Then you change it like the other moves.");
-                ui.add_enabled_ui(has_card && self.is_custom(), |ui| {
-                    delete = widget::button(ui, "Delete");
-                })
-                .response
-                .on_hover_text("Deletes this new move.");
-                ui.add_enabled_ui(self.bundle.is_some(), |ui| {
-                    export = widget::button(ui, "Export");
-                })
-                .response
-                .on_hover_text("Writes the CSV files of all the moves.");
-                ui.add_enabled_ui(has_card, |ui| {
-                    import = widget::button(ui, "Import");
-                })
-                .response
-                .on_hover_text("Reads the CSV files of all the moves.");
-                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset_more = widget::button(ui, "Reset");
-                })
-                .response
-                .on_hover_text("Reset one move or all the moves, for the parts that you choose.");
-                save = self.data.is_some() && session.sd.is_some() && widget::save_button(ui, self.unsaved());
+                let own = self.is_custom();
+                let clicks = widget::action_bar(
+                    ui,
+                    widget::ActionBar {
+                        new: Some(("+ New move", has_card)),
+                        delete: Some(has_card && own),
+                        export: Some(self.bundle.is_some()),
+                        import: Some(has_card),
+                        reset: Some(has_card && !own),
+                        save: (self.data.is_some() && session.sd.is_some()).then(|| self.unsaved()),
+                        notes: widget::ActionNotes {
+                            new: "Adds a move that starts like this one (the same data). Then you change it like the other moves.",
+                            delete: "Deletes this new move.",
+                            export: "Writes the CSV files of all the moves.",
+                            import: "Reads the CSV files of all the moves.",
+                            reset: "Reset one move or all the moves, for the parts that you choose.",
+                        },
+                    },
+                );
+                (add, delete, export, import, reset_more, save) = (clicks.new, clicks.delete, clicks.export, clicks.import, clicks.reset, clicks.save);
+                self.history.buttons(ui, self.loaded.is_some() && self.data.is_some());
                 if self.data.is_some() && self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_sd || self.texts.from_card() {

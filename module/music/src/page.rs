@@ -9,6 +9,7 @@ use crate::bcsar::{Archive, Kind, Place};
 use crate::bcstm::{self, Music};
 use crate::{ids, names, wav};
 use sango_core::SdCard;
+use sango_ui::history::{Step, Steps};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::path::{Path, PathBuf};
@@ -50,8 +51,43 @@ impl Entry {
 /// The result of an import.
 pub(crate) type Outcome = Result<String, String>;
 
+/// A step of the history: the file of a music on the SD card, as it was. `None`: the card had no file.
+struct Replaced {
+    /// The place of the music in the list.
+    index: usize,
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+}
+
+/// The bytes of a file, or `None` when it is not there.
+fn read_if_there(path: &Path) -> Result<Option<Vec<u8>>, String> {
+    match std::fs::read(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("{}: {error}", path.display())),
+    }
+}
+
+/// Writes a file with these bytes, or removes it.
+pub(crate) fn put_file(path: &Path, bytes: Option<&[u8]>) -> Result<(), String> {
+    let result = match bytes {
+        Some(bytes) => path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(path, bytes)),
+        None => match std::fs::remove_file(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            other => other,
+        },
+    };
+    result.map_err(|error| format!("{}: {error}", path.display()))
+}
+
 #[derive(Default)]
 pub struct MusicPage {
+    /// Undo and redo of the imports and the resets of the musics.
+    steps: Steps<Replaced>,
+    /// The file that the running import replaces.
+    before: Option<Replaced>,
+    /// The SD card of the steps.
+    steps_card: Option<PathBuf>,
     /// The windows of the buttons Export, Import and Reset.
     export_open: bool,
     import_open: bool,
@@ -180,6 +216,8 @@ impl MusicPage {
         let file = self.entries[index].file.clone();
         let target = sd.bgm_folder().join(&file);
         let (loop_on, loop_seconds) = (self.loop_on, self.loop_seconds);
+        // Without the old bytes, the import still runs: it has no step in the history.
+        self.before = read_if_there(&target).ok().map(|bytes| Replaced { index, path: target.clone(), bytes });
         let (sender, receiver) = channel();
         std::thread::spawn(move || {
             let outcome = (|| -> Outcome {
@@ -218,12 +256,43 @@ impl MusicPage {
 
     fn reset(&mut self, index: usize, sd: &SdCard) {
         let file = self.entries[index].file.clone();
-        self.status = Some(match std::fs::remove_file(sd.bgm_folder().join(&file)) {
-            Ok(()) => (true, "The music of the game is back. Restart the game.".to_string()),
+        let path = sd.bgm_folder().join(&file);
+        let before = read_if_there(&path).ok().flatten();
+        self.status = Some(match std::fs::remove_file(&path) {
+            Ok(()) => {
+                if let Some(bytes) = before {
+                    self.steps.done(Replaced { index, path, bytes: Some(bytes) });
+                }
+                (true, "The music of the game is back. Restart the game.".to_string())
+            }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => (true, "The music of the game was already there.".to_string()),
             Err(error) => (false, error.to_string()),
         });
         self.select(index, Some(sd));
+    }
+
+    /// Undo or redo of an import or of a reset: the file of the SD card goes back, and its music is shown.
+    fn step(&mut self, step: Step, sd: &SdCard) {
+        self.stop();
+        let mut shown = None;
+        let done = self.steps.apply(step, |kept| {
+            let replaced = Replaced { index: kept.index, path: kept.path.clone(), bytes: read_if_there(&kept.path)? };
+            put_file(&kept.path, kept.bytes.as_deref())?;
+            shown = Some(kept.index);
+            Ok(replaced)
+        });
+        match done {
+            Some(Ok(())) => {
+                if let Some(index) = shown.filter(|&index| index < self.entries.len()) {
+                    self.jingles = self.entries[index].jingle;
+                    self.select(index, Some(sd));
+                    let way = if step == Step::Undo { "Undone" } else { "Done again" };
+                    self.status = Some((true, format!("{way}: {}. Restart the game.", self.entries[index].file)));
+                }
+            }
+            Some(Err(message)) => self.status = Some((false, message)),
+            None => {}
+        }
     }
 
     fn list(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>) {
@@ -319,6 +388,9 @@ impl MusicPage {
                 self.export_open |= clicks.export;
                 self.import_open |= clicks.import;
                 self.reset_open |= clicks.reset;
+                if let Some(step) = self.steps.asked(ui, !busy) {
+                    self.step(step, sd);
+                }
                 if replaced {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else {
@@ -347,12 +419,12 @@ impl MusicPage {
                 egui::Window::new("Import").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open).show(&ctx, |ui| {
                     ui.set_max_width(460.0);
                     ui.label(widget::hint("A WAV or an MP3 file. It is brought to 32728 Hz and to the channels of this music."));
-                    ui.horizontal(|ui| {
+                    let zone = ui.horizontal(|ui| {
                         ui.checkbox(&mut self.loop_on, "Loop from");
                         ui.add_enabled(self.loop_on, egui::DragValue::new(&mut self.loop_seconds).speed(0.1).range(0.0..=3600.0).suffix(" s"));
                     })
-                    .response
-                    .on_hover_text("A WAV file with its own loop keeps it.");
+                    .response;
+                    widget::zone_hint(ui, &zone, "A WAV file with its own loop keeps it.");
                     ui.horizontal(|ui| {
                         choose = widget::button_styled(ui, egui::RichText::new("Choose a file").color(color::WHITE), Some(color::ACCENT));
                         close = widget::button(ui, "Cancel");
@@ -411,11 +483,21 @@ impl Module for MusicPage {
         if self.effects_tab {
             self.effects.load(&folder, sd);
         }
+        // The steps are for the files of one SD card.
+        let card = sd.bgm_folder();
+        if self.steps_card.as_ref() != Some(&card) {
+            self.steps_card = Some(card);
+            self.steps.clear();
+            self.effects.forget_steps();
+        }
         // The result of an import.
         if let Some(receiver) = &self.job {
             match receiver.try_recv() {
                 Ok(outcome) => {
                     self.job = None;
+                    if let Some(before) = self.before.take().filter(|_| outcome.is_ok()) {
+                        self.steps.done(before);
+                    }
                     let status = match outcome {
                         Ok(message) => (true, message),
                         Err(message) => (false, message),
@@ -505,8 +587,19 @@ mod test {
         assert_eq!(&written[..4], &original[..4]);
         assert_eq!(bcstm::channel_count(&written).unwrap(), bcstm::channel_count(&original).unwrap());
 
+        // The import is a step: undo removes the file of the card, redo writes it again.
+        let before = page.before.take().unwrap();
+        page.steps.done(before);
+        let target = sd.bgm_folder().join(&page.entries[theme].file);
+        page.step(Step::Undo, &sd);
+        assert!(!target.exists());
+        page.step(Step::Redo, &sd);
+        assert_eq!(std::fs::read(&target).unwrap(), written);
+
         page.reset(theme, &sd);
         assert!(!sd.bgm_folder().join(&page.entries[theme].file).exists());
+        page.step(Step::Undo, &sd);
+        assert_eq!(std::fs::read(&target).unwrap(), written, "the undo of the reset");
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

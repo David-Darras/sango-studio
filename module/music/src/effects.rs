@@ -12,6 +12,7 @@ use crate::waves::{self, WaveSlot};
 use crate::{ids, wav};
 use sango_core::SdCard;
 use sango_cry::Sound;
+use sango_ui::history::{Step, Steps};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
 use std::path::{Path, PathBuf};
@@ -43,8 +44,29 @@ impl Entry {
     }
 }
 
+/// A step of the history: a part of the sound archive that the game reads, as it was.
+struct Replaced {
+    /// The sound effect and its wave that the page shows.
+    entry: usize,
+    wave: usize,
+    /// The place of the part in the archive, and its bytes.
+    offset: usize,
+    bytes: Vec<u8>,
+}
+
+/// The part of `before` that is not the same in `after` (two archives of the same size): its place and its old bytes.
+fn replaced_part(before: &[u8], after: &[u8]) -> Option<(usize, Vec<u8>)> {
+    let first = before.iter().zip(after).position(|(a, b)| a != b)?;
+    let last = before.iter().zip(after).rposition(|(a, b)| a != b)?;
+    Some((first, before[first..=last].to_vec()))
+}
+
 #[derive(Default)]
 pub struct Effects {
+    /// Undo and redo of the imports and the resets of the waves.
+    steps: Steps<Replaced>,
+    /// The sound effect, the wave and the archive of the running import, as they were when it started.
+    before: Option<(usize, usize, Vec<u8>)>,
     /// The windows of the buttons Export and Reset.
     export_open: bool,
     reset_open: bool,
@@ -83,6 +105,7 @@ impl Effects {
             return;
         }
         self.folder = Some(folder.to_path_buf());
+        self.steps.clear();
         self.entries.clear();
         self.selected = None;
         self.archive = None;
@@ -98,6 +121,52 @@ impl Effects {
                 self.archive = Some(archive);
             }
             Err(message) => self.status = Some((false, message)),
+        }
+    }
+
+    /// Forgets the steps of the history (another SD card).
+    pub(crate) fn forget_steps(&mut self) {
+        self.steps.clear();
+    }
+
+    /// An import or a reset of a wave changed the archive that was `before`: a new step.
+    fn remember(&mut self, entry: usize, wave: usize, before: &[u8]) {
+        if let Some((offset, bytes)) = replaced_part(before, &self.current) {
+            self.steps.done(Replaced { entry, wave, offset, bytes });
+        }
+    }
+
+    /// Writes the copy of the archive on the SD card. A copy that is the same as the archive of the game is removed.
+    fn write_copy(&self, sd: &SdCard, copy: &[u8]) -> Result<(), String> {
+        crate::page::put_file(&card_path(sd), (copy != self.original).then_some(copy))
+    }
+
+    /// Undo or redo of an import or of a reset: the part of the archive goes back, and its wave is shown.
+    fn step(&mut self, step: Step, sd: &SdCard) {
+        self.stop();
+        let mut steps = std::mem::take(&mut self.steps);
+        let mut shown = None;
+        let done = steps.apply(step, |kept| {
+            let end = kept.offset + kept.bytes.len();
+            let now = self.current.get(kept.offset..end).ok_or("The sound archive changed: this step cannot be done.")?.to_vec();
+            let mut copy = self.current.clone();
+            copy[kept.offset..end].copy_from_slice(&kept.bytes);
+            self.write_copy(sd, &copy)?;
+            shown = Some((kept.entry, kept.wave));
+            Ok(Replaced { entry: kept.entry, wave: kept.wave, offset: kept.offset, bytes: now })
+        });
+        self.steps = steps;
+        match done {
+            Some(Ok(())) => {
+                if let Some((entry, wave)) = shown {
+                    (self.selected, self.wave) = (Some(entry), wave);
+                    self.refresh(sd);
+                    let way = if step == Step::Undo { "Undone" } else { "Done again" };
+                    self.status = Some((true, format!("{way}. Restart the game.")));
+                }
+            }
+            Some(Err(message)) => self.status = Some((false, message)),
+            None => {}
         }
     }
 
@@ -145,6 +214,7 @@ impl Effects {
     fn start_import(&mut self, path: PathBuf, sd: &SdCard) {
         let Some(slot) = self.slots.get(self.wave).cloned() else { return };
         let (Some(folder), target) = (self.folder.clone(), card_path(sd)) else { return };
+        self.before = self.selected.map(|entry| (entry, self.wave, self.current.clone()));
         let (sender, receiver) = channel();
         std::thread::spawn(move || {
             let outcome = (|| -> Outcome {
@@ -171,15 +241,17 @@ impl Effects {
     /// Puts the wave of the game back in the copy of the archive. The copy is removed when nothing else is changed.
     fn reset(&mut self, sd: &SdCard) {
         let Some(slot) = self.slots.get(self.wave).cloned() else { return };
-        let target = card_path(sd);
+        let before = self.current.clone();
         let mut copy = self.current.clone();
         copy[slot.offset..slot.offset + slot.size].copy_from_slice(&self.original[slot.offset..slot.offset + slot.size]);
-        let result = if copy == self.original { std::fs::remove_file(&target).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) }) } else { std::fs::write(&target, &copy) };
-        self.status = Some(match result {
+        self.status = Some(match self.write_copy(sd, &copy) {
             Ok(()) => (true, "The wave of the game is back. Restart the game.".to_string()),
-            Err(error) => (false, error.to_string()),
+            Err(message) => (false, message),
         });
         self.refresh(sd);
+        if let Some(entry) = self.selected {
+            self.remember(entry, self.wave, &before);
+        }
     }
 
     fn export(&mut self, mp3: bool) {
@@ -226,6 +298,9 @@ impl Effects {
                         Err(message) => (false, message),
                     };
                     self.refresh(sd);
+                    if let Some((entry, wave, before)) = self.before.take().filter(|_| status.0) {
+                        self.remember(entry, wave, &before);
+                    }
                     self.status = Some(status);
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => ui.ctx().request_repaint_after(std::time::Duration::from_millis(200)),
@@ -283,6 +358,9 @@ impl Effects {
                     }
                 }
                 self.reset_open |= clicks.reset;
+                if let Some(step) = self.steps.asked(ui, !busy) {
+                    self.step(step, sd);
+                }
                 if changed {
                     widget::badge(ui, "From the SD card", color::TEAL);
                 } else {
@@ -376,9 +454,19 @@ mod test {
         assert_eq!(copy.len(), effects.original.len());
         assert_eq!(waves::read(&copy, &effects.slots[0]).unwrap().rate, 22050);
 
+        let (entry, wave, before) = effects.before.take().unwrap();
+        effects.remember(entry, wave, &before);
+        effects.step(Step::Undo, &sd);
+        assert!(!effects.changed[0] && !card_path(&sd).exists(), "the undo of the import");
+        effects.step(Step::Redo, &sd);
+        assert!(effects.changed[0]);
+        assert_eq!(std::fs::read(card_path(&sd)).unwrap(), copy, "the redo of the import");
+
         effects.reset(&sd);
         assert!(!effects.changed[0]);
         assert!(!card_path(&sd).exists(), "nothing else is changed: the copy goes away");
+        effects.step(Step::Undo, &sd);
+        assert!(effects.changed[0], "the undo of the reset");
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

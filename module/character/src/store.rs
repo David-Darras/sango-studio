@@ -139,6 +139,20 @@ impl Store {
         sd.mark_changed(&path(pack))
     }
 
+    /// The file of a pack on the SD card, as it is, or `None` when the card does not replace the pack.
+    pub fn card_file(sd: &SdCard, pack: usize) -> Option<Vec<u8>> {
+        sd.read(&path(pack))
+    }
+
+    /// Puts back what [`Store::card_file`] gave.
+    pub fn put_card_file(sd: &SdCard, pack: usize, file: Option<&[u8]>) -> Result<(), String> {
+        match file {
+            Some(bytes) => sd.write(&path(pack), bytes).map(|_| ())?,
+            None => sd.remove(&path(pack)).map(|_| ())?,
+        }
+        sd.mark_changed(&path(pack))
+    }
+
     /// Gives back the model of the game.
     pub fn reset(&self, sd: &SdCard, pack: usize) -> Result<(), String> {
         sd.remove(&path(pack))?;

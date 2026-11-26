@@ -170,13 +170,13 @@ impl Packs {
                     }
                 }
             });
-            ui.add_enabled_ui(!busy && !self.library.registry.packs.is_empty(), |ui| {
+            let zone = ui.add_enabled_ui(!busy && !self.library.registry.packs.is_empty(), |ui| {
                 if widget::button(ui, "Write the files again") {
                     self.start(session, Action::Rewrite);
                 }
             })
-            .response
-            .on_hover_text("Writes the table and the models again from the installed packs: use it if the game does not show the species or the models.");
+            .response;
+            widget::zone_hint(ui, &zone, "Writes the table and the models again from the installed packs: use it if the game does not show the species or the models.");
             ui.add_space(6.0);
             ui.label(widget::hint(&format!(
                 "{} of {MAX_SPECIES} places for species used, {} of {MAX_FORMS} for forms, {} of {MAX_MODELS} for models.",

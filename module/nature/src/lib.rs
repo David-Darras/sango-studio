@@ -106,6 +106,7 @@ impl Nature {
                 let full = self.table.natures.len() >= MAX_COUNT;
                 let changed = self.table != self.saved;
                 let clicks = widget::action_bar(ui, widget::ActionBar { new: Some(("+ New nature", !full)), export: Some(true), import: Some(true), reset: Some(!self.table.is_game()), save: Some(changed && sd.is_some()), ..Default::default() });
+                self.history.buttons(ui, true);
                 {
                     if clicks.new {
                         let number = self.table.natures.len() + 1;

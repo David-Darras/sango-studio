@@ -957,40 +957,31 @@ impl Species {
                 let forms = self.total_form_count();
                 self.form = self.form.min(forms.saturating_sub(1));
                 let has_card = session.sd.is_some() && self.garc.is_some();
-                ui.add_enabled_ui(has_card && self.data.is_some(), |ui| {
-                    add_form = widget::button_styled(ui, egui::RichText::new("+ New species").color(color::WHITE), Some(color::ACCENT));
-                })
-                .response
-                .on_hover_text("Makes a new species-form (for example \"Rotom-Ice\"), with its own data, icon and model. It starts as a copy of the open one or as a template.");
                 // Only a species-form that was added (by a pack or by "+ New species") can be deleted.
                 let added = (self.form > 0 && extras::pack_forms(self.species).iter().any(|f| f.form as usize == self.form)) || (self.form == 0 && self.species > SPECIES_COUNT);
-                ui.add_enabled_ui(session.sd.is_some() && added, |ui| {
-                    if widget::confirm_button(ui, "Delete", "Click again to delete") {
-                        delete_open = true;
-                    }
-                })
-                .response
-                .on_hover_text(if added { "Deletes this added species-form: its data, and its place in the lists." } else { "Only an added species-form can be deleted, not one of the game." });
-                ui.add_enabled_ui(self.garc.is_some(), |ui| {
-                    if widget::button(ui, "Export") {
-                        self.tools.export_open = true;
-                    }
-                })
-                .response
-                .on_hover_text("Writes CSV files of all the species: choose the parts in the window.");
-                ui.add_enabled_ui(has_card, |ui| {
-                    if widget::button(ui, "Import") {
-                        self.tools.import_open = true;
-                    }
-                })
-                .response
-                .on_hover_text("Reads CSV files of all the species: choose the parts in the window.");
-                ui.add_enabled_ui(has_card, |ui| {
-                    reset_more = widget::button(ui, "Reset");
-                })
-                .response
-                .on_hover_text("Puts parts of one form, one species or all the species back to the romfs: choose in the window.");
-                save = self.data.is_some() && widget::save_button(ui, self.unsaved());
+                let clicks = widget::action_bar(
+                    ui,
+                    widget::ActionBar {
+                        new: Some(("+ New species", has_card && self.data.is_some())),
+                        delete: Some(session.sd.is_some() && added),
+                        export: Some(self.garc.is_some()),
+                        import: Some(has_card),
+                        reset: Some(has_card),
+                        save: self.data.is_some().then(|| self.unsaved()),
+                        notes: widget::ActionNotes {
+                            new: "Makes a new species-form (for example \"Rotom-Ice\"), with its own data, icon and model. It starts as a copy of the open one or as a template.",
+                            delete: if added { "Deletes this added species-form: its data, and its place in the lists." } else { "Only an added species-form can be deleted, not one of the game." },
+                            export: "Writes CSV files of all the species: choose the parts in the window.",
+                            import: "Reads CSV files of all the species: choose the parts in the window.",
+                            reset: "Puts parts of one form, one species or all the species back to the romfs: choose in the window.",
+                        },
+                    },
+                );
+                (add_form, delete_open, reset_more, save) = (clicks.new, clicks.delete, clicks.reset, clicks.save);
+                self.tools.export_open |= clicks.export;
+                self.tools.import_open |= clicks.import;
+                // The history is for the data of the first tab.
+                self.history.buttons(ui, self.tab == 0 && self.loaded.is_some() && self.data.is_some());
                 if self.data.is_some() && (self.data != self.baseline || self.shape != self.shape_baseline || self.learnset.changed() || self.evolution.changed() || self.text.changed() || self.icon_tab.changed() || self.cry_tab.changed()) {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.from_sd || self.pokedex_from_sd || self.mega_from_sd || self.learnset.from_card() || self.evolution.from_card() || self.text.from_card() || self.icon_tab.from_card() || self.cry_tab.from_card() {

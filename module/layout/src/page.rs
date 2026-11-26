@@ -529,6 +529,11 @@ impl Module for LayoutPage {
         let mut reset_asked = false;
         ui.horizontal_wrapped(|ui| {
             let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(open.replaced), save: Some(open.dirty), ..Default::default() });
+            match sango_ui::history::buttons(ui, !open.undo.is_empty(), !open.redo.is_empty()) {
+                Some(sango_ui::history::Step::Undo) => open.undo(),
+                Some(sango_ui::history::Step::Redo) => open.redo(),
+                None => {}
+            }
             if clicks.export {
                 open.commit();
                 let name = format!("layout_{}_{}.bin", open.entry.archive, open.entry.file);

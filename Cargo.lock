@@ -2970,6 +2970,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-player"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-character",
+ "sango-core",
+ "sango-layout",
+ "sango-modelport",
+ "sango-species",
+ "sango-trainer",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-rules"
 version = "0.1.0"
 dependencies = [
@@ -3045,6 +3060,7 @@ dependencies = [
  "sango-nature",
  "sango-overworld",
  "sango-packs",
+ "sango-player",
  "sango-script",
  "sango-species",
  "sango-trainer",

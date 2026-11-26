@@ -38,6 +38,7 @@ sango-formula = { path = "module/formula" }
 sango-character = { path = "module/character" }
 sango-nature = { path = "module/nature" }
 sango-font = { path = "module/font" }
+sango-player = { path = "module/player" }
 sango-layout = { path = "module/layout" }
 sango-battle = { path = "module/battle" }
 

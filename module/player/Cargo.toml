@@ -1,0 +1,16 @@
+[package]
+name = "sango-player"
+version.workspace = true
+edition.workspace = true
+description = "The Player page of Sango Studio: the pictures and the 3D models of the two player characters."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+sango-species.workspace = true
+sango-character.workspace = true
+sango-trainer.workspace = true
+sango-layout.workspace = true
+sango-modelport.workspace = true
+rfd.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }

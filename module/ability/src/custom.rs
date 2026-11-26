@@ -14,7 +14,7 @@ const FOLDER: &str = "ability";
 #[derive(Default)]
 pub struct Store {
     /// The abilities, as the user has them now.
-    list: Vec<CustomAbility>,
+    pub(crate) list: Vec<CustomAbility>,
     /// The abilities as they are on the SD card: to know what changed.
     saved: Vec<CustomAbility>,
     loaded: bool,
@@ -22,14 +22,15 @@ pub struct Store {
 }
 
 impl Store {
-    /// Reads the files of the SD card the first time, and when the folder of the card changes.
-    pub fn ensure(&mut self, sd: Option<&SdCard>) {
+    /// Reads the files of the SD card the first time, and when the folder of the card changes. True when it read them.
+    pub fn ensure(&mut self, sd: Option<&SdCard>) -> bool {
         let root = sd.map(|sd| sd.local().to_path_buf());
         if self.loaded && self.root == root {
-            return;
+            return false;
         }
         self.root = root;
         self.reload(sd);
+        true
     }
 
     /// Reads the files of the SD card again.

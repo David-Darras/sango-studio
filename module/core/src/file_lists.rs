@@ -35,6 +35,10 @@ pub fn folders() -> Vec<(String, usize)> {
         ("script/amie".to_string(), 89),
         ("dexnav".to_string(), 248),
         ("overworld/model".to_string(), 21),
+        // The Player page: the PSS icons, the portraits of the introduction and the models of the player in the Soar sequence.
+        ("player/icon".to_string(), 108),
+        ("player/intro".to_string(), 269),
+        ("player/soaring_model".to_string(), 254),
         ("font".to_string(), 167),
         ("item/icon".to_string(), 92),
         ("battle/background".to_string(), 136),

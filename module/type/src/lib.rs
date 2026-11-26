@@ -179,23 +179,25 @@ impl Type {
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 let has_card = session.sd.is_some();
-                ui.add_enabled_ui(has_card && self.list.custom.len() < MAX_CUSTOM, |ui| {
-                    add = widget::button_styled(ui, egui::RichText::new("+ New type").color(color::WHITE), Some(color::ACCENT));
-                })
-                .response
-                .on_hover_text("Adds a type with the effects ×1 against every type. Then you change it like the other types.");
-                export = widget::button(ui, "Export");
-                ui.add_enabled_ui(has_card, |ui| {
-                    import = widget::button(ui, "Import");
-                })
-                .response
-                .on_hover_text("Reads the CSV files of the types.");
-                ui.add_enabled_ui(has_card, |ui| {
-                    reset_more = widget::button(ui, "Reset");
-                })
-                .response
-                .on_hover_text("Reset the chart, the new types or the names, for the parts that you choose.");
-                save = has_card && widget::save_button(ui, self.unsaved());
+                let clicks = widget::action_bar(
+                    ui,
+                    widget::ActionBar {
+                        new: Some(("+ New type", has_card && self.list.custom.len() < MAX_CUSTOM)),
+                        export: Some(true),
+                        import: Some(has_card),
+                        reset: Some(has_card),
+                        save: has_card.then(|| self.unsaved()),
+                        notes: widget::ActionNotes {
+                            new: "Adds a type with the effects ×1 against every type. Then you change it like the other types.",
+                            import: "Reads the CSV files of the types.",
+                            reset: "Reset the chart, the new types or the names, for the parts that you choose.",
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    },
+                );
+                (add, export, import, reset_more, save) = (clicks.new, clicks.export, clicks.import, clicks.reset, clicks.save);
+                self.history.buttons(ui, true);
                 if self.dirty() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.chart_baseline != Chart::original() || !self.list_baseline.custom.is_empty() || self.icons.from_card() || self.texts.from_card() {

@@ -48,11 +48,13 @@ pub struct Choreography {
     status: Option<(bool, String)>,
     /// The kind of the step that "Add a step" makes.
     new_kind: u16,
+    /// Undo and redo of the open choreography.
+    history: sango_ui::history::History<Option<MoveChoreography>>,
 }
 
 impl Default for Choreography {
     fn default() -> Self {
-        Choreography { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 119 + 1, choreography: None, baseline: Vec::new(), selected: None, zoom: 6.0, status: None, new_kind: 1, pending_file: None }
+        Choreography { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 119 + 1, choreography: None, baseline: Vec::new(), selected: None, zoom: 6.0, status: None, new_kind: 1, pending_file: None, history: Default::default() }
     }
 }
 
@@ -111,6 +113,7 @@ impl Choreography {
             Err(message) => self.error = Some(message),
         }
         self.choreography = None;
+        self.history.clear();
     }
 
     /// Reads the open choreography: the SD card first, then the game.
@@ -204,6 +207,7 @@ impl Choreography {
                 }
                 let has_card = session.sd.is_some();
                 let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(self.choreography.is_some()), import: Some(true), reset: Some(has_card && from_card), save: Some(has_card && dirty), ..Default::default() });
+                self.history.buttons(ui, self.choreography.is_some());
                 if clicks.export {
                     if let Some(choreography) = self.choreography.as_ref() {
                         self.status = export_bytes("Export the choreography", &format!("choreography_{}.bin", self.file), ("Choreography", &["bin"]), &choreography.to_bytes()).or(self.status.take());
@@ -498,6 +502,11 @@ impl Module for Choreography {
             self.details(ui);
             self.add_bar(ui);
         });
+        // Ctrl+Z, Ctrl+Y and the buttons on the open choreography. A drag is one step: nothing while the mouse button is down.
+        if !ui.input(|i| i.pointer.any_down()) && self.history.track(ui, self.file as u64, &mut self.choreography) {
+            let count = self.choreography.as_ref().map_or(0, |choreography| choreography.steps.len());
+            self.selected = self.selected.filter(|&step| step < count);
+        }
     }
 }
 
@@ -527,6 +536,13 @@ mod test {
         let kind = move_choreography::kind_of(page.choreography.as_ref().unwrap().steps[place].kind).unwrap();
         page.choreography.as_mut().unwrap().steps[place].set_value(&kind.params[0], &Value::Vec3([9.0, 9.0, 9.0]));
         assert!(page.dirty());
+        // Ctrl+Z and Ctrl+Y on the change.
+        for (input, undone) in [(Default::default(), false), (sango_ui::history::test_keys(egui::Key::Z), true), (sango_ui::history::test_keys(egui::Key::Y), false)] {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, &mut session));
+            });
+            assert_eq!(!page.dirty(), undone);
+        }
         page.save(session.sd.as_ref().unwrap());
         assert!(!page.dirty());
         assert!(session.sd.as_ref().unwrap().read("choreography/index.bin").is_some(), "the list of the files is written");

@@ -50,7 +50,8 @@ pub fn decompress(bytes: &[u8]) -> Result<Vec<u8>, String> {
         length = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize;
         at = 8;
     }
-    let mut out: Vec<u8> = Vec::with_capacity(length);
+    // A header that is wrong can give a huge size: no room is taken for more than 16 MB before the data is read.
+    let mut out: Vec<u8> = Vec::with_capacity(length.min(1 << 24));
     let cut = || "The compressed data stops too early.".to_string();
     while out.len() < length {
         let flags = *bytes.get(at).ok_or_else(cut)?;

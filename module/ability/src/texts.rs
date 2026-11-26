@@ -42,7 +42,7 @@ pub const ENGLISH: usize = 2;
 pub struct AbilityTexts {
     archives: Vec<Option<Garc>>,
     /// The files that were read, as the user changed them. The key is the language and the file.
-    files: HashMap<(usize, usize), TextFile>,
+    pub(crate) files: HashMap<(usize, usize), TextFile>,
     /// The files as they were read or saved: to know what changed.
     saved: HashMap<(usize, usize), TextFile>,
     /// The files that came from the SD card.
@@ -76,6 +76,21 @@ impl AbilityTexts {
         self.errors.clear();
         self.current = None;
         self.game.clear();
+    }
+
+    /// Reads every file of texts of the abilities, in every language.
+    pub(crate) fn load_all(&mut self, sd: Option<&SdCard>) {
+        for language in 0..LANGUAGES.len() {
+            for field in &FIELDS {
+                self.load(sd, language, field.file);
+            }
+        }
+    }
+
+    /// The text boxes read the files again: an undo or a redo changed them.
+    pub(crate) fn forget_boxes(&mut self) {
+        self.buffers.clear();
+        self.errors.clear();
     }
 
     /// A file of texts as the romfs has it.

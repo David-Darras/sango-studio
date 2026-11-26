@@ -184,14 +184,14 @@ impl Species {
                     let megas: Vec<u16> = self.mega_table.as_ref().map(|t| t.entries.iter().filter(|e| !e.is_empty()).map(|e| e.evolved_form).collect()).unwrap_or_default();
                     let pack_megas: Vec<u16> = pack_forms.iter().filter(|(_, c)| c.is_mega()).map(|(form, _)| *form).collect();
                     let allowed = move |s: usize, f: usize| s == species && f > 0 && !megas.contains(&(f as u16)) && !pack_megas.contains(&(f as u16));
-                    ui.add_enabled_ui(session.sd.is_some() && self.data.is_some() && total_active < MAX_ENTRIES, |ui| {
+                    let zone = ui.add_enabled_ui(session.sd.is_some() && self.data.is_some() && total_active < MAX_ENTRIES, |ui| {
                         let mut chosen = (0, 0);
                         if crate::menus::pokemon_menu(ui, "mega_add", &mut chosen, 300.0, Some(&allowed), Some("+ Add a Mega evolution")) && chosen.0 != 0 {
                             add = Some(chosen.1);
                         }
                     })
-                    .response
-                    .on_hover_text("Choose the form that the Pokémon becomes. A Mega Evolution stays in the species: the forms of the other species are greyed out. To make a new form, use \"+ New species\".");
+                    .response;
+                    widget::zone_hint(ui, &zone, "Choose the form that the Pokémon becomes. A Mega Evolution stays in the species: the forms of the other species are greyed out. To make a new form, use \"+ New species\".");
                     ui.label(widget::hint(&format!("{total_active} of {MAX_ENTRIES} Mega forms with a condition. Restart the game after a change.")));
                 });
                 ui.add_space(8.0);

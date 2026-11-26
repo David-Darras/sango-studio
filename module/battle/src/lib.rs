@@ -104,6 +104,8 @@ struct Open {
     /// True when the selected picture must come in sight (after a key).
     scroll_picture: bool,
     dirty: bool,
+    /// The bytes of the file as they were read or saved.
+    saved: Vec<u8>,
     replaced: bool,
     /// The textures that were removed during this frame (freed at the start of the next one).
     retired: Vec<egui::TextureHandle>,
@@ -121,11 +123,13 @@ pub struct BattlePage {
     status: Option<(bool, String)>,
     /// True when the selected file must come in sight in the list (after a key).
     scroll_list: bool,
+    /// Undo and redo of the bytes of the open file.
+    history: sango_ui::history::History<Vec<u8>>,
 }
 
 impl Default for BattlePage {
     fn default() -> Self {
-        BattlePage { reset_open: false, opened_for: None, entries: Vec::new(), filter: String::new(), open: None, status: None, scroll_list: false }
+        BattlePage { reset_open: false, opened_for: None, entries: Vec::new(), filter: String::new(), open: None, status: None, scroll_list: false, history: Default::default() }
     }
 }
 
@@ -204,6 +208,7 @@ impl BattlePage {
             let (_, parts) = parts_of(&raw);
             Ok(Open {
                 id,
+                saved: raw.clone(),
                 raw,
                 compressed,
                 parts,
@@ -222,6 +227,7 @@ impl BattlePage {
         })();
         match result {
             Ok(open) => {
+                self.history.clear();
                 self.open = Some(open);
                 self.status = None;
             }
@@ -280,6 +286,17 @@ impl Open {
                 Err(e) => self.error = Some(e),
             }
         }
+    }
+
+    /// After an undo or a redo: the parts and the pictures are read again.
+    fn after_history(&mut self) {
+        self.parts = parts_of(&self.raw).1;
+        self.part = self.part.min(self.parts.len().saturating_sub(1));
+        self.pictures_for = None;
+        if let Some((old, _)) = self.view.take() {
+            self.retired.push(old);
+        }
+        self.dirty = self.raw != self.saved;
     }
 
     /// Replaces a picture of the model of the part with the pixels of a PNG file.
@@ -385,12 +402,17 @@ impl Module for BattlePage {
             return;
         };
         open.retired.clear();
+        // Ctrl+Z, Ctrl+Y and the buttons, before the file is drawn.
+        if self.history.track(ui, open.id as u64, &mut open.raw) {
+            open.after_history();
+        }
         let entry = self.entries.iter().find(|e| e.id == open.id).cloned();
 
         ui.horizontal_wrapped(|ui| {
             ui.label(widget::title(&format!("File {}{}", open.id, entry.as_ref().and_then(|e| e.name()).map(|n| format!(" · {n}")).unwrap_or_default())));
             ui.separator();
             let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(open.replaced), save: Some(open.dirty), ..Default::default() });
+            self.history.buttons(ui, true);
             if clicks.export {
                 self.status = export_bytes("Export the file", &format!("battle_{}.bin", open.id), ("File of the game", &["bin"]), &open.raw).or(self.status.take());
             }
@@ -571,6 +593,7 @@ fn save(open: &mut Open, sd: Option<&SdCard>, status: &mut Option<(bool, String)
     let bytes = if open.compressed { lz::compress_lz11(&open.raw) } else { open.raw.clone() };
     match sd.write(&sd_path(open.id), &bytes) {
         Ok(path) => {
+            open.saved = open.raw.clone();
             open.dirty = false;
             open.replaced = true;
             *status = Some((true, format!("Saved: {}", path.display())));
@@ -587,6 +610,7 @@ fn reset(open: &mut Open, dump: &Dump, sd: Option<&SdCard>, status: &mut Option<
     match result {
         Ok((raw, compressed)) => {
             let (_, parts) = parts_of(&raw);
+            open.saved = raw.clone();
             open.raw = raw;
             open.compressed = compressed;
             open.parts = parts;
@@ -671,6 +695,34 @@ mod preview {
 #[cfg(test)]
 mod pictures {
     use super::*;
+
+    /// With the dump: a change of the open file is undone and done again with the keys.
+    #[test]
+    fn a_change_of_a_file_is_undone() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), ..Session::default() };
+        let mut page = BattlePage::default();
+        let ctx = egui::Context::default();
+        let frame = |page: &mut BattlePage, session: &mut Session, input: egui::RawInput| {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        frame(&mut page, &mut session, Default::default());
+        page.open_file(&session, 94);
+        frame(&mut page, &mut session, Default::default());
+        let first = page.open.as_ref().unwrap().raw.clone();
+        let open = page.open.as_mut().unwrap();
+        *open.raw.last_mut().unwrap() ^= 1;
+        open.dirty = true;
+        frame(&mut page, &mut session, Default::default());
+        frame(&mut page, &mut session, sango_ui::history::test_keys(egui::Key::Z));
+        let open = page.open.as_ref().unwrap();
+        assert!(open.raw == first && !open.dirty);
+        frame(&mut page, &mut session, sango_ui::history::test_keys(egui::Key::Y));
+        let open = page.open.as_ref().unwrap();
+        assert!(open.raw != first && open.dirty);
+    }
 
     #[test]
     fn save_pictures() {

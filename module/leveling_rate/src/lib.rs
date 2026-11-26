@@ -411,6 +411,7 @@ impl LevelingRate {
         let mut clicks = widget::ActionClicks::default();
         ui.horizontal_wrapped(|ui| {
             clicks = widget::action_bar(ui, widget::ActionBar { new: Some(("+ New leveling rate", can_save && !at_limit)), export: Some(true), import: Some(can_save), reset: Some(can_save), save: Some(can_save && changed), ..Default::default() });
+            self.history.buttons(ui, true);
             if changed {
                 widget::badge(ui, "Not saved", color::AMBER);
             } else if self.from_card.contains(&self.rate) {

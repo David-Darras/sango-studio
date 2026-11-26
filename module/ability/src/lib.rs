@@ -56,11 +56,16 @@ pub struct Ability {
     /// The reaction of the game as rules, for the open ability of the game that has no file yet. It goes in the store at the first
     /// change.
     draft: Option<rules::CustomAbility>,
+    /// Undo and redo of the new abilities, the rules and the texts, while one ability is open.
+    history: sango_ui::history::History<Edited>,
 }
+
+/// What the history of the page keeps: the abilities of the user, and the files of texts.
+type Edited = (Vec<rules::CustomAbility>, std::collections::HashMap<(usize, usize), sango_core::text::TextFile>);
 
 impl Default for Ability {
     fn default() -> Self {
-        Ability { root: None, id: 1, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, species_table: SpeciesTable::default(), texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2, draft: None }
+        Ability { root: None, id: 1, status: None, list_names: None, modified: Default::default(), usage: Vec::new(), usage_ready: false, species_table: SpeciesTable::default(), texts: texts::AbilityTexts::default(), tools: tools::Tools::default(), store: custom::Store::default(), custom_language: 2, draft: None, history: Default::default() }
     }
 }
 
@@ -69,6 +74,7 @@ impl Ability {
     fn open(&mut self, dump: &Dump) {
         self.root = Some(dump.root().to_path_buf());
         self.texts.open(dump);
+        self.history.clear();
         self.list_names = None;
         self.usage_ready = false;
     }
@@ -240,6 +246,20 @@ impl Ability {
         }
     }
 
+    /// Ctrl+Z, Ctrl+Y and the buttons. Call it after the page is drawn.
+    fn track(&mut self, ui: &egui::Ui, session: &Session) {
+        // All the files are read first: a file that is read later would look like a change.
+        self.texts.load_all(session.sd.as_ref());
+        let mut state = (std::mem::take(&mut self.store.list), std::mem::take(&mut self.texts.files));
+        let stepped = self.history.track(ui, self.id as u64, &mut state);
+        (self.store.list, self.texts.files) = state;
+        if stepped {
+            self.texts.forget_boxes();
+            self.list_names = None;
+            self.draft = None;
+        }
+    }
+
     /// The picker, the buttons and the state.
     fn top_bar(&mut self, ui: &mut egui::Ui, session: &Session) {
         let mut save = false;
@@ -253,32 +273,28 @@ impl Ability {
                 picker::ability_menu(ui, "ability_menu", &mut chosen, 300.0, &rows);
                 self.id = chosen.clamp(1, self.last_ability());
                 let has_card = session.sd.is_some();
-                ui.add_enabled_ui(has_card, |ui| {
-                    add = widget::button_styled(ui, egui::RichText::new("+ New ability").color(color::WHITE), Some(color::ACCENT));
-                })
-                .response
-                .on_hover_text("Adds an ability: then write its name, its description and its reactions.");
-                ui.add_enabled_ui(has_card && self.is_custom(), |ui| {
-                    if widget::confirm_button(ui, "Delete", "Click again to delete") {
-                        delete = true;
-                    }
-                })
-                .response
-                .on_hover_text(if self.is_custom() { "Deletes this new ability." } else { "Only a new ability can be deleted, not one of the game." });
-                if widget::button(ui, "Export") {
-                    self.tools.export_open = true;
-                }
-                ui.add_enabled_ui(has_card, |ui| {
-                    if widget::button(ui, "Import") {
-                        self.tools.import_open = true;
-                    }
-                });
-                ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset = widget::button(ui, "Reset");
-                })
-                .response
-                .on_hover_text("Puts the texts or the reactions of one ability or of all the abilities back to the game: choose in the window.");
-                save = has_card && widget::save_button(ui, self.unsaved());
+                let own = self.is_custom();
+                let clicks = widget::action_bar(
+                    ui,
+                    widget::ActionBar {
+                        new: Some(("+ New ability", has_card)),
+                        delete: Some(has_card && own),
+                        export: Some(true),
+                        import: Some(has_card),
+                        reset: Some(has_card && !own),
+                        save: has_card.then(|| self.unsaved()),
+                        notes: widget::ActionNotes {
+                            new: "Adds an ability: then write its name, its description and its reactions.",
+                            delete: if own { "Deletes this new ability." } else { "Only a new ability can be deleted, not one of the game." },
+                            reset: "Puts the texts or the reactions of one ability or of all the abilities back to the game: choose in the window.",
+                            ..Default::default()
+                        },
+                    },
+                );
+                (add, delete, reset, save) = (clicks.new, clicks.delete, clicks.reset, clicks.save);
+                self.tools.export_open |= clicks.export;
+                self.tools.import_open |= clicks.import;
+                self.history.buttons(ui, true);
                 if self.texts.changed() || self.store.changed() {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.texts.from_card() {
@@ -412,7 +428,9 @@ impl Module for Ability {
         if self.root.as_deref() != Some(dump.root()) {
             self.open(&dump);
         }
-        self.store.ensure(session.sd.as_ref());
+        if self.store.ensure(session.sd.as_ref()) {
+            self.history.clear();
+        }
         if !self.usage_ready {
             self.read_usage(session);
         }
@@ -421,6 +439,7 @@ impl Module for Ability {
         self.csv_windows(ui.ctx(), session);
         ui.add_space(8.0);
         self.page_view(ui, session);
+        self.track(ui, session);
     }
 }
 
@@ -502,6 +521,38 @@ mod add_test {
 #[cfg(test)]
 mod game_rules_test {
     use super::*;
+
+    /// With the dump: a change of a text and of the rules is undone and done again with the keys.
+    #[test]
+    fn a_change_of_an_ability_is_undone() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_ability_undo_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(SdCard::open(folder.to_str().unwrap()).unwrap()), ..Session::default() };
+        let mut page = Ability { id: 22, ..Ability::default() };
+        let ctx = egui::Context::default();
+        let frame = |page: &mut Ability, session: &mut Session, input: egui::RawInput| {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut page, &mut session, Default::default());
+        }
+        assert!(!page.unsaved());
+        page.store.insert(rules::CustomAbility::game(22, vec![rules::Rule::new()]));
+        let key = (texts::ENGLISH, texts::FIELDS[0].file);
+        page.texts.files.get_mut(&key).unwrap().set_text(22, "Test").unwrap();
+        frame(&mut page, &mut session, Default::default());
+        assert!(page.unsaved());
+        frame(&mut page, &mut session, sango_ui::history::test_keys(egui::Key::Z));
+        assert!(!page.unsaved());
+        frame(&mut page, &mut session, sango_ui::history::test_keys(egui::Key::Y));
+        assert_eq!(page.store.game_ids(), vec![22]);
+        assert_eq!(page.texts.files[&key].text(22).as_deref(), Some("Test"));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
 
     fn draw(page: &mut Ability, session: &Session) {
         let ctx = egui::Context::default();

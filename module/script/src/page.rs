@@ -33,6 +33,8 @@ struct Item {
 
 /// The page.
 pub struct ScriptPage {
+    /// Undo and redo of the text of the open script.
+    history: sango_ui::history::History<String>,
     /// The window of the button Reset.
     reset_open: bool,
     root: Option<std::path::PathBuf>,
@@ -68,7 +70,7 @@ pub struct ScriptPage {
 
 impl Default for ScriptPage {
     fn default() -> Self {
-        ScriptPage { reset_open: false, root: None, error: None, garcs: Vec::new(), items: Vec::new(), chosen: 0, tab: 0, text: String::new(), baseline: String::new(), built: None, status: None, search: String::new(), names: HashMap::new(), pawn: Vec::new(), assembly_lines: Vec::new(), pawn_from: String::new(), pawn_error: None, selected: None, scroll_pawn: false, scroll_assembly: false, cursor_line: None, creator: Default::default() }
+        ScriptPage { history: Default::default(), reset_open: false, root: None, error: None, garcs: Vec::new(), items: Vec::new(), chosen: 0, tab: 0, text: String::new(), baseline: String::new(), built: None, status: None, search: String::new(), names: HashMap::new(), pawn: Vec::new(), assembly_lines: Vec::new(), pawn_from: String::new(), pawn_error: None, selected: None, scroll_pawn: false, scroll_assembly: false, cursor_line: None, creator: Default::default() }
     }
 }
 
@@ -165,6 +167,7 @@ impl ScriptPage {
             }
         }
         self.chosen = 0;
+        self.history.clear();
         self.text.clear();
         self.built = None;
     }
@@ -287,6 +290,7 @@ impl ScriptPage {
                 }
                 let has_card = session.sd.is_some();
                 let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(has_card && from_card), save: Some(has_card && dirty), ..Default::default() });
+                self.history.buttons(ui, !self.text.is_empty());
                 if widget::button(ui, "Check") {
                     self.check();
                 }
@@ -607,6 +611,8 @@ impl Module for ScriptPage {
             }
             _ => self.api_tab(ui),
         }
+        // Ctrl+Z, Ctrl+Y and the buttons on the text (the editor keeps the keys while it has them).
+        self.history.track(ui, self.chosen as u64, &mut self.text);
     }
 }
 
@@ -637,6 +643,28 @@ mod test {
         let at = page.text.find("    proc").expect("a function starts with proc");
         page.text.insert_str(at, "    nop\n");
         assert!(page.dirty());
+        // Ctrl+Z and Ctrl+Y on the change.
+        for (input, undone) in [(Default::default(), false), (sango_ui::history::test_keys(egui::Key::Z), true), (sango_ui::history::test_keys(egui::Key::Y), false)] {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, &mut session));
+            });
+            assert_eq!(!page.dirty(), undone);
+        }
+        // The same on the scripts made of blocks.
+        page.tab = CREATE_TAB;
+        let frame = |page: &mut ScriptPage, session: &mut Session, input: egui::RawInput| {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, session));
+            });
+        };
+        frame(&mut page, &mut session, Default::default());
+        assert!(!page.creator.unsaved());
+        page.creator.rename(0, "A test");
+        frame(&mut page, &mut session, Default::default());
+        assert!(page.creator.unsaved());
+        frame(&mut page, &mut session, sango_ui::history::test_keys(egui::Key::Z));
+        assert!(!page.creator.unsaved());
+        page.tab = 0;
         page.save(session.sd.as_ref().unwrap());
         assert!(!page.dirty(), "{:?}", page.status);
         let index = page.items[page.chosen].index;

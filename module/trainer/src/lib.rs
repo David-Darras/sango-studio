@@ -5,7 +5,7 @@
 //! reads these files instead of the files of the game (restart the game after a change). See [`sango_core::trainer`] for the formats.
 
 mod csv;
-mod store;
+pub mod store;
 
 use sango_core::text::LANGUAGES;
 use sango_core::trainer::{self as data, BattleExtras, PokemonExtras, Team, TrainerClass, TrainerData};
@@ -806,6 +806,7 @@ impl Trainer {
                     ui,
                     widget::ActionBar { new: Some(("+ New trainer", has_card && self.open.is_some())), export: Some(true), import: Some(has_card), reset: Some(has_card && self.open.is_some()), save: Some(has_card && dirty), ..Default::default() },
                 );
+                self.history.buttons(ui, self.open.is_some());
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if self.changed.contains(&self.trainer) {

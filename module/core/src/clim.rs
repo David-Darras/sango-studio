@@ -253,7 +253,7 @@ impl Clim {
             Format::Rgba4 => Clim::from_rgba4(self.width, self.height, rgba)?.body,
             Format::Rgba8 => Clim::from_rgba8(self.width, self.height, rgba)?.body,
             Format::Etc1 | Format::Etc1A4 => self.encode_etc1(rgba),
-            Format::Rgba5551 => return Err("This image format cannot be replaced.".into()),
+            Format::Rgba5551 => self.encode_5551(rgba),
         };
         if data.len() != data_size {
             return Err(format!("The new pixel data has {} bytes, the old one has {data_size}.", data.len()));
@@ -261,6 +261,24 @@ impl Clim {
         let mut body = data;
         body.extend_from_slice(&self.body[data_size..]);
         Ok(Clim { width: self.width, height: self.height, format: self.format, body, footer: self.footer })
+    }
+
+    /// The pixel data of the image in RGBA5551 without palette: a pixel is transparent when its alpha is under 128.
+    fn encode_5551(&self, rgba: &[u8]) -> Vec<u8> {
+        let (side_x, side_y) = (texture_side(self.width), texture_side(self.height));
+        let tiles_per_row = side_x / 8;
+        let mut out = vec![0u8; side_x * side_y * 2];
+        for i in 0..side_x * side_y {
+            let (dx, dy) = morton_position(i % 64);
+            let (x, y) = ((i / 64 % tiles_per_row) * 8 + dx, (i / 64 / tiles_per_row) * 8 + dy);
+            if x < self.width && y < self.height {
+                let pixel = &rgba[(y * self.width + x) * 4..][..4];
+                let five = |value: u8| u16::from(value >> 3);
+                let raw = five(pixel[0]) << 11 | five(pixel[1]) << 6 | five(pixel[2]) << 1 | u16::from(pixel[3] >= 128);
+                out[i * 2..][..2].copy_from_slice(&raw.to_le_bytes());
+            }
+        }
+        out
     }
 
     /// The pixel data of the image in ETC1 or ETC1A4: blocks of 4 × 4 pixels, four blocks in each tile of 8 × 8. A block outside of the

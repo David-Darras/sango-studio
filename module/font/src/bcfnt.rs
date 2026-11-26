@@ -110,7 +110,7 @@ impl Format {
 }
 
 /// A font.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Font {
     bytes: Vec<u8>,
     /// The distance between two lines.

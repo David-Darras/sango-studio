@@ -35,19 +35,28 @@ pub fn badge(ui: &mut egui::Ui, text: &str, fill: egui::Color32) {
 /// A button for something that cannot be undone: the first click changes the button ("Click again to confirm"), the second click does
 /// the work. The button goes back to its first state after a few seconds. Gives true on the second click.
 pub fn confirm_button(ui: &mut egui::Ui, text: &str, confirm_text: &str) -> bool {
+    confirm_response(ui, text, confirm_text).1
+}
+
+/// [`confirm_button`] with the response of the button.
+fn confirm_response(ui: &mut egui::Ui, text: &str, confirm_text: &str) -> (egui::Response, bool) {
     let id = ui.make_persistent_id(("confirm_button", text));
     let now = ui.input(|i| i.time);
     let armed: Option<f64> = ui.data(|d| d.get_temp(id));
     if armed.is_some_and(|since| now - since < 4.0) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
-        if button_styled(ui, egui::RichText::new(confirm_text).color(color::WHITE), Some(color::ROSE)) {
+        let (response, clicked) = button_response(ui, egui::RichText::new(confirm_text).color(color::WHITE), Some(color::ROSE));
+        if clicked {
             ui.data_mut(|d| d.remove::<f64>(id));
-            return true;
         }
-    } else if button(ui, text) {
-        ui.data_mut(|d| d.insert_temp(id, now));
+        (response, clicked)
+    } else {
+        let (response, clicked) = button_response(ui, text, None);
+        if clicked {
+            ui.data_mut(|d| d.insert_temp(id, now));
+        }
+        (response, false)
     }
-    false
 }
 
 /// A button of the side bar: filled with the main colour when it is the current page. The icon is in
@@ -640,6 +649,12 @@ pub fn button(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>) -> bool {
 
 /// A styled button that can be focused with keyboard navigation. Pressing Enter or Space clicks it.
 pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill: Option<egui::Color32>) -> bool {
+    button_response(ui, text, fill).1
+}
+
+/// [`button_styled`] with the response of the button, for a text on hover: a text on the response of the zone around the button never
+/// shows. Gives also true when the button is clicked.
+fn button_response(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill: Option<egui::Color32>) -> (egui::Response, bool) {
     let mut b = egui::Button::new(text);
     if let Some(c) = fill {
         b = b.fill(c);
@@ -665,7 +680,26 @@ pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill:
             clicked = true;
         }
     }
-    clicked
+    (response, clicked)
+}
+
+/// A text over a zone that holds widgets, while the pointer is on it. `Response::on_hover_text` does not show there: the widgets
+/// cover the zone.
+pub fn zone_hint(ui: &egui::Ui, zone: &egui::Response, text: &str) {
+    if ui.rect_contains_pointer(zone.rect) {
+        egui::show_tooltip_at_pointer(ui.ctx(), ui.layer_id(), zone.id.with("zone_hint"), |ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(text);
+        });
+    }
+}
+
+/// The text over a button, also when it is grey.
+fn tip(response: egui::Response, text: &str) -> egui::Response {
+    if text.is_empty() {
+        return response;
+    }
+    response.on_hover_text(text).on_disabled_hover_text(text)
 }
 
 /// An imposing, polished tab button with distinct active, hovered, and inactive states.
@@ -1310,13 +1344,10 @@ mod test {
 /// The Save button of a page: in the colour of the actions when something changed, greyed out (and not clickable) when there is
 /// nothing to save. Gives true when it is clicked.
 pub fn save_button(ui: &mut egui::Ui, changed: bool) -> bool {
-    let mut clicked = false;
-    ui.add_enabled_ui(changed, |ui| {
-        let ink = if changed { color::WHITE } else { color::MUTED };
-        clicked = button_styled(ui, egui::RichText::new("Save").color(ink), Some(if changed { color::ACCENT } else { color::SURFACE }));
-    })
-    .response
-    .on_hover_text(if changed { "Writes the changes on the SD card.  (Ctrl+S)" } else { "Nothing changed: there is nothing to save.  (Ctrl+S)" });
+    let ink = if changed { color::WHITE } else { color::MUTED };
+    let fill = if changed { color::ACCENT } else { color::SURFACE };
+    let (response, clicked) = ui.add_enabled_ui(changed, |ui| button_response(ui, egui::RichText::new("Save").color(ink), Some(fill))).inner;
+    tip(response, if changed { "Writes the changes on the SD card.  (Ctrl+S)" } else { "Nothing changed: there is nothing to save.  (Ctrl+S)" });
     clicked && changed
 }
 
@@ -1372,6 +1403,18 @@ pub struct ActionBar<'a> {
     pub reset: Option<bool>,
     /// True when something changed: the button Save is blue.
     pub save: Option<bool>,
+    /// What the buttons do on this page, shown over them with their shortcut.
+    pub notes: ActionNotes<'a>,
+}
+
+/// The texts over the buttons of [`ActionBar`]. An empty text: only the shortcut shows (nothing for `delete` and `reset`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ActionNotes<'a> {
+    pub new: &'a str,
+    pub delete: &'a str,
+    pub export: &'a str,
+    pub import: &'a str,
+    pub reset: &'a str,
 }
 
 /// The buttons of [`ActionBar`] that were clicked.
@@ -1401,26 +1444,32 @@ pub fn shortcut(ui: &egui::Ui, key: egui::Key) -> bool {
 /// pressed (Ctrl+N, Ctrl+E, Ctrl+I, Ctrl+S: the text over a button gives its shortcut).
 pub fn action_bar(ui: &mut egui::Ui, bar: ActionBar) -> ActionClicks {
     let mut clicks = ActionClicks::default();
-    let hover = |r: egui::InnerResponse<()>, text: &str| {
-        r.response.on_hover_text(text);
-    };
+    // The note of the page, then the shortcut.
+    let with = |note: &str, shortcut: &str| if note.is_empty() { shortcut.to_string() } else { format!("{note}  ({shortcut})") };
     if let Some((text, enabled)) = bar.new {
-        hover(ui.add_enabled_ui(enabled, |ui| clicks.new = button_styled(ui, egui::RichText::new(text).color(color::WHITE), Some(color::ACCENT))), SHORTCUT_NEW);
-        clicks.new |= enabled && shortcut(ui, egui::Key::N);
+        let (response, clicked) = ui.add_enabled_ui(enabled, |ui| button_response(ui, egui::RichText::new(text).color(color::WHITE), Some(color::ACCENT))).inner;
+        tip(response, &with(bar.notes.new, SHORTCUT_NEW));
+        clicks.new = clicked || (enabled && shortcut(ui, egui::Key::N));
     }
     if let Some(enabled) = bar.delete {
-        ui.add_enabled_ui(enabled, |ui| clicks.delete = confirm_button(ui, "Delete", "Click again to delete"));
+        let (response, clicked) = ui.add_enabled_ui(enabled, |ui| confirm_response(ui, "Delete", "Click again to delete")).inner;
+        tip(response, bar.notes.delete);
+        clicks.delete = clicked;
     }
     if let Some(enabled) = bar.export {
-        hover(ui.add_enabled_ui(enabled, |ui| clicks.export = button(ui, "Export")), SHORTCUT_EXPORT);
-        clicks.export |= enabled && shortcut(ui, egui::Key::E);
+        let (response, clicked) = ui.add_enabled_ui(enabled, |ui| button_response(ui, "Export", None)).inner;
+        tip(response, &with(bar.notes.export, SHORTCUT_EXPORT));
+        clicks.export = clicked || (enabled && shortcut(ui, egui::Key::E));
     }
     if let Some(enabled) = bar.import {
-        hover(ui.add_enabled_ui(enabled, |ui| clicks.import = button(ui, "Import")), SHORTCUT_IMPORT);
-        clicks.import |= enabled && shortcut(ui, egui::Key::I);
+        let (response, clicked) = ui.add_enabled_ui(enabled, |ui| button_response(ui, "Import", None)).inner;
+        tip(response, &with(bar.notes.import, SHORTCUT_IMPORT));
+        clicks.import = clicked || (enabled && shortcut(ui, egui::Key::I));
     }
     if let Some(enabled) = bar.reset {
-        ui.add_enabled_ui(enabled, |ui| clicks.reset = button(ui, "Reset"));
+        let (response, clicked) = ui.add_enabled_ui(enabled, |ui| button_response(ui, "Reset", None)).inner;
+        tip(response, bar.notes.reset);
+        clicks.reset = clicked;
     }
     if let Some(changed) = bar.save {
         clicks.save = save_button(ui, changed);
@@ -1523,5 +1572,53 @@ pub fn focus_from_clicks(ui: &egui::Ui) {
             }
         }
         _ => ctx.data_mut(|d| d.remove::<egui::Id>(egui::Id::new(CLICK_FOCUS_KEY))),
+    }
+}
+
+#[cfg(test)]
+mod top_bar_test {
+    use super::*;
+
+    fn texts(shape: &egui::Shape, out: &mut Vec<(String, egui::Pos2)>) {
+        match shape {
+            egui::Shape::Text(text) => out.push((text.galley.text().to_string(), text.pos + text.galley.rect.center().to_vec2())),
+            egui::Shape::Vec(shapes) => shapes.iter().for_each(|s| texts(s, out)),
+            _ => {}
+        }
+    }
+
+    /// Draws the top bar with the pointer at rest on `at`, and gives the texts of the screen.
+    fn draw(on: bool, at: Option<egui::Pos2>) -> Vec<(String, egui::Pos2)> {
+        let ctx = egui::Context::default();
+        let mut shown = Vec::new();
+        for frame in 0..14 {
+            let events = match at {
+                Some(at) if frame == 2 => vec![egui::Event::PointerMoved(at)],
+                _ => Vec::new(),
+            };
+            let input = egui::RawInput { time: Some(frame as f64 * 0.25), events, ..Default::default() };
+            let output = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        let notes = ActionNotes { export: "Writes a file.", delete: "Removes it.", ..Default::default() };
+                        action_bar(ui, ActionBar { new: Some(("+ New", on)), delete: Some(on), export: Some(on), import: Some(on), reset: Some(on), save: Some(on), notes });
+                    });
+                });
+            });
+            shown.clear();
+            output.shapes.iter().for_each(|s| texts(&s.shape, &mut shown));
+        }
+        shown
+    }
+
+    #[test]
+    fn each_button_shows_its_text_and_its_shortcut_even_when_grey() {
+        for on in [true, false] {
+            let screen = draw(on, None);
+            for (button, text) in [("+ New", "Ctrl+N"), ("Delete", "Removes it."), ("Export", "Writes a file.  (Ctrl+E)"), ("Import", "Ctrl+I"), ("Save", "Ctrl+S")] {
+                let at = screen.iter().find(|(shown, _)| shown == button).map(|(_, at)| *at).unwrap();
+                assert!(draw(on, Some(at)).iter().any(|(shown, _)| shown.contains(text)), "{button} (enabled: {on}) shows {text}");
+            }
+        }
     }
 }

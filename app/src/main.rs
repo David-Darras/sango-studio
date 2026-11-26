@@ -8,7 +8,7 @@ use sango_ui::{widget, Module, Session};
 const SIDE_BAR_WIDTH: f32 = 210.0;
 
 /// The sections of the side bar: the place of their first page in [`App::pages`], and their title.
-const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (17, "Look and sound"), (20, "Tools")];
+const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (18, "Look and sound"), (21, "Tools")];
 
 struct App {
     modules: Vec<Box<dyn Module>>,
@@ -65,6 +65,7 @@ impl App {
             // World.
             Box::new(sango_overworld::Overworld::default()),
             Box::new(sango_encounter::EncounterPage::default()),
+            Box::new(sango_player::PlayerPage::default()),
             Box::new(sango_character::Character::default()),
             Box::new(sango_script::ScriptPage::default()),
             // Look and sound.
@@ -1029,6 +1030,6 @@ mod side_bar_test {
         let first: Vec<&str> = SECTIONS.iter().map(|(place, _)| pages[*place].title()).collect();
         assert_eq!(first, ["Species", "Formula", "Overworld", "Layout", "Packs"]);
         assert_eq!(pages[0].title(), "Home");
-        assert_eq!(pages.len(), 22);
+        assert_eq!(pages.len(), 23);
     }
 }

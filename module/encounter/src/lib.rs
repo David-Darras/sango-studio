@@ -243,6 +243,7 @@ impl EncounterPage {
                 }
                 let has_card = session.sd.is_some();
                 let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(self.table.is_some()), import: Some(true), reset: Some(has_card && self.from_sd), save: Some(has_card && dirty), ..Default::default() });
+                self.history.buttons(ui, self.tab != DEXNAV && self.table.is_some());
                 if clicks.export {
                     self.export_csv();
                 }
@@ -404,14 +405,6 @@ impl EncounterPage {
                 let chance = if method.group == method.count { format!("{:>3} %", method.chance(at)) } else { "     ".to_string() };
                 let text = egui::RichText::new(chance).monospace();
                 ui.add_sized([46.0, 22.0], egui::Label::new(if changed { text.color(color::ACCENT) } else { text }));
-                match self.icons.get(ui.ctx(), edited.species as usize) {
-                    Some(texture) if edited.species != 0 => {
-                        ui.add(egui::Image::new(texture).fit_to_exact_size(egui::vec2(40.0, 30.0)));
-                    }
-                    _ => {
-                        ui.add_space(44.0);
-                    }
-                }
                 // One menu for the species and the form: each form is a Pokémon of its own ("Rotom-Heat").
                 let mut value = (edited.species as usize, edited.form as usize);
                 if sango_species::menus::pokemon_menu(ui, &format!("encounter_species_{place}_{at}"), &mut value, 260.0, None, Some("No Pokémon")) {

@@ -35,11 +35,13 @@ pub struct Creator {
     saved: Vec<Event>,
     chosen: usize,
     status: Option<(bool, String)>,
+    /// Undo and redo of the events.
+    history: sango_ui::history::History<Vec<Event>>,
 }
 
 impl Default for Creator {
     fn default() -> Self {
-        Creator { opened_for: None, events: vec![Event::default(); COUNT], saved: vec![Event::default(); COUNT], chosen: 0, status: None }
+        Creator { opened_for: None, events: vec![Event::default(); COUNT], saved: vec![Event::default(); COUNT], chosen: 0, status: None, history: Default::default() }
     }
 }
 
@@ -50,6 +52,7 @@ impl Creator {
     }
 
     fn open(&mut self, sd: &SdCard) {
+        self.history.clear();
         self.opened_for = Some(sd.root().to_path_buf());
         self.status = None;
         for number in 0..COUNT {
@@ -58,6 +61,12 @@ impl Creator {
             self.saved[number] = event;
         }
         self.chosen = self.events.iter().position(|e| !e.is_empty()).unwrap_or(0);
+    }
+
+    /// Gives a name to an event, like the box of the name.
+    #[cfg(test)]
+    pub(crate) fn rename(&mut self, number: usize, name: &str) {
+        self.events[number].name = name.to_string();
     }
 
     /// Writes every event that changed.
@@ -135,6 +144,7 @@ impl Creator {
             ui.horizontal_wrapped(|ui| {
                 let changed = self.events[number] != self.saved[number];
                 let clicks = widget::action_bar(ui, widget::ActionBar { new: Some(("+ New script", true)), delete: Some(!self.saved[number].is_empty()), save: Some(changed), ..Default::default() });
+                self.history.buttons(ui, true);
                 if clicks.new {
                     if let Some(free) = (0..COUNT).find(|&n| self.events[n].is_empty() && self.saved[n].is_empty() && n != self.chosen) {
                         self.chosen = free;
@@ -198,6 +208,8 @@ impl Creator {
                 });
             });
         });
+        // Ctrl+Z, Ctrl+Y and the buttons on the events.
+        self.history.track(ui, 0, &mut self.events);
     }
 }
 

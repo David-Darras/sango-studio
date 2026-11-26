@@ -50,6 +50,8 @@ struct Open {
     replaced: bool,
     /// True when the font on the page was changed and is not on the SD card yet.
     dirty: bool,
+    /// The bytes of the font as they were read from the SD card or from the game.
+    saved: Vec<u8>,
     /// All the glyphs in one texture, `columns` on a line.
     texture: egui::TextureHandle,
     stride: (usize, usize),
@@ -62,6 +64,8 @@ struct Open {
 
 /// The Font page.
 pub struct FontPage {
+    /// Undo and redo of the open font.
+    history: sango_ui::history::History<bcfnt::Font>,
     /// The windows of the buttons Export, Import and Reset.
     import_open: bool,
     reset_open: bool,
@@ -86,7 +90,7 @@ pub struct FontPage {
 
 impl Default for FontPage {
     fn default() -> Self {
-        FontPage { import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 1, system: None, pc_filter: String::new(), pc_choice: None, game_filter: String::new(), pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
+        FontPage { history: Default::default(), import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 1, system: None, pc_filter: String::new(), pc_choice: None, game_filter: String::new(), pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
     }
 }
 
@@ -171,7 +175,8 @@ impl FontPage {
             Ok(font) => {
                 let (texture, stride, atlas_size, columns) = Self::make_atlas(ctx, &font);
                 let codes = font.code_of_each_glyph();
-                self.open = Some(Open { id, language, font, replaced, dirty: false, texture, stride, columns, atlas_size, codes, selected: None });
+                let saved = font.bytes().to_vec();
+                self.open = Some(Open { id, language, font, saved, replaced, dirty: false, texture, stride, columns, atlas_size, codes, selected: None });
             }
             Err(message) => {
                 self.open = None;
@@ -297,6 +302,7 @@ impl FontPage {
             ui.horizontal_wrapped(|ui| {
                 picked = self.font_menu(ui);
                 clicks = widget::action_bar(ui, widget::ActionBar { export: Some(true), import: Some(true), reset: Some(replaced), save: Some(dirty && single), ..Default::default() });
+                self.history.buttons(ui, true);
                 if dirty {
                     widget::badge(ui, "Not saved", color::AMBER);
                 } else if replaced {
@@ -528,11 +534,26 @@ impl Module for FontPage {
             return;
         };
         if self.opened_for.as_ref() != Some(&(sd.root().to_path_buf(), self.version)) {
+            self.history.clear();
             self.read_list(dump, &sd);
         }
         let stale = self.open.as_ref().map_or(true, |o| (o.id, o.language) != self.chosen);
         if stale && !self.entries.is_empty() {
             self.open_chosen(ui.ctx(), dump, &sd);
+        }
+        // Ctrl+Z, Ctrl+Y and the buttons, before the font is drawn.
+        let mut stepped = None;
+        if let Some(open) = self.open.as_mut() {
+            let key = (open.id as u64) << 8 | open.language as u64;
+            if self.history.track(ui, key, &mut open.font) {
+                stepped = Some(open.font.clone());
+            }
+        }
+        if let Some(font) = stepped {
+            self.show(ui.ctx(), font);
+            if let Some(open) = self.open.as_mut() {
+                open.dirty = open.font.bytes() != open.saved.as_slice();
+            }
         }
         let mut reload = false;
         self.actions(ui, &sd, &mut reload);
@@ -593,6 +614,20 @@ mod test {
         let font = page.open.as_ref().unwrap().font.clone();
         page.show(&ctx, font);
         assert!(page.open.as_ref().unwrap().dirty);
+        // Another font on the page, then Ctrl+Z and Ctrl+Y.
+        frame(&mut page, &mut session);
+        let first = page.open.as_ref().unwrap().font.clone();
+        page.show(&ctx, Font::parse(garc.file(3, 2).unwrap().to_vec()).unwrap());
+        frame(&mut page, &mut session);
+        for (key, back) in [(egui::Key::Z, true), (egui::Key::Y, false)] {
+            let _ = ctx.run(sango_ui::history::test_keys(key), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, &mut session));
+            });
+            let open = page.open.as_ref().unwrap();
+            assert_eq!(open.font == first, back);
+            assert_eq!(!open.dirty, back);
+        }
+        page.show(&ctx, first);
         assert!(page.save(&sd, 2).0);
         let _ = std::fs::remove_dir_all(&folder);
     }

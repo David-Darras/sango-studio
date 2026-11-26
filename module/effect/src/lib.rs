@@ -38,11 +38,13 @@ pub struct EffectPage {
     retired: sango_ui::retired::Retired,
     /// The preview of the open effect.
     view: PreviewState,
+    /// Undo and redo of the open effect.
+    history: sango_ui::history::History<Option<Effect>>,
 }
 
 impl Default for EffectPage {
     fn default() -> Self {
-        EffectPage { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), pending_file: None }
+        EffectPage { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), pending_file: None, history: Default::default() }
     }
 }
 
@@ -154,6 +156,7 @@ impl EffectPage {
             Err(message) => self.error = Some(message),
         }
         self.effect = None;
+        self.history.clear();
     }
 
     fn load(&mut self, sd: Option<&SdCard>) {
@@ -320,6 +323,7 @@ impl EffectPage {
                 }
                 let has_card = session.sd.is_some();
                 let clicks = widget::action_bar(ui, widget::ActionBar { export: Some(self.effect.is_some()), import: Some(true), reset: Some(has_card && from_card), save: Some(has_card && dirty), ..Default::default() });
+                self.history.buttons(ui, self.effect.is_some());
                 if clicks.export {
                     if let Some(effect) = self.effect.as_ref() {
                         self.status = export_bytes("Export the effect", &format!("effect_{}.bin", self.file), ("Effect", &["bin"]), effect.bytes()).or(self.status.take());
@@ -775,6 +779,12 @@ impl Module for EffectPage {
             ui.add_space(8.0);
             self.layers(ui);
         });
+        // Ctrl+Z, Ctrl+Y and the buttons on the open effect. A drag is one step: nothing while the mouse button is down.
+        if !ui.input(|i| i.pointer.any_down()) && self.history.track(ui, self.file as u64, &mut self.effect) {
+            let count = self.effect.as_ref().map_or(0, |effect| effect.layer_count());
+            self.layer = self.layer.min(count.saturating_sub(1));
+            self.forget_textures();
+        }
     }
 }
 
@@ -805,6 +815,13 @@ mod test {
         emission.ratio += 2.0;
         page.effect.as_mut().unwrap().set_emission(0, &emission);
         assert!(page.dirty());
+        // Ctrl+Z and Ctrl+Y on the change.
+        for (input, undone) in [(Default::default(), false), (sango_ui::history::test_keys(egui::Key::Z), true), (sango_ui::history::test_keys(egui::Key::Y), false)] {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, &mut session));
+            });
+            assert_eq!(!page.dirty(), undone);
+        }
         page.save(session.sd.as_ref().unwrap());
         assert!(!page.dirty());
         assert!(session.sd.as_ref().unwrap().read("effect/index.bin").is_some(), "the list of the files is written");

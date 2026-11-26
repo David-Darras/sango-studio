@@ -1,8 +1,9 @@
-//! The archive page: choose an archive of the game, see its tree, click a file to see its bytes.
+//! The archive page: choose an archive of the game, see its tree, click a file to see its bytes, as they are in the archive or
+//! decompressed.
 
 mod hex;
 
-use sango_core::{Dump, Garc};
+use sango_core::{lz, Dump, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};
 use std::collections::HashSet;
@@ -21,6 +22,8 @@ struct Loaded {
     view: std::ops::Range<usize>,
     /// The line to bring on the screen at the next frame (after a key).
     scroll_to: Option<usize>,
+    /// The bytes of a file after decompression: the file id and the language, then the bytes or what is wrong.
+    plain: Option<((usize, usize), Result<Vec<u8>, String>)>,
 }
 
 /// One line of the list of files.
@@ -41,6 +44,8 @@ pub struct Archive {
     error: Option<String>,
     /// While the list of the archives is open: the archive that the keyboard cursor is on.
     cursor: Option<usize>,
+    /// True when the compressed files show their bytes after decompression.
+    decompress: bool,
 }
 
 /// The height of a line of the list of files, in points.
@@ -106,7 +111,7 @@ impl Archive {
         match Garc::open(&path) {
             Ok(garc) => {
                 let first_sel = garc.languages(0).first().map(|&l| (0, l));
-                self.loaded = Some(Loaded { number, path, garc, selected: first_sel, expanded: HashSet::new(), view: 0..0, scroll_to: None });
+                self.loaded = Some(Loaded { number, path, garc, selected: first_sel, expanded: HashSet::new(), view: 0..0, scroll_to: None, plain: None });
                 self.error = None;
                 self.input = number.to_string();
             }
@@ -476,8 +481,8 @@ impl Archive {
         ui.ctx().request_repaint();
     }
 
-    /// The bytes of the file that is chosen.
-    fn bytes(ui: &mut egui::Ui, loaded: &Loaded) {
+    /// The bytes of the file that is chosen. With `decompress`, a compressed file shows its bytes after decompression.
+    fn bytes(ui: &mut egui::Ui, loaded: &mut Loaded, decompress: &mut bool) {
         let Some((id, language)) = loaded.selected else {
             ui.add_space(6.0);
             ui.label(widget::hint("Click a file to see its bytes."));
@@ -497,8 +502,48 @@ impl Archive {
             first_bytes(bytes)
         )));
         ui.add_space(4.0);
-        hex::show(ui, bytes);
+        let compressed = lz::is_compressed(bytes);
+        ui.horizontal(|ui| {
+            let note = "Shows the bytes of the compressed files after decompression (LZ10 or LZ11). Click again to see the bytes of the archive.";
+            let button = ui.add_enabled(compressed, egui::Button::new("Decompress").selected(compressed && *decompress));
+            if button.on_hover_text(note).on_disabled_hover_text("This file is not compressed with LZ10 or LZ11.").clicked() {
+                *decompress = !*decompress;
+            }
+        });
+        ui.add_space(4.0);
+        if !(compressed && *decompress) {
+            hex::show(ui, bytes);
+            return;
+        }
+        if loaded.plain.as_ref().map(|(of, _)| *of) != Some((id, language)) {
+            loaded.plain = Some(((id, language), lz::decompress(bytes)));
+        }
+        match loaded.plain.as_ref().map(|(_, plain)| plain) {
+            Some(Ok(plain)) => {
+                ui.label(widget::hint(&plain_text(bytes, plain)));
+                ui.add_space(4.0);
+                hex::show(ui, plain);
+            }
+            Some(Err(message)) => {
+                ui.label(egui::RichText::new(message).color(color::ROSE));
+                ui.add_space(4.0);
+                hex::show(ui, bytes);
+            }
+            None => {}
+        }
     }
+}
+
+/// The line over the bytes of a file after decompression: the kind of compression, the size, the first bytes, and the footer of a
+/// picture (the BCLIM files have it in their last 40 bytes).
+fn plain_text(compressed: &[u8], plain: &[u8]) -> String {
+    let kind = if compressed.first() == Some(&0x10) { "LZ10" } else { "LZ11" };
+    let mut text = format!("Decompressed from {kind}: {} bytes ({}). Starts with: {}", plain.len(), size_text(plain.len()), first_bytes(plain));
+    if let Some(at) = plain.len().checked_sub(40).filter(|&at| &plain[at..at + 4] == b"CLIM") {
+        let number = |from: usize| u16::from_le_bytes([plain[at + from], plain[at + from + 1]]);
+        text.push_str(&format!(". A BCLIM picture: footer at {at:#x}, {} × {} pixels, format {}", number(0x1C), number(0x1E), number(0x20)));
+    }
+    text
 }
 
 /// The first four bytes as text when they can be read, else as numbers.
@@ -588,7 +633,7 @@ impl Module for Archive {
             ui.separator();
             let rest = ui.available_width();
             ui.allocate_ui_with_layout(egui::vec2(rest, size.y), egui::Layout::top_down(egui::Align::Min), |ui| {
-                Self::bytes(ui, loaded);
+                Self::bytes(ui, loaded, &mut self.decompress);
             });
         });
     }
@@ -610,6 +655,21 @@ mod test {
         assert_eq!(short_path(277), "a/2/7/7");
         assert_eq!(short_path(13), "a/0/1/3");
         assert_eq!(short_path(0), "a/0/0/0");
+    }
+
+    #[test]
+    fn a_decompressed_picture_gives_its_size_and_its_format() {
+        let mut picture = vec![0u8; 48];
+        picture[8..12].copy_from_slice(b"CLIM");
+        picture[8 + 0x1C] = 40;
+        picture[8 + 0x1E] = 30;
+        picture[8 + 0x20] = 7;
+        let packed = lz::compress_lz11(&picture);
+        assert_eq!(lz::decompress(&packed).unwrap(), picture);
+        let text = plain_text(&packed, &picture);
+        assert!(text.starts_with("Decompressed from LZ11: 48 bytes"), "{text}");
+        assert!(text.ends_with("footer at 0x8, 40 × 30 pixels, format 7"), "{text}");
+        assert!(!plain_text(&packed, b"short").contains("BCLIM"));
     }
 
     #[test]
@@ -804,6 +864,7 @@ mod test {
             expanded: HashSet::new(),
             view: 0..3,
             scroll_to: None,
+            plain: None,
         };
 
         let ctx = egui::Context::default();
