@@ -29,7 +29,7 @@ const ROW: f32 = 22.0;
 
 /// The page.
 pub struct Choreography {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     /// The file that the user chose while the open choreography had changes that were not saved: the window asks first.
     pending_file: Option<usize>,

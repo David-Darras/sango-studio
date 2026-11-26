@@ -184,14 +184,14 @@ impl Type {
                 })
                 .response
                 .on_hover_text("Adds a type with the effects ×1 against every type. Then you change it like the other types.");
-                export = widget::button(ui, "Export…");
+                export = widget::button(ui, "Export");
                 ui.add_enabled_ui(has_card, |ui| {
-                    import = widget::button(ui, "Import…");
+                    import = widget::button(ui, "Import");
                 })
                 .response
                 .on_hover_text("Reads the CSV files of the types.");
                 ui.add_enabled_ui(has_card, |ui| {
-                    reset_more = widget::button(ui, "Reset…");
+                    reset_more = widget::button(ui, "Reset");
                 })
                 .response
                 .on_hover_text("Reset the chart, the new types or the names, for the parts that you choose.");
@@ -251,11 +251,11 @@ impl Type {
         let language = self.texts.language();
         let has_override = self.icons.has_override(id, language);
         ui.menu_button("⋯", |ui| {
-            if ui.button("Export the icon (PNG)…").clicked() {
+            if ui.button("Export the icon (PNG)").clicked() {
                 *asked = Some(RowAction::Icon(IconAction::Export, id, language));
                 ui.close_menu();
             }
-            if ui.button("Import an icon (PNG)…").clicked() {
+            if ui.button("Import an icon (PNG)").clicked() {
                 *asked = Some(RowAction::Icon(IconAction::Import, id, language));
                 ui.close_menu();
             }

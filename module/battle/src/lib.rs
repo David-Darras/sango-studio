@@ -112,7 +112,7 @@ struct Open {
 
 /// The Battle page.
 pub struct BattlePage {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     opened_for: Option<PathBuf>,
     entries: Vec<Entry>,

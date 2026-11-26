@@ -106,7 +106,7 @@ enum Drag {
 
 /// The Layout page.
 pub struct LayoutPage {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     scanned_for: Option<PathBuf>,
     scan: Option<Receiver<Vec<Entry>>>,
@@ -845,7 +845,7 @@ fn tree_and_properties(ui: &mut egui::Ui, open: &mut Open, action: &mut Option<A
             match name {
                 Some(name) => {
                     ui.label(format!("Image: {name}"));
-                    if ui.button("Replace the image with a PNG…").clicked() {
+                    if ui.button("Replace the image with a PNG").clicked() {
                         *action = Some(Action::ReplaceImage(name));
                     }
                     ui.label(widget::hint("Every pane that uses this image changes."));

@@ -52,7 +52,7 @@ pub(crate) type Outcome = Result<String, String>;
 
 #[derive(Default)]
 pub struct MusicPage {
-    /// The windows of the buttons Export…, Import… and Reset….
+    /// The windows of the buttons Export, Import and Reset.
     export_open: bool,
     import_open: bool,
     reset_open: bool,
@@ -354,7 +354,7 @@ impl MusicPage {
                     .response
                     .on_hover_text("A WAV file with its own loop keeps it.");
                     ui.horizontal(|ui| {
-                        choose = widget::button_styled(ui, egui::RichText::new("Choose a file…").color(color::WHITE), Some(color::ACCENT));
+                        choose = widget::button_styled(ui, egui::RichText::new("Choose a file").color(color::WHITE), Some(color::ACCENT));
                         close = widget::button(ui, "Cancel");
                     });
                 });

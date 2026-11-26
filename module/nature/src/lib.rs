@@ -21,7 +21,7 @@ const NAME_SIZE: usize = 16;
 
 /// The Nature page.
 pub struct Nature {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     opened_for: Option<PathBuf>,
     table: NatureTable,

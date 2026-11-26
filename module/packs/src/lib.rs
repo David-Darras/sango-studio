@@ -160,7 +160,7 @@ impl Packs {
             ui.label(widget::hint("A pack is a .sangopack file with the species, the forms and the 3D models. Choose one or several: a pack that needs another one waits for it."));
             ui.add_space(6.0);
             ui.add_enabled_ui(!busy, |ui| {
-                if widget::button_styled(ui, egui::RichText::new("+ Install packs…").color(color::WHITE), Some(color::ACCENT)) {
+                if widget::button_styled(ui, egui::RichText::new("+ Install packs").color(color::WHITE), Some(color::ACCENT)) {
                     let mut dialog = rfd::FileDialog::new().add_filter("Species pack", &["sangopack"]).set_title("Choose the packs to install");
                     if Path::new("packs").is_dir() {
                         dialog = dialog.set_directory("packs");
@@ -231,7 +231,7 @@ impl Packs {
                         }
                     }
                 }
-                if installed.active && pack.map_or(false, |p| !p.icons.is_empty() || !p.item_icons.is_empty() || !p.model_names().is_empty()) && widget::button(ui, "Content…") {
+                if installed.active && pack.map_or(false, |p| !p.icons.is_empty() || !p.item_icons.is_empty() || !p.model_names().is_empty()) && widget::button(ui, "Content") {
                     show = Some(installed.id.clone());
                 }
                 ui.add_enabled_ui(!busy, |ui| {

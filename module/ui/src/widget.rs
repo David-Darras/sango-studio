@@ -1360,7 +1360,7 @@ pub fn unsaved_window(ctx: &egui::Context, what: &str) -> Option<Unsaved> {
 }
 
 /// The buttons of the top bar of a page, in the same order and with the same look on every page: `+ New …` (blue), `Delete` (two clicks),
-/// `Export…`, `Import…`, `Reset…`, then `Save` (blue when something changed, grey when there is nothing to save). A button that is `None` is
+/// `Export`, `Import`, `Reset`, then `Save` (blue when something changed, grey when there is nothing to save). A button that is `None` is
 /// not shown; `Some(false)` shows it greyed out.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ActionBar<'a> {
@@ -1385,7 +1385,7 @@ pub struct ActionClicks {
     pub save: bool,
 }
 
-/// The keyboard shortcuts of the top bar: Ctrl+N (+ New), Ctrl+E (Export…), Ctrl+I (Import…), Ctrl+S (Save).
+/// The keyboard shortcuts of the top bar: Ctrl+N (+ New), Ctrl+E (Export), Ctrl+I (Import), Ctrl+S (Save).
 pub const SHORTCUT_NEW: &str = "Ctrl+N";
 pub const SHORTCUT_EXPORT: &str = "Ctrl+E";
 pub const SHORTCUT_IMPORT: &str = "Ctrl+I";
@@ -1412,15 +1412,15 @@ pub fn action_bar(ui: &mut egui::Ui, bar: ActionBar) -> ActionClicks {
         ui.add_enabled_ui(enabled, |ui| clicks.delete = confirm_button(ui, "Delete", "Click again to delete"));
     }
     if let Some(enabled) = bar.export {
-        hover(ui.add_enabled_ui(enabled, |ui| clicks.export = button(ui, "Export…")), SHORTCUT_EXPORT);
+        hover(ui.add_enabled_ui(enabled, |ui| clicks.export = button(ui, "Export")), SHORTCUT_EXPORT);
         clicks.export |= enabled && shortcut(ui, egui::Key::E);
     }
     if let Some(enabled) = bar.import {
-        hover(ui.add_enabled_ui(enabled, |ui| clicks.import = button(ui, "Import…")), SHORTCUT_IMPORT);
+        hover(ui.add_enabled_ui(enabled, |ui| clicks.import = button(ui, "Import")), SHORTCUT_IMPORT);
         clicks.import |= enabled && shortcut(ui, egui::Key::I);
     }
     if let Some(enabled) = bar.reset {
-        ui.add_enabled_ui(enabled, |ui| clicks.reset = button(ui, "Reset…"));
+        ui.add_enabled_ui(enabled, |ui| clicks.reset = button(ui, "Reset"));
     }
     if let Some(changed) = bar.save {
         clicks.save = save_button(ui, changed);
@@ -1457,7 +1457,7 @@ pub fn field_name(ui: &mut egui::Ui, name: &str, changed: bool) -> (egui::Respon
     (response, back)
 }
 
-/// The window of the button `Reset…` of a page: what is reset, check boxes for the parts when there are some, and the buttons Reset and
+/// The window of the button `Reset` of a page: what is reset, check boxes for the parts when there are some, and the buttons Reset and
 /// Cancel. `open` is set to false when the window closes. Gives true when the user clicks Reset.
 pub fn reset_window(ctx: &egui::Context, open: &mut bool, what: &str, parts: &mut [(&str, &mut bool)]) -> bool {
     if !*open {
@@ -1489,7 +1489,7 @@ pub fn reset_window(ctx: &egui::Context, open: &mut bool, what: &str, parts: &mu
 const CLICK_FOCUS_KEY: &str = "sango_click_focus";
 
 /// Gives the focus to the widget of a click when the page does not do it: text boxes, menus, numbers, sliders, check boxes, radio
-/// buttons and selectable labels. Buttons (Save, Export…, Import…) do not take the focus. Call it after the page, in the same panel.
+/// buttons and selectable labels. Buttons (Save, Export, Import) do not take the focus. Call it after the page, in the same panel.
 pub fn focus_from_clicks(ui: &egui::Ui) {
     use egui::WidgetType as T;
     let ctx = ui.ctx();

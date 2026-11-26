@@ -134,7 +134,7 @@ fn clamp_level(level: usize, range: &RangeInclusive<usize>) -> usize {
 pub struct LevelingRate {
     /// The dump that the data comes from.
     root: Option<PathBuf>,
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     /// The tables that the user edits.
     table: Option<ExperienceTable>,

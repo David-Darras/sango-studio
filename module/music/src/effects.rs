@@ -45,7 +45,7 @@ impl Entry {
 
 #[derive(Default)]
 pub struct Effects {
-    /// The windows of the buttons Export… and Reset….
+    /// The windows of the buttons Export and Reset.
     export_open: bool,
     reset_open: bool,
     folder: Option<PathBuf>,

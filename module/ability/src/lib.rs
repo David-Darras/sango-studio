@@ -265,16 +265,16 @@ impl Ability {
                 })
                 .response
                 .on_hover_text(if self.is_custom() { "Deletes this new ability." } else { "Only a new ability can be deleted, not one of the game." });
-                if widget::button(ui, "Export…") {
+                if widget::button(ui, "Export") {
                     self.tools.export_open = true;
                 }
                 ui.add_enabled_ui(has_card, |ui| {
-                    if widget::button(ui, "Import…") {
+                    if widget::button(ui, "Import") {
                         self.tools.import_open = true;
                     }
                 });
                 ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset = widget::button(ui, "Reset…");
+                    reset = widget::button(ui, "Reset");
                 })
                 .response
                 .on_hover_text("Puts the texts or the reactions of one ability or of all the abilities back to the game: choose in the window.");

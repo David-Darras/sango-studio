@@ -256,7 +256,7 @@ pub struct Tools {
     pub parts: [bool; 7],
     /// The parts of the CSV files: Data, Moves, Evolutions, Texts.
     pub csv_parts: [bool; 4],
-    /// The windows of the buttons Export… and Import….
+    /// The windows of the buttons Export and Import.
     pub export_open: bool,
     pub import_open: bool,
 }
@@ -405,7 +405,7 @@ impl Species {
         }
     }
 
-    /// The windows of the buttons Export… and Import…: the parts to write or to read, for all the species.
+    /// The windows of the buttons Export and Import: the parts to write or to read, for all the species.
     pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
         for import in [false, true] {
             let shown = if import { self.tools.import_open } else { self.tools.export_open };

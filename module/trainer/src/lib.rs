@@ -97,7 +97,7 @@ pub struct Trainer {
     history: sango_ui::history::History<Open>,
     status: Option<(bool, String)>,
     item_list: Arc<Mutex<sango_ui::item_menu::ItemList>>,
-    /// The windows of the buttons Export…, Import… and Reset…, and the parts of a reset: the data and the team, the class.
+    /// The windows of the buttons Export, Import and Reset, and the parts of a reset: the data and the team, the class.
     export_open: bool,
     import_open: bool,
     reset_open: bool,
@@ -737,10 +737,10 @@ impl Trainer {
                             ui.label(widget::hint("No picture."));
                         }
                         ui.horizontal(|ui| {
-                            if ui.small_button("Export…").clicked() {
+                            if ui.small_button("Export").clicked() {
                                 action = Some((file, 0));
                             }
-                            if sd.is_some() && ui.small_button("Import…").clicked() {
+                            if sd.is_some() && ui.small_button("Import").clicked() {
                                 action = Some((file, 1));
                             }
                             if Store::picture_changed(sd, file) && ui.small_button("Reset").clicked() {
@@ -834,7 +834,7 @@ impl Trainer {
         self.reset_open |= clicks.reset;
     }
 
-    /// The windows of the buttons Export…, Import… and Reset….
+    /// The windows of the buttons Export, Import and Reset.
     fn windows(&mut self, ctx: &egui::Context, session: &Session) {
         let Some(sd) = session.sd.clone() else {
             self.export_open = false;

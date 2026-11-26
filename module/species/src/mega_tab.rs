@@ -186,7 +186,7 @@ impl Species {
                     let allowed = move |s: usize, f: usize| s == species && f > 0 && !megas.contains(&(f as u16)) && !pack_megas.contains(&(f as u16));
                     ui.add_enabled_ui(session.sd.is_some() && self.data.is_some() && total_active < MAX_ENTRIES, |ui| {
                         let mut chosen = (0, 0);
-                        if crate::menus::pokemon_menu(ui, "mega_add", &mut chosen, 300.0, Some(&allowed), Some("+ Add a Mega evolution…")) && chosen.0 != 0 {
+                        if crate::menus::pokemon_menu(ui, "mega_add", &mut chosen, 300.0, Some(&allowed), Some("+ Add a Mega evolution")) && chosen.0 != 0 {
                             add = Some(chosen.1);
                         }
                     })

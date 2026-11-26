@@ -23,7 +23,7 @@ const TABS: [&str; 2] = ["Statistics", "Shiny"];
 
 /// The Formula page.
 pub struct Formula {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     opened_for: Option<PathBuf>,
     formulas: Formulas,

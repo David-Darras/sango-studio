@@ -86,7 +86,7 @@ pub struct Tools {
     pub parts: [bool; 4],
     /// The parts of the CSV files: Data, Texts.
     pub csv_parts: [bool; 2],
-    /// The windows of the buttons Export… and Import….
+    /// The windows of the buttons Export and Import.
     pub export_open: bool,
     pub import_open: bool,
 }
@@ -318,7 +318,7 @@ impl Item {
         });
     }
 
-    /// The windows of the buttons Export… and Import…: the CSV files of all the items, for the parts that the user ticks.
+    /// The windows of the buttons Export and Import: the CSV files of all the items, for the parts that the user ticks.
     pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
         for import in [false, true] {
             let shown = if import { self.tools.import_open } else { self.tools.export_open };

@@ -62,8 +62,7 @@ struct Open {
 
 /// The Font page.
 pub struct FontPage {
-    /// The windows of the buttons Export…, Import… and Reset….
-    export_open: bool,
+    /// The windows of the buttons Export, Import and Reset.
     import_open: bool,
     reset_open: bool,
     opened_for: Option<(PathBuf, u32)>,
@@ -87,7 +86,7 @@ pub struct FontPage {
 
 impl Default for FontPage {
     fn default() -> Self {
-        FontPage { export_open: false, import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 1, system: None, pc_filter: String::new(), pc_choice: None, game_filter: String::new(), pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
+        FontPage { import_open: false, reset_open: false, opened_for: None, entries: Vec::new(), open: None, chosen: (0, 0), text: SAMPLE.to_string(), zoom: 1, system: None, pc_filter: String::new(), pc_choice: None, game_filter: String::new(), pc_settings: ttf::Settings { size: 20.0, latin_only: true, outline: true }, status: None, version: 0 }
     }
 }
 
@@ -319,63 +318,31 @@ impl FontPage {
             self.status = Some(self.save(sd, id));
             *reload = true;
         }
-        self.export_open |= clicks.export;
+        // Export: the sheet of the glyphs (a PNG and a CSV file of the widths).
+        if clicks.export {
+            self.status = Some(self.export_sheet(id));
+        }
         self.import_open |= clicks.import;
         self.reset_open |= clicks.reset;
-        // Export… and Import…: the sheet of the glyphs (a PNG and a CSV file of the widths) or the font file.
-        for import in [false, true] {
-            let shown = if import { self.import_open } else { self.export_open };
-            if !shown {
-                continue;
-            }
-            let (mut open_window, mut sheet, mut file, mut close, mut computer) = (true, false, false, false, false);
-            egui::Window::new(if import { "Import" } else { "Export" }).collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open_window).show(ui.ctx(), |ui| {
+        // Import: a sheet of the glyphs, or a font of the computer.
+        if self.import_open {
+            let (mut open_window, mut sheet, mut close, mut computer) = (true, false, false, false);
+            egui::Window::new("Import").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).open(&mut open_window).show(ui.ctx(), |ui| {
                 ui.set_max_width(460.0);
                 ui.horizontal(|ui| {
                     sheet = ui.button("Sheet (PNG + CSV)").on_hover_text("A PNG picture of the glyphs, 10 on a line, and a CSV file of their widths. Draw over the PNG and keep its size.").clicked();
-                    file = widget::button(ui, "Font file (.bcfnt)");
                     close = widget::button(ui, "Cancel");
                 });
-                if import {
-                    ui.separator();
-                    ui.label(egui::RichText::new("From a font of the computer").strong());
-                    computer = self.computer_font(ui);
-                }
+                ui.separator();
+                ui.label(egui::RichText::new("From a font of the computer").strong());
+                computer = self.computer_font(ui);
             });
             if sheet {
-                if import {
-                    let ctx = ui.ctx().clone();
-                    self.status = Some(self.import_sheet(&ctx));
-                } else {
-                    self.status = Some(self.export_sheet(id));
-                }
+                let ctx = ui.ctx().clone();
+                self.status = Some(self.import_sheet(&ctx));
             }
-            if file {
-                if import {
-                    if let Some(path) = rfd::FileDialog::new().set_title("Font to use").add_filter("Font", &["bcfnt", "bin"]).pick_file() {
-                        match std::fs::read(&path).map_err(|e| e.to_string()).and_then(Font::parse) {
-                            Ok(font) => {
-                                let ctx = ui.ctx().clone();
-                                self.show(&ctx, font);
-                                self.status = Some((true, "File read. Check the preview, then save.".into()));
-                            }
-                            Err(e) => self.status = Some((false, format!("This file is not a font that the game can use: {e}"))),
-                        }
-                    }
-                } else if let Some(path) = rfd::FileDialog::new().set_title("Export the font").set_file_name(format!("font_{id}.bcfnt")).add_filter("Font", &["bcfnt"]).save_file() {
-                    let bytes = self.open.as_ref().map(|o| o.font.bytes().to_vec()).unwrap_or_default();
-                    self.status = Some(match std::fs::write(&path, bytes) {
-                        Ok(()) => (true, format!("Exported to {}.", path.display())),
-                        Err(e) => (false, format!("{}: {e}", path.display())),
-                    });
-                }
-            }
-            if sheet || file || close || computer || !open_window {
-                if import {
-                    self.import_open = false;
-                } else {
-                    self.export_open = false;
-                }
+            if sheet || close || computer || !open_window {
+                self.import_open = false;
             }
         }
         if picked {
@@ -405,7 +372,7 @@ impl FontPage {
             let combo = egui::ComboBox::from_id_salt("font_pc_choice").selected_text(shown).width(260.0).height(360.0).show_ui(ui, |ui| {
                 ui.add(egui::TextEdit::singleline(&mut self.pc_filter).hint_text("Search").desired_width(230.0));
                 let filter = self.pc_filter.to_lowercase();
-                if ui.selectable_label(false, "A .ttf or .otf file…").clicked() {
+                if ui.selectable_label(false, "A .ttf or .otf file").clicked() {
                     if let Some(path) = rfd::FileDialog::new().set_title("Font of the computer").add_filter("Font", &["ttf", "otf"]).pick_file() {
                         let name = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                         let list = self.system.get_or_insert_with(Vec::new);

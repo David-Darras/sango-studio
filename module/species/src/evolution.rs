@@ -178,7 +178,7 @@ impl EvolutionTab {
                     // The same menu as everywhere: the Pokémon that it evolves into, with its form.
                     ui.add_enabled_ui(self.evolutions.has_room(), |ui| {
                         let mut chosen = (0, 0);
-                        if crate::menus::pokemon_menu(ui, "evolution_add", &mut chosen, 280.0, None, Some("+ Add an evolution…")) && chosen.0 != 0 {
+                        if crate::menus::pokemon_menu(ui, "evolution_add", &mut chosen, 280.0, None, Some("+ Add an evolution")) && chosen.0 != 0 {
                             let place = self.evolutions.list.len();
                             self.evolutions.list.push(Evolution { method: 4, argument: default_argument(Argument::Level), species: chosen.0 as u16 });
                             if let Some(form) = self.forms.get_mut(place) {

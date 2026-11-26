@@ -246,7 +246,7 @@ impl Builder {
                     ui.ctx().copy_text(text);
                     self.status = Some((true, "The team is copied: paste it in the team builder of Pokémon Showdown.".to_string()));
                 }
-                if ui.button("Import a team…").clicked() {
+                if ui.button("Import a team").clicked() {
                     self.show_text = !self.show_text;
                 }
                 ui.hyperlink_to("Open the team builder of Pokémon Showdown", SHOWDOWN_LINK);
@@ -527,7 +527,7 @@ impl Builder {
             ui.add_space(6.0);
             row(ui, "Popular set", &mut |ui| {
                 let mut chosen = 0u16;
-                if picker(ui, &format!("builder_set_{place}"), "Load a set of the players…", width, &mut chosen, None, || {
+                if picker(ui, &format!("builder_set_{place}"), "Load a set of the players", width, &mut chosen, None, || {
                     vec![Group { title: "Sets of Smogon".to_string(), entries: sets.iter().enumerate().map(|(at, set)| (at as u16 + 1, format!("{} — {}", set.name, entry(&ITEM_NAMES, set.item).1))).collect() }]
                 }) && chosen > 0 {
                     let set = &sets[chosen as usize - 1];

@@ -360,17 +360,17 @@ impl Item {
                 .response
                 .on_hover_text("Deletes this new item.");
                 ui.add_enabled_ui(self.garc.is_some(), |ui| {
-                    export = widget::button(ui, "Export…");
+                    export = widget::button(ui, "Export");
                 })
                 .response
                 .on_hover_text("Writes the CSV files of all the items.");
                 ui.add_enabled_ui(has_card, |ui| {
-                    import = widget::button(ui, "Import…");
+                    import = widget::button(ui, "Import");
                 })
                 .response
                 .on_hover_text("Reads the CSV files of all the items.");
                 ui.add_enabled_ui(has_card && !self.is_custom(), |ui| {
-                    reset_more = widget::button(ui, "Reset…");
+                    reset_more = widget::button(ui, "Reset");
                 })
                 .response
                 .on_hover_text("Reset one item or all the items, for the parts that you choose.");

@@ -19,7 +19,7 @@ const FOLDER: &str = "effect";
 
 /// The page.
 pub struct EffectPage {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     /// The file that the user chose while the open effect had changes that were not saved: the window asks first.
     pending_file: Option<usize>,
@@ -440,10 +440,10 @@ fn pictures_card(ui: &mut egui::Ui, effect: &mut Effect, textures: &mut Vec<Opti
                         ui.painter().image(texture.id(), shown, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                     }
                     ui.horizontal(|ui| {
-                        if widget::button(ui, "Export PNG…") {
+                        if widget::button(ui, "Export PNG") {
                             *status = export_picture(effect, place, &picture.name);
                         }
-                        if widget::button(ui, "Import PNG…") {
+                        if widget::button(ui, "Import PNG") {
                             let result = import_picture(effect, place);
                             if matches!(result, Some((true, _))) {
                                 changed = true;

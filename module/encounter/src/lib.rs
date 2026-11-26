@@ -25,7 +25,7 @@ const DEXNAV: usize = SUMMARY + 1;
 
 /// The Encounter page.
 pub struct EncounterPage {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     zones: Option<Zones>,
     opened_for: Option<(PathBuf, PathBuf)>,
@@ -294,7 +294,7 @@ impl EncounterPage {
         });
     }
 
-    /// The window of the button Reset…: the table of the game comes back for the open map.
+    /// The window of the button Reset: the table of the game comes back for the open map.
     fn reset_dialog(&mut self, ctx: &egui::Context, session: &Session) {
         let what = format!("The wild Pokémon of {}", self.names.get(self.zone).cloned().unwrap_or_default());
         if widget::reset_window(ctx, &mut self.reset_open, &what, &mut []) {

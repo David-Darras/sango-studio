@@ -972,21 +972,21 @@ impl Species {
                 .response
                 .on_hover_text(if added { "Deletes this added species-form: its data, and its place in the lists." } else { "Only an added species-form can be deleted, not one of the game." });
                 ui.add_enabled_ui(self.garc.is_some(), |ui| {
-                    if widget::button(ui, "Export…") {
+                    if widget::button(ui, "Export") {
                         self.tools.export_open = true;
                     }
                 })
                 .response
                 .on_hover_text("Writes CSV files of all the species: choose the parts in the window.");
                 ui.add_enabled_ui(has_card, |ui| {
-                    if widget::button(ui, "Import…") {
+                    if widget::button(ui, "Import") {
                         self.tools.import_open = true;
                     }
                 })
                 .response
                 .on_hover_text("Reads CSV files of all the species: choose the parts in the window.");
                 ui.add_enabled_ui(has_card, |ui| {
-                    reset_more = widget::button(ui, "Reset…");
+                    reset_more = widget::button(ui, "Reset");
                 })
                 .response
                 .on_hover_text("Puts parts of one form, one species or all the species back to the romfs: choose in the window.");

@@ -33,7 +33,7 @@ struct Item {
 
 /// The page.
 pub struct ScriptPage {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     root: Option<std::path::PathBuf>,
     error: Option<String>,

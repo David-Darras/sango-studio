@@ -32,7 +32,7 @@ pub struct Tools {
     /// The parts of a reset: the texts, the reactions.
     pub reset_texts: bool,
     pub reset_reactions: bool,
-    /// The windows of the buttons Export… and Import….
+    /// The windows of the buttons Export and Import.
     pub export_open: bool,
     pub import_open: bool,
 }
@@ -180,7 +180,7 @@ impl Ability {
         }
     }
 
-    /// The windows of the buttons Export… and Import…: the texts of all the abilities in a CSV file.
+    /// The windows of the buttons Export and Import: the texts of all the abilities in a CSV file.
     pub fn csv_windows(&mut self, ctx: &egui::Context, session: &Session) {
         for import in [false, true] {
             let shown = if import { self.tools.import_open } else { self.tools.export_open };

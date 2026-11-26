@@ -24,7 +24,7 @@ const MAP_PICTURE: u32 = 0;
 
 /// The DexNav tab.
 pub struct NaviView {
-    /// The window of the button Reset….
+    /// The window of the button Reset.
     reset_open: bool,
     navi: Option<Navi>,
     error: Option<String>,

@@ -144,7 +144,7 @@ impl Home {
             ui.label(widget::hint("Removes all the files of the studio: the changes that you made, the installed packs, the 3D models, the cries, the texts, the music files and the sound effects. The game goes back to its own data. The dump of the game, the settings of the program, the maps of the Overworld page and the other files of the plugin (the names, the scripts) stay."));
             ui.add_space(6.0);
             if !self.asking {
-                if widget::button(ui, "Start from zero…") {
+                if widget::button(ui, "Start from zero") {
                     self.asking = true;
                     self.understood = false;
                     self.erased = None;
