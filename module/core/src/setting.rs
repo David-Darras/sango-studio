@@ -1,12 +1,16 @@
 use std::path::PathBuf;
 
-/// What Sango Studio keeps between two runs: the two folders that the user gave.
+/// What Sango Studio keeps between two runs: the folders that the user gave, and the open page.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Settings {
     /// The dump of the romfs.
     pub dump: Option<String>,
     /// The folder of the SD card.
     pub sd: Option<String>,
+    /// The folder of the Sango plugin, which the button Run builds.
+    pub plugin: Option<String>,
+    /// The folder of devkitPro, which has the shell of the build.
+    pub devkitpro: Option<String>,
     /// The title of the page that was open at the last run.
     pub page: Option<String>,
 }
@@ -42,6 +46,8 @@ pub fn parse(text: &str) -> Settings {
         match key.trim() {
             "dump" => settings.dump = Some(value.to_string()),
             "sd" => settings.sd = Some(value.to_string()),
+            "plugin" => settings.plugin = Some(value.to_string()),
+            "devkitpro" => settings.devkitpro = Some(value.to_string()),
             "page" => settings.page = Some(value.to_string()),
             _ => {}
         }
@@ -57,6 +63,12 @@ pub fn format(settings: &Settings) -> String {
     }
     if let Some(sd) = &settings.sd {
         text.push_str(&format!("sd={sd}\n"));
+    }
+    if let Some(plugin) = &settings.plugin {
+        text.push_str(&format!("plugin={plugin}\n"));
+    }
+    if let Some(devkitpro) = &settings.devkitpro {
+        text.push_str(&format!("devkitpro={devkitpro}\n"));
     }
     if let Some(page) = &settings.page {
         text.push_str(&format!("page={page}\n"));
@@ -94,15 +106,13 @@ mod test {
 
     #[test]
     fn the_settings_are_read_back() {
-        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), page: None };
+        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), plugin: Some("C:/work/sango_plugin".into()), devkitpro: Some("C:/devkitPro".into()), page: None };
         assert_eq!(parse(&format(&settings)), settings);
     }
 
     #[test]
     fn a_missing_or_empty_value_is_none() {
         assert_eq!(parse("dump=\nsd=  \nother=1\nno equal sign"), Settings::default());
-        // The keys of the old code editor are not used any more.
-        assert_eq!(parse("devkitpro=C:/devkitPro\nplugin=C:/work"), Settings::default());
         assert_eq!(parse("sd=D:/card").sd.as_deref(), Some("D:/card"));
         assert_eq!(format(&Settings::default()), "");
     }

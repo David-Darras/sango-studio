@@ -273,13 +273,7 @@ impl Module for Formula {
             self.status = Some((true, "The formulas of the game are back. Save to keep them.".to_string()));
         }
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            for (place, name) in TABS.iter().enumerate() {
-                if widget::tab_button(ui, name, self.tab == place, false).clicked() {
-                    self.tab = place;
-                }
-            }
-        });
+        widget::tabs(ui, "formula", &TABS, &mut self.tab);
         ui.add_space(6.0);
         egui::ScrollArea::vertical().id_salt("formula_scroll").auto_shrink([false, false]).show(ui, |ui| {
             if self.tab == 0 {

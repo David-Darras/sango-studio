@@ -1,0 +1,15 @@
+[package]
+name = "sango-title"
+version.workspace = true
+edition.workspace = true
+description = "The Title Screen page of Sango Studio: the pictures, the Pokémon and the sequences of the title screen."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+sango-layout.workspace = true
+sango-species-base.workspace = true
+sango-species.workspace = true
+sango-music.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
+rfd.workspace = true

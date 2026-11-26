@@ -390,15 +390,14 @@ impl EffectPage {
             ui.label(widget::title("Layers"));
             ui.label(widget::hint("An effect is made of layers. Each layer makes its own particles: choose one to change it."));
             ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                for layer in 0..count {
+            let labels: Vec<String> = (0..count)
+                .map(|layer| {
                     let name = effect.emitter_name(layer);
-                    let label = if name.is_empty() { format!("Layer {}", layer + 1) } else { format!("{}  {}", layer + 1, name) };
-                    if widget::tab_button(ui, &label, self.layer == layer, false).clicked() {
-                        self.layer = layer;
-                    }
-                }
-            });
+                    if name.is_empty() { format!("Layer {}", layer + 1) } else { format!("{}  {}", layer + 1, name) }
+                })
+                .collect();
+            let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
+            widget::tabs(ui, "effect_layer", &labels, &mut self.layer);
         });
         let layer = self.layer;
         ui.add_space(8.0);

@@ -1,0 +1,10 @@
+[package]
+name = "sango-feature"
+version.workspace = true
+edition.workspace = true
+description = "The Features page of Sango Studio: turns features of the plugin on or off."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true

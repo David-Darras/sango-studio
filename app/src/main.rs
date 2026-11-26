@@ -8,7 +8,7 @@ use sango_ui::{widget, Module, Session};
 const SIDE_BAR_WIDTH: f32 = 210.0;
 
 /// The sections of the side bar: the place of their first page in [`App::pages`], and their title.
-const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (19, "Look and sound"), (22, "Tools")];
+const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (19, "Look and sound"), (23, "Tools")];
 
 struct App {
     modules: Vec<Box<dyn Module>>,
@@ -70,11 +70,13 @@ impl App {
             Box::new(sango_character::Character::default()),
             Box::new(sango_script::ScriptPage::default()),
             // Look and sound.
+            Box::new(sango_title::TitlePage::default()),
             Box::new(sango_layout::LayoutPage::default()),
             Box::new(sango_font::FontPage::default()),
             Box::new(sango_music::MusicPage::default()),
             // Tools.
             Box::new(sango_packs::Packs::default()),
+            Box::new(sango_feature::FeaturePage::default()),
             Box::new(sango_archive::Archive::default()),
         ]
     }
@@ -1029,8 +1031,8 @@ mod side_bar_test {
     fn the_sections_start_at_their_first_page() {
         let pages = App::pages();
         let first: Vec<&str> = SECTIONS.iter().map(|(place, _)| pages[*place].title()).collect();
-        assert_eq!(first, ["Species", "Formula", "3D Maps", "Layout", "Packs"]);
+        assert_eq!(first, ["Species", "Formula", "3D Maps", "Title Screen", "Packs"]);
         assert_eq!(pages[0].title(), "Home");
-        assert_eq!(pages.len(), 24);
+        assert_eq!(pages.len(), 26);
     }
 }

@@ -26,6 +26,73 @@ fn morton(i: usize) -> (usize, usize) {
     (x, y)
 }
 
+/// The bytes of a `.bclim` file with other pixels: `rgba` has the size of the image, row by row from the top. The image keeps its
+/// format. A format with grey values takes the brightness of each pixel; a format with the alpha only takes the alpha.
+pub fn encode(original: &[u8], rgba: &[u8]) -> Result<Vec<u8>, String> {
+    if let Ok(clim) = Clim::parse(original) {
+        return Ok(clim.with_rgba(rgba)?.to_bytes());
+    }
+    // The size and the format are checked by the reading.
+    let picture = decode(original)?;
+    let (width, height) = (picture.width, picture.height);
+    if rgba.len() != width * height * 4 {
+        return Err(format!("The picture must have {width} × {height} pixels."));
+    }
+    let footer = &original[original.len() - 40..];
+    let format = u32::from_le_bytes(footer[0x20..0x24].try_into().unwrap());
+    let (sx, sy) = (side(width), side(height));
+    // The pixels outside of the picture stay as they are.
+    let mut out = original.to_vec();
+    for i in 0..sx * sy {
+        let (dx, dy) = morton(i % 64);
+        let tile = i / 64;
+        let (x, y) = ((tile % (sx / 8)) * 8 + dx, (tile / (sx / 8)) * 8 + dy);
+        if x >= width || y >= height {
+            continue;
+        }
+        let [r, g, b, a] = <[u8; 4]>::try_from(&rgba[(y * width + x) * 4..][..4]).unwrap();
+        let light = ((u32::from(r) * 77 + u32::from(g) * 150 + u32::from(b) * 29) >> 8) as u8;
+        match format {
+            0 => out[i] = light,
+            1 => out[i] = a,
+            2 => out[i] = (light & 0xF0) | (a >> 4),
+            3 => out[i * 2..i * 2 + 2].copy_from_slice(&[a, light]),
+            5 => {
+                let value = u16::from(r >> 3) << 11 | u16::from(g >> 2) << 5 | u16::from(b >> 3);
+                out[i * 2..i * 2 + 2].copy_from_slice(&value.to_le_bytes());
+            }
+            6 => out[i * 3..i * 3 + 3].copy_from_slice(&[b, g, r]),
+            _ => {
+                let value = if format == 12 { light >> 4 } else { a >> 4 };
+                let shift = if i % 2 == 0 { 0 } else { 4 };
+                out[i / 2] = (out[i / 2] & !(15 << shift)) | value << shift;
+            }
+        }
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// A small image of each simple format: the pixels that are read are written back with the same bytes.
+    #[test]
+    fn the_simple_formats_are_written_as_they_were_read() {
+        for (format, bits) in [(0u32, 8), (1, 8), (2, 8), (3, 16), (5, 16), (6, 24), (12, 4), (13, 4)] {
+            let mut bytes: Vec<u8> = (0..16 * 8 * bits / 8).map(|n| (n * 37 % 251) as u8).collect();
+            let mut footer = [0u8; 40];
+            footer[..4].copy_from_slice(b"CLIM");
+            footer[0x1C..0x1E].copy_from_slice(&12u16.to_le_bytes());
+            footer[0x1E..0x20].copy_from_slice(&8u16.to_le_bytes());
+            footer[0x20..0x24].copy_from_slice(&format.to_le_bytes());
+            bytes.extend_from_slice(&footer);
+            let picture = decode(&bytes).unwrap();
+            assert_eq!(encode(&bytes, &picture.rgba).unwrap(), bytes, "format {format}");
+        }
+    }
+}
+
 /// Decodes the bytes of a `.bclim` file.
 pub fn decode(bytes: &[u8]) -> Result<Picture, String> {
     if let Ok(clim) = Clim::parse(bytes) {

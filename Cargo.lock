@@ -2826,6 +2826,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-feature"
+version = "0.1.0"
+dependencies = [
+ "rfd",
+ "sango-core",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-font"
 version = "0.1.0"
 dependencies = [
@@ -3049,6 +3058,7 @@ dependencies = [
  "sango-core",
  "sango-effect",
  "sango-encounter",
+ "sango-feature",
  "sango-font",
  "sango-formula",
  "sango-home",
@@ -3063,10 +3073,25 @@ dependencies = [
  "sango-player",
  "sango-script",
  "sango-species",
+ "sango-title",
  "sango-trainer",
  "sango-type",
  "sango-ui",
  "sango-zone",
+]
+
+[[package]]
+name = "sango-title"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "rfd",
+ "sango-core",
+ "sango-layout",
+ "sango-music",
+ "sango-species",
+ "sango-species-base",
+ "sango-ui",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@ const RELOAD_PATH_SIZE: usize = 64;
 const RELOAD_MAX_PATHS: usize = 256;
 
 /// The paths in the folder of the studio that the plugin reads: the other files stay on the computer. A folder ends with `/`.
-const PUBLISHED: [&str; 33] = [
+const PUBLISHED: [&str; 35] = [
     "reload.bin",
     "names/",
     "font/",
@@ -46,6 +46,8 @@ const PUBLISHED: [&str; 33] = [
     "nature/",
     "overworld/model/",
     "player/",
+    "title/",
+    "features.ini",
 ];
 
 /// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs) and the maps of

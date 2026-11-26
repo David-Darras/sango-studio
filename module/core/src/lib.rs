@@ -4,7 +4,7 @@
 
 mod dump;
 mod sd;
-mod setting;
+pub mod setting;
 
 pub mod backup;
 pub mod bundle;
@@ -110,7 +110,7 @@ impl Session {
         setting::write(&setting::Settings {
             dump: self.dump.as_ref().map(|d| d.root().to_string_lossy().to_string()),
             sd: self.sd.as_ref().map(|s| s.root().to_string_lossy().to_string()),
-            page: setting::read().page,
+            ..setting::read()
         });
     }
 }

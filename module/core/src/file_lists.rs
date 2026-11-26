@@ -39,6 +39,9 @@ pub fn folders() -> Vec<(String, usize)> {
         ("player/icon".to_string(), 108),
         ("player/intro".to_string(), 269),
         ("player/soaring_model".to_string(), 254),
+        // The Title Screen page: the models of the scene and the two sequences. The logo is in the layouts of the archive 152.
+        ("title/data".to_string(), 152),
+        ("title/sequence".to_string(), 162),
         ("font".to_string(), 167),
         ("item/icon".to_string(), 92),
         ("battle/background".to_string(), 136),

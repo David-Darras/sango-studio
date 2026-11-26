@@ -1,7 +1,9 @@
-//! The start page: the user gives the folders that Sango Studio needs.
+//! The start page: the user gives the folders that Sango Studio needs, and runs the game.
 //!
-//! The four folders are in one card. A folder is used when the user presses Enter in its field, or picks it
-//! with Browse. The card "Start from zero" is at the top.
+//! The two folders of the studio are in one card, and the card "Run" under it has the two folders of the build. A folder is used
+//! when the user presses Enter in its field, or picks it with Browse. The card "Start from zero" is at the top.
+
+mod run;
 
 use sango_core::SD_FOLDER_NAME;
 use sango_ui::theme::color;
@@ -30,6 +32,7 @@ struct Field {
 pub struct Home {
     dump: Field,
     sd: Field,
+    run: run::Run,
     /// True once the fields took the folders of the session.
     filled: bool,
     /// The card "Start from zero": the user asked and did not answer yet, the box of the answer, and what happened.
@@ -132,6 +135,8 @@ impl Home {
                 self.sd.error = session.set_sd(&self.sd.text).err();
             }
         });
+        ui.add_space(12.0);
+        self.run.card(ui);
     }
 }
 

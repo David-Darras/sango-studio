@@ -521,18 +521,13 @@ impl Module for PlayerPage {
             self.forget_pictures();
             self.steps.clear();
         }
-        ui.horizontal(|ui| {
-            for (player, name) in PLAYERS.iter().enumerate() {
-                if widget::tab_button(ui, name, self.player == player, false).clicked() && self.player != player {
-                    // The icon of the menu "Use the picture of" follows the character.
-                    self.player = player;
-                    if let Kind::Icon(file) = entries(player)[0].kind {
-                        (self.source, self.icon) = (file, file);
-                    }
-                    self.status = None;
-                }
+        if widget::tabs(ui, "player", &PLAYERS, &mut self.player) {
+            // The icon of the menu "Use the picture of" follows the character.
+            if let Kind::Icon(file) = entries(self.player)[0].kind {
+                (self.source, self.icon) = (file, file);
             }
-        });
+            self.status = None;
+        }
         ui.add_space(6.0);
         ui.horizontal_top(|ui| {
             ui.vertical(|ui| {

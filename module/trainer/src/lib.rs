@@ -980,13 +980,7 @@ impl Module for Trainer {
                 self.top_bar(ui, session);
                 self.windows(ui.ctx(), session);
                 ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    for (place, name) in TABS.iter().enumerate() {
-                        if widget::tab_button(ui, name, self.tab == place, false).clicked() {
-                            self.tab = place;
-                        }
-                    }
-                });
+                widget::tabs(ui, "trainer", &TABS, &mut self.tab);
                 ui.add_space(6.0);
                 egui::ScrollArea::vertical().id_salt("trainer_tab").auto_shrink([false, false]).show(ui, |ui| match self.tab {
                     0 => self.general_tab(ui),

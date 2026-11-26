@@ -330,20 +330,11 @@ impl EncounterPage {
     }
 
     fn kind_tabs(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            for (place, method) in METHODS.iter().enumerate() {
-                let active = self.table.as_ref().is_some_and(|t| t.rates[method.rate_at] > 0);
-                if widget::tab_button(ui, method.name, self.tab == place, active).clicked() {
-                    self.tab = place;
-                }
-            }
-            if widget::tab_button(ui, "Summary", self.tab == SUMMARY, false).clicked() {
-                self.tab = SUMMARY;
-            }
-            if widget::tab_button(ui, "DexNav", self.tab == DEXNAV, false).clicked() {
-                self.tab = DEXNAV;
-            }
-        });
+        // The kinds of places, then the two other tabs: their places are SUMMARY and DEXNAV.
+        let names: Vec<&str> = METHODS.iter().map(|method| method.name).chain(["Summary", "DexNav"]).collect();
+        // A kind of place that has wild Pokémon glows.
+        let table = self.table.as_ref();
+        widget::marked_tabs(ui, "encounter", &names, |place| METHODS.get(place).zip(table).is_some_and(|(method, table)| table.rates[method.rate_at] > 0), &mut self.tab);
     }
 
     /// The rate of a kind of place: the chance of a meeting, or the table that the game uses.

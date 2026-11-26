@@ -1006,6 +1006,21 @@ pub fn replace_texture(data: &[u8], name: &str, rgba: &[u8]) -> Result<Vec<u8>, 
     Ok(out)
 }
 
+/// Gives the bytes of a model file where a picture has again the bytes that it has in another copy of the same file, so the
+/// picture comes back without a loss.
+pub fn copy_texture(data: &[u8], from: &[u8], name: &str) -> Result<Vec<u8>, String> {
+    let (start, format, width, height) = find_texture(data, name)?;
+    let (source, from_format, from_width, from_height) = find_texture(from, name)?;
+    if (format, width, height) != (from_format, from_width, from_height) {
+        return Err(format!("The picture {name} is not the same in the two files."));
+    }
+    let size = texture_size(format, width, height);
+    let bytes = from.get(source..source + size).ok_or("The picture is outside of the file.")?;
+    let mut out = data.to_vec();
+    out.get_mut(start..start + size).ok_or("The picture is outside of the file.")?.copy_from_slice(bytes);
+    Ok(out)
+}
+
 /// Decodes a block of 4 × 4 pixels of ETC1, row after row.
 fn etc1_block(block: u64) -> [[u8; 3]; 16] {
     let mut out = [[0u8; 3]; 16];

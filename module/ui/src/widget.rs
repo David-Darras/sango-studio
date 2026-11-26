@@ -423,6 +423,9 @@ pub fn update_navigation(ui: &mut egui::Ui) {
         ui.ctx().data(|d| d.get_temp::<bool>(id.with("handles_arrows")).unwrap_or(false))
     });
 
+    // From a button, the plain arrow left goes to the widget at the left when there is one (else it goes to the side bar, below).
+    let has_left = widgets.iter().find(|w| Some(w.id) == current_id).is_some_and(|cur| cur.rect.is_positive() && find_spatial_neighbor(&widgets, cur, Direction::Left).is_some());
+
     // 1. Check for 2D spatial navigation via Ctrl+Arrow (or Cmd+Arrow on macOS):
     let mut nav_dir = None;
     if !handles_arrows {
@@ -451,6 +454,9 @@ pub fn update_navigation(ui: &mut egui::Ui) {
                 }
                 if nav_dir.is_none() && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight) {
                     nav_dir = Some(Direction::Right);
+                }
+                if nav_dir.is_none() && has_left && i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft) {
+                    nav_dir = Some(Direction::Left);
                 }
             }
         });
@@ -654,7 +660,7 @@ pub fn button_styled(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill:
 
 /// [`button_styled`] with the response of the button, for a text on hover: a text on the response of the zone around the button never
 /// shows. Gives also true when the button is clicked.
-fn button_response(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill: Option<egui::Color32>) -> (egui::Response, bool) {
+pub fn button_response(ui: &mut egui::Ui, text: impl Into<egui::WidgetText>, fill: Option<egui::Color32>) -> (egui::Response, bool) {
     let mut b = egui::Button::new(text);
     if let Some(c) = fill {
         b = b.fill(c);
@@ -763,6 +769,105 @@ pub fn scroll_to_chosen(ui: &egui::Ui, row: &egui::Response, chosen: bool) {
     if changed {
         row.scroll_to_me(None);
     }
+}
+
+/// The id of a tab of [`tabs`], for the keys and the tests.
+pub fn tab_id(id_salt: &str, place: usize) -> egui::Id {
+    egui::Id::new(("sango_tab", id_salt, place))
+}
+
+/// A row of tab buttons that the keys reach: the arrows go from a tab to the next one, and the tab that the focus comes to opens.
+/// When the focus comes into the row from outside, it goes to the open tab. Gives true when the open tab changed.
+pub fn tabs(ui: &mut egui::Ui, id_salt: &str, names: &[&str], chosen: &mut usize) -> bool {
+    marked_tabs(ui, id_salt, names, |_| false, chosen)
+}
+
+/// [`tabs`] where some tabs glow (`marked`), for example the ones that have something in them.
+pub fn marked_tabs(ui: &mut egui::Ui, id_salt: &str, names: &[&str], marked: impl Fn(usize) -> bool, chosen: &mut usize) -> bool {
+    let before = *chosen;
+    // The tab of the row that had the focus at the frame before.
+    let key = egui::Id::new(("sango_tabs", id_salt));
+    let had: Option<usize> = ui.data(|d| d.get_temp::<Option<usize>>(key)).flatten();
+    let mut has = (0..names.len()).find(|&place| is_active(ui, tab_id(id_salt, place)));
+    if let Some(place) = has.filter(|_| page_has_focus(ui)) {
+        if had.is_some() && had != has {
+            *chosen = place;
+        } else if place != *chosen && *chosen < names.len() {
+            // The focus came from outside, or the page changed the tab: the focus goes to the open tab.
+            set_active_id(ui, tab_id(id_salt, *chosen));
+            has = Some(*chosen);
+            ui.ctx().request_repaint();
+        }
+    }
+    ui.data_mut(|d| d.insert_temp(key, has));
+    ui.horizontal_wrapped(|ui| {
+        for (place, name) in names.iter().enumerate() {
+            let id = tab_id(id_salt, place);
+            let focused = is_active(ui, id) && page_has_focus(ui);
+            let response = tab_button(ui, name, *chosen == place, focused || marked(place));
+            register_focusable(ui, id, response.rect);
+            ui.ctx().data_mut(|d| d.insert_temp(id.with("is_button"), true));
+            if response.clicked() {
+                *chosen = place;
+                set_active_id(ui, id);
+                ui.data_mut(|d| d.insert_temp(key, Some(place)));
+                ui.ctx().request_repaint();
+            }
+        }
+    });
+    *chosen != before
+}
+
+/// A check box that the keys reach: Enter or Space change it. The arrows go to the next widget.
+pub fn checkbox(ui: &mut egui::Ui, on: &mut bool, text: &str) -> egui::Response {
+    let mut response = ui.checkbox(on, text);
+    let id = response.id;
+    register_focusable(ui, id, response.rect);
+    ui.ctx().data_mut(|d| d.insert_temp(id.with("is_button"), true));
+    if response.clicked() {
+        set_active_id(ui, id);
+    }
+    if is_active(ui, id) && page_has_focus(ui) {
+        glow(ui, response.rect, 6.0);
+        scroll_active_into_view(ui, &response);
+        if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter) || i.consume_key(egui::Modifiers::NONE, egui::Key::Space)) {
+            *on = !*on;
+            response.mark_changed();
+        }
+    }
+    response
+}
+
+/// A decimal number that the keys reach: drag it or type it; when it has the focus, Up and Down add or take `step` (ten times more
+/// with Shift). Gives the response of the field, and changed when the keys changed the value too.
+pub fn decimal(ui: &mut egui::Ui, value: &mut f32, step: f32, range: std::ops::RangeInclusive<f32>) -> egui::Response {
+    let mut response = ui.add(egui::DragValue::new(value).speed(step).range(range.clone()).max_decimals(3));
+    let id = response.id;
+    register_focusable(ui, id, response.rect);
+    if response.clicked() {
+        set_active_id(ui, id);
+    }
+    if is_active(ui, id) && page_has_focus(ui) && !ui.ctx().wants_keyboard_input() {
+        glow(ui, response.rect, 6.0);
+        scroll_active_into_view(ui, &response);
+        let move_by = ui.input_mut(|i| {
+            let mut by = 0.0;
+            for (modifiers, times) in [(egui::Modifiers::NONE, 1.0), (egui::Modifiers::SHIFT, 10.0)] {
+                if i.consume_key(modifiers, egui::Key::ArrowUp) {
+                    by += times;
+                }
+                if i.consume_key(modifiers, egui::Key::ArrowDown) {
+                    by -= times;
+                }
+            }
+            by
+        });
+        if move_by != 0.0 {
+            *value = (*value + move_by * step).clamp(*range.start(), *range.end());
+            response.mark_changed();
+        }
+    }
+    response
 }
 
 /// A toggle that looks like a pill: filled when it is on. Gives the response; a click, or Enter or Space when the page
@@ -1622,3 +1727,45 @@ mod top_bar_test {
         }
     }
 }
+
+#[cfg(test)]
+mod tabs_test {
+    use super::*;
+
+    /// With the keys alone: the focus comes into the row at the open tab, goes from tab to tab, and leaves without a change. A change
+    /// of the tab by the page keeps.
+    #[test]
+    fn the_keys_open_the_tabs() {
+        let ctx = egui::Context::default();
+        let mut chosen = 1;
+        let frame = |chosen: &mut usize, key: Option<egui::Key>| {
+            let events = key.map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() });
+            for events in [events.into_iter().collect(), Vec::new()] {
+                let _ = ctx.run(egui::RawInput { events, ..Default::default() }, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        set_page_focus(ui.ctx(), true);
+                        update_navigation(ui);
+                        button(ui, "A wide button above all the tabs of the row");
+                        tabs(ui, "test", &["One", "Two", "Three"], chosen);
+                    });
+                });
+            }
+        };
+        let active = || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        frame(&mut chosen, None);
+        frame(&mut chosen, Some(egui::Key::ArrowDown));
+        assert_eq!((active(), chosen), (Some(tab_id("test", 1)), 1), "the focus comes to the open tab");
+        frame(&mut chosen, Some(egui::Key::ArrowRight));
+        assert_eq!(chosen, 2);
+        frame(&mut chosen, Some(egui::Key::ArrowLeft));
+        frame(&mut chosen, Some(egui::Key::ArrowLeft));
+        assert_eq!(chosen, 0);
+        chosen = 2;
+        frame(&mut chosen, None);
+        assert_eq!((active(), chosen), (Some(tab_id("test", 2)), 2), "the focus follows a change of the page");
+        frame(&mut chosen, Some(egui::Key::ArrowUp));
+        assert_eq!(chosen, 2);
+        assert_ne!(active(), Some(tab_id("test", 2)));
+    }
+}
+

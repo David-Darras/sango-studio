@@ -107,7 +107,7 @@ fn numbered(list: &[&str]) -> Vec<(i64, String)> {
 fn flag_row(ui: &mut egui::Ui, label: &str, note: &str, settings: &mut Settings, game: &Settings, field: Field) {
     name_cell(ui, label, note, settings, game, field);
     let mut on = settings.get(field) != 0;
-    ui.checkbox(&mut on, "").on_hover_text(note);
+    widget::checkbox(ui, &mut on, "").on_hover_text(note);
     settings.set(field, i64::from(on));
     ui.end_row();
 }
@@ -436,7 +436,7 @@ impl ZonePage {
                 let back = ui.horizontal(|ui| widget::field_name(ui, &format!("Surface {}", surface + 1), changed).1).inner;
                 ui.horizontal(|ui| {
                     let mut on = edit.water.on(surface);
-                    ui.checkbox(&mut on, "On");
+                    widget::checkbox(ui, &mut on, "On");
                     edit.water.set_on(surface, on);
                     let mut height = edit.water.height(surface);
                     ui.label(widget::hint("Height"));
@@ -534,7 +534,7 @@ impl ZonePage {
                     })
                     .inner;
                 let mut number = camera.value(value.at);
-                if ui.add(egui::DragValue::new(&mut number).speed(value.speed).max_decimals(2)).on_hover_text(value.note).changed() {
+                if widget::decimal(ui, &mut number, value.speed as f32, f32::MIN..=f32::MAX).on_hover_text(value.note).changed() {
                     camera.set_value(value.at, number);
                 }
                 if back {
@@ -580,13 +580,7 @@ impl ZonePage {
 
     fn tabs(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>) {
         let (Some(mut edit), Some(game)) = (self.edit.take(), self.game.clone()) else { return };
-        ui.horizontal(|ui| {
-            for (place, name) in TABS.iter().enumerate() {
-                if widget::tab_button(ui, name, self.tab == place, false).clicked() {
-                    self.tab = place;
-                }
-            }
-        });
+        widget::tabs(ui, "zone", &TABS, &mut self.tab);
         ui.add_space(6.0);
         let count = self.store.as_ref().map_or(0, Store::zone_count);
         egui::ScrollArea::vertical().id_salt("zone_tab").auto_shrink([false, false]).show(ui, |ui| {
@@ -723,6 +717,44 @@ mod test {
         frame(&mut page, sango_ui::history::test_keys(egui::Key::Z));
         assert_eq!(page.edit.as_ref().unwrap().names[&(ENGLISH, line)], old);
         assert!(page.unsaved(), "the card has the new name");
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// With the dump: with the keys alone, the tabs open and a check box changes.
+    #[test]
+    fn the_keys_reach_the_tabs_and_the_check_boxes() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let folder = std::env::temp_dir().join(format!("sango_zone_keys_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open_with(&folder.to_string_lossy(), Some(folder.join("work"))).unwrap();
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), sd: Some(sd), focus_page: true, ..Session::default() };
+        let mut page = ZonePage::default();
+        let ctx = egui::Context::default();
+        let mut frame = |page: &mut ZonePage, key: Option<(egui::Key, egui::Modifiers)>| {
+            let events = key.map(|(key, modifiers)| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+            let modifiers = key.map_or_else(Default::default, |(_, modifiers)| modifiers);
+            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))), events: events.into_iter().collect(), modifiers, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, &mut session));
+            });
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| page.ui(ui, &mut session));
+            });
+        };
+        for _ in 0..2 {
+            frame(&mut page, None);
+        }
+        ctx.data_mut(|d| d.insert_temp(egui::Id::new("sango_active_widget"), widget::tab_id("zone", 0)));
+        frame(&mut page, None);
+        frame(&mut page, Some((egui::Key::ArrowRight, egui::Modifiers::NONE)));
+        assert_eq!(page.tab, 1, "Right opens the next tab");
+        // Down goes to the first check box (Fly), and Space changes it.
+        let fly = page.edit.as_ref().unwrap().settings.get(data::FLY);
+        frame(&mut page, Some((egui::Key::ArrowDown, egui::Modifiers::NONE)));
+        frame(&mut page, Some((egui::Key::Space, egui::Modifiers::NONE)));
+        assert_ne!(page.edit.as_ref().unwrap().settings.get(data::FLY), fly, "Space changes the check box");
+        assert_eq!(page.tab, 1);
         let _ = std::fs::remove_dir_all(&folder);
     }
 }

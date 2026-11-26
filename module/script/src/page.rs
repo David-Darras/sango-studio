@@ -589,13 +589,7 @@ impl Module for ScriptPage {
             self.tool_bar(ui, session);
             ui.add_space(8.0);
         }
-        ui.horizontal(|ui| {
-            for (place, name) in TABS.iter().enumerate() {
-                if widget::tab_button(ui, name, self.tab == place, false).clicked() {
-                    self.tab = place;
-                }
-            }
-        });
+        widget::tabs(ui, "script", &TABS, &mut self.tab);
         ui.add_space(6.0);
         if self.tab == CREATE_TAB {
             self.creator.ui(ui, session.sd.as_ref());

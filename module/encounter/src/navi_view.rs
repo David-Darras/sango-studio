@@ -140,13 +140,7 @@ impl NaviView {
         }
         self.tool_bar(ui, session);
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            for (place, name) in TABS.iter().enumerate() {
-                if widget::tab_button(ui, name, self.tab == place, false).clicked() {
-                    self.tab = place;
-                }
-            }
-        });
+        widget::tabs(ui, "dexnav", &TABS, &mut self.tab);
         ui.add_space(6.0);
         if self.tab == 0 {
             self.screen_tab(ui, map, table, icons);
