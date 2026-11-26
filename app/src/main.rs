@@ -77,6 +77,7 @@ impl App {
             // Tools.
             Box::new(sango_packs::Packs::default()),
             Box::new(sango_feature::FeaturePage::default()),
+            Box::new(sango_save::SavePage::default()),
             Box::new(sango_archive::Archive::default()),
         ]
     }
@@ -1033,6 +1034,6 @@ mod side_bar_test {
         let first: Vec<&str> = SECTIONS.iter().map(|(place, _)| pages[*place].title()).collect();
         assert_eq!(first, ["Species", "Formula", "3D Maps", "Title Screen", "Packs"]);
         assert_eq!(pages[0].title(), "Home");
-        assert_eq!(pages.len(), 26);
+        assert_eq!(pages.len(), 27);
     }
 }

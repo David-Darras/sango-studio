@@ -33,5 +33,6 @@ sango-character.workspace = true
 sango-player.workspace = true
 sango-zone.workspace = true
 sango-title.workspace = true
+sango-save.workspace = true
 sango-feature.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

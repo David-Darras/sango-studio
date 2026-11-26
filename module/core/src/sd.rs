@@ -52,7 +52,7 @@ const PUBLISHED: [&str; 35] = [
 
 /// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs) and the maps of
 /// the 3D Maps page (the editor of the maps writes them there).
-const CARD_ONLY: [&str; 3] = ["species/model/", "overworld/", "music/"];
+const CARD_ONLY: [&str; 4] = ["species/model/", "overworld/", "music/", "save/"];
 
 /// The folder of the maps in the folder of the studio of the SD card.
 pub const OVERWORLD_FOLDER: &str = "overworld";

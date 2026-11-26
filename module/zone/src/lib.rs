@@ -3,7 +3,7 @@
 //! For each map: its name on the screen, the music, the weather, the battle background, what the player can do there (Fly, Bicycle,
 //! Escape Rope...), how it looks, where Fly puts the player, the water, and the camera. See `data.rs` for the files.
 
-mod data;
+pub mod data;
 mod lists;
 mod page;
 

@@ -42,6 +42,7 @@ sango-player = { path = "module/player" }
 sango-zone = { path = "module/zone" }
 sango-title = { path = "module/title" }
 sango-feature = { path = "module/feature" }
+sango-save = { path = "module/save" }
 sango-layout = { path = "module/layout" }
 sango-battle = { path = "module/battle" }
 

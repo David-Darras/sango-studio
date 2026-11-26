@@ -1,0 +1,13 @@
+[package]
+name = "sango-save"
+version.workspace = true
+edition.workspace = true
+description = "The save editor of Sango Studio: the trainer, the party, the boxes, the Bag and the place of the player in the file main."
+
+[dependencies]
+sango-core.workspace = true
+sango-species.workspace = true
+sango-species-base.workspace = true
+sango-zone.workspace = true
+sango-ui.workspace = true
+rfd.workspace = true

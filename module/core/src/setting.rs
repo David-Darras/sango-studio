@@ -11,6 +11,8 @@ pub struct Settings {
     pub plugin: Option<String>,
     /// The folder of devkitPro, which has the shell of the build.
     pub devkitpro: Option<String>,
+    /// The save file of the game (`main`), which the page Save edits.
+    pub save: Option<String>,
     /// The title of the page that was open at the last run.
     pub page: Option<String>,
 }
@@ -21,6 +23,11 @@ fn base() -> Option<PathBuf> {
         return Some(PathBuf::from(folder));
     }
     std::env::var_os("APPDATA").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))
+}
+
+/// The folder where Sango Studio keeps the copies of the save before it writes it.
+pub fn save_copies_folder() -> PathBuf {
+    base().unwrap_or_else(std::env::temp_dir).join("SangoStudio").join("save_backups")
 }
 
 /// The file of the settings: in the folder of the application data of the user.
@@ -48,6 +55,7 @@ pub fn parse(text: &str) -> Settings {
             "sd" => settings.sd = Some(value.to_string()),
             "plugin" => settings.plugin = Some(value.to_string()),
             "devkitpro" => settings.devkitpro = Some(value.to_string()),
+            "save" => settings.save = Some(value.to_string()),
             "page" => settings.page = Some(value.to_string()),
             _ => {}
         }
@@ -69,6 +77,10 @@ pub fn format(settings: &Settings) -> String {
     }
     if let Some(devkitpro) = &settings.devkitpro {
         text.push_str(&format!("devkitpro={devkitpro}\n"));
+    }
+    if let Some(save) = &settings.save {
+        text.push_str(&format!("save={save}
+"));
     }
     if let Some(page) = &settings.page {
         text.push_str(&format!("page={page}\n"));
@@ -106,7 +118,7 @@ mod test {
 
     #[test]
     fn the_settings_are_read_back() {
-        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), plugin: Some("C:/work/sango_plugin".into()), devkitpro: Some("C:/devkitPro".into()), page: None };
+        let settings = Settings { dump: Some("C:/game/romfs".into()), sd: Some("C:/emu/sdmc/sango-studio".into()), plugin: Some("C:/work/sango_plugin".into()), devkitpro: Some("C:/devkitPro".into()), save: Some("C:/emu/title/data/00000001/main".into()), page: None };
         assert_eq!(parse(&format(&settings)), settings);
     }
 

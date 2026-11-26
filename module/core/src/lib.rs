@@ -65,6 +65,8 @@ pub struct Session {
     pub dump: Option<Dump>,
     /// The folder of the SD card. Sango Studio puts here the files that it changed.
     pub sd: Option<SdCard>,
+    /// The save file of the game, which the page Save edits. It is not needed by the other pages.
+    pub save_file: Option<std::path::PathBuf>,
     /// True when the arrow keys belong to the page. False when they change the page of the side bar.
     pub focus_page: bool,
 }
@@ -76,6 +78,7 @@ impl Session {
         Session {
             dump: settings.dump.and_then(|path| Dump::open(&path).ok()),
             sd: settings.sd.and_then(|path| SdCard::open(&path).ok()),
+            save_file: settings.save.map(std::path::PathBuf::from).filter(|path| path.is_file()),
             focus_page: false,
         }
     }
@@ -96,6 +99,17 @@ impl Session {
         Ok(())
     }
 
+    /// Takes a file as the save of the game, and keeps it for the next run. The page Save checks what is in the file.
+    pub fn set_save_file(&mut self, path: &str) -> Result<(), String> {
+        let path = std::path::PathBuf::from(path.trim().trim_matches('"'));
+        if !path.is_file() {
+            return Err("There is no file at this place. Choose the file `main` of the save.".into());
+        }
+        self.save_file = Some(path);
+        self.save();
+        Ok(())
+    }
+
     /// Says what is missing before the editors can work: the two folders are needed.
     pub fn missing(&self) -> Option<&'static str> {
         match (&self.dump, &self.sd) {
@@ -110,6 +124,7 @@ impl Session {
         setting::write(&setting::Settings {
             dump: self.dump.as_ref().map(|d| d.root().to_string_lossy().to_string()),
             sd: self.sd.as_ref().map(|s| s.root().to_string_lossy().to_string()),
+            save: self.save_file.as_ref().map(|s| s.to_string_lossy().to_string()).or_else(|| setting::read().save),
             ..setting::read()
         });
     }

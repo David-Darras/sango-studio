@@ -1,7 +1,7 @@
 //! The start page: the user gives the folders that Sango Studio needs, and runs the game.
 //!
-//! The two folders of the studio are in one card, and the card "Run" under it has the two folders of the build. A folder is used
-//! when the user presses Enter in its field, or picks it with Browse. The card "Start from zero" is at the top.
+//! The two folders of the studio and the save file are in one card, and the card "Run" under it has the two folders of the build. A
+//! path is used when the user presses Enter in its field, or picks it with Browse. The card "Start from zero" is at the top.
 
 mod run;
 
@@ -32,6 +32,7 @@ struct Field {
 pub struct Home {
     dump: Field,
     sd: Field,
+    save: Field,
     run: run::Run,
     /// True once the fields took the folders of the session.
     filled: bool,
@@ -41,9 +42,21 @@ pub struct Home {
     erased: Option<(bool, String)>,
 }
 
-/// Draws one folder of the card: its title, the field, Browse, and the state. Returns true when the folder
-/// must be used: the user pressed Enter in the field, or picked a folder.
+/// What the button Browse picks.
+#[derive(Clone, Copy, PartialEq)]
+enum Pick {
+    Folder,
+    File,
+}
+
+/// Draws one folder of the card, see [`path_row`].
 fn folder_row(ui: &mut egui::Ui, title: &str, hint: &str, picker: &str, field: &mut Field, state: State) -> bool {
+    path_row(ui, title, hint, picker, Pick::Folder, field, state)
+}
+
+/// Draws one folder or file of the card: its title, the field, Browse, and the state. Returns true when it
+/// must be used: the user pressed Enter in the field, or picked with Browse.
+fn path_row(ui: &mut egui::Ui, title: &str, hint: &str, picker: &str, pick: Pick, field: &mut Field, state: State) -> bool {
     let mut apply = false;
     ui.push_id(title, |ui| {
         ui.label(widget::title(title));
@@ -53,8 +66,10 @@ fn folder_row(ui: &mut egui::Ui, title: &str, hint: &str, picker: &str, field: &
                 apply = true;
             }
             if widget::button(ui, "Browse...") {
-                if let Some(folder) = rfd::FileDialog::new().set_title(picker).pick_folder() {
-                    field.text = folder.to_string_lossy().to_string();
+                let dialog = rfd::FileDialog::new().set_title(picker);
+                let chosen = if pick == Pick::File { dialog.pick_file() } else { dialog.pick_folder() };
+                if let Some(chosen) = chosen {
+                    field.text = chosen.to_string_lossy().to_string();
                     apply = true;
                 }
             }
@@ -109,6 +124,9 @@ impl Home {
             if let Some(sd) = &session.sd {
                 self.sd.text = sd.root().to_string_lossy().to_string();
             }
+            if let Some(save) = &session.save_file {
+                self.save.text = save.to_string_lossy().to_string();
+            }
         }
         ui.add_space(8.0);
         if let Some(sd) = session.sd.clone() {
@@ -133,6 +151,14 @@ impl Home {
             let sd_error = self.sd.error.clone();
             if folder_row(ui, "SD card folder", &format!("C:\\...\\sdmc\\{SD_FOLDER_NAME}"), "Folder of the SD card", &mut self.sd, state_of(&sd_error, &sd_path)) {
                 self.sd.error = session.set_sd(&self.sd.text).err();
+            }
+            ui.add_space(10.0);
+
+            let save_path = session.save_file.as_ref().map(|s| s.to_string_lossy().to_string());
+            let save_error = self.save.error.clone();
+            let hint = "C:\\...\\title\\00040000\\0011c500\\data\\00000001\\main";
+            if path_row(ui, "Save file of the game (main), for the page Save", hint, "The save file of the game: main", Pick::File, &mut self.save, state_of(&save_error, &save_path)) {
+                self.save.error = session.set_save_file(&self.save.text).err();
             }
         });
         ui.add_space(12.0);

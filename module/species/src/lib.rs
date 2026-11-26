@@ -48,7 +48,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 /// The number of the archive that has the data of the species.
-const ARCHIVE: usize = 195;
+/// The archive of the data of the species.
+pub const ARCHIVE: usize = 195;
 
 pub use extras::{is_species, max_species, species_ids, species_name};
 pub use names::{is_unused_rate, LEVELING_RATE, SPECIES};
