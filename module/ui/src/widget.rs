@@ -464,7 +464,12 @@ pub fn update_navigation(ui: &mut egui::Ui) {
 
     if let Some(dir) = nav_dir {
         if let Some(cur) = widgets.iter().find(|w| Some(w.id) == current_id) {
-            if let Some(neighbor) = find_spatial_neighbor(&widgets, cur, dir) {
+            // Down from a tab goes into the page: to the first widget under the row, wherever it is.
+            let is_tab = ui.ctx().data(|d| d.get_temp::<bool>(cur.id.with("is_tab")).unwrap_or(false));
+            let first_under = (is_tab && dir == Direction::Down)
+                .then(|| widgets.iter().filter(|w| w.rect.top() >= cur.rect.bottom()).min_by(|a, b| a.rect.top().total_cmp(&b.rect.top()).then(a.rect.left().total_cmp(&b.rect.left()))).copied())
+                .flatten();
+            if let Some(neighbor) = first_under.or_else(|| find_spatial_neighbor(&widgets, cur, dir)) {
                 set_active_id(ui, neighbor.id);
                 request_scroll_to_active(ui);
                 ui.ctx().request_repaint();
@@ -806,7 +811,10 @@ pub fn marked_tabs(ui: &mut egui::Ui, id_salt: &str, names: &[&str], marked: imp
             let focused = is_active(ui, id) && page_has_focus(ui);
             let response = tab_button(ui, name, *chosen == place, focused || marked(place));
             register_focusable(ui, id, response.rect);
-            ui.ctx().data_mut(|d| d.insert_temp(id.with("is_button"), true));
+            ui.ctx().data_mut(|d| {
+                d.insert_temp(id.with("is_button"), true);
+                d.insert_temp(id.with("is_tab"), true);
+            });
             if response.clicked() {
                 *chosen = place;
                 set_active_id(ui, id);

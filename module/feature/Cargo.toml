@@ -7,4 +7,5 @@ description = "The Features page of Sango Studio: turns features of the plugin o
 [dependencies]
 sango-core.workspace = true
 sango-ui.workspace = true
+sango-species.workspace = true
 rfd.workspace = true

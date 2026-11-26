@@ -376,7 +376,7 @@ impl TitlePage {
         let mut version = self.version;
         widget::card(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label(widget::hint("Title screen of")).on_hover_text("Features page, Title screen of the plugin. On: the menu of the plugin chooses the one that plays (Omega Ruby at first). Off: Alpha Sapphire.");
+                ui.label(widget::hint("Title screen of")).on_hover_text("The game plays Alpha Sapphire. To play Omega Ruby: Features page, Start, videos Title Omega Ruby and Primo Groudon, and the cry of Groudon.");
                 let mut chosen = version as i32;
                 number_menu(ui, "title_version", &mut chosen, &[(0, VERSIONS[0]), (1, VERSIONS[1])], 180.0);
                 version = chosen as usize;
@@ -661,7 +661,7 @@ impl TitlePage {
             });
             ui.add_space(10.0);
         }
-        ui.label(widget::hint("The camera was made for the Pokémon of the game: use Size and Place for another one. The cry at the start is set in the menu of the plugin."));
+        ui.label(widget::hint("The camera was made for the Pokémon of the game: use Size and Place for another one. The cry at the start is set on the Features page."));
     }
 
     fn add_bar(&mut self, ui: &mut egui::Ui, screen: usize) {
