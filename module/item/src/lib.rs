@@ -995,6 +995,7 @@ impl Module for Item {
             self.icons.load_card(session.sd.as_ref());
             self.icons_ready = true;
         }
+        self.icons.follow_card(session.sd.as_ref());
         if self.garc.is_some() && self.loaded != Some(self.item) {
             self.load(session);
         }

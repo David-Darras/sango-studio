@@ -131,7 +131,7 @@ impl IconTab {
 
     /// Gives an icon a new picture: 40 × 30 pixels of RGBA. Returns the compressed file.
     fn make_file(rgba: &[u8]) -> Result<Vec<u8>, String> {
-        let image = Clim::from_rgba(WIDTH, HEIGHT, rgba)?;
+        let image = Clim::from_rgba_icon(WIDTH, HEIGHT, rgba)?;
         Ok(lz::compress_lz11(&image.to_bytes()))
     }
 
@@ -164,7 +164,7 @@ impl IconTab {
             if let Some(old) = self.texture.take() {
                 self.retired.keep(old);
             }
-            self.texture = bytes.as_deref().and_then(|bytes| decode(bytes).ok()).map(|rgba| sango_ui::textures::load(ui.ctx(), "species_icon_editor", egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), egui::TextureOptions::NEAREST));
+            self.texture = bytes.as_deref().and_then(|bytes| decode(bytes).ok()).map(|rgba| sango_ui::textures::load(ui.ctx(), "species_icon_editor", egui::ColorImage::from_rgba_unmultiplied([WIDTH, HEIGHT], &rgba), sango_species_base::icon_filter(&rgba)));
             self.shown = bytes.clone().map(|bytes| (file, bytes));
         }
         widget::card(ui, |ui| {

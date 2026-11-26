@@ -324,6 +324,8 @@ impl App {
         let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(margin));
         // The menus of Pokémon, items and moves read the dump and the SD card of the session.
         sango_species::menus::set_source(&self.session);
+        // The item pictures of the SD card take the place of the ones of the game.
+        sango_ui::item_menu::set_card(self.session.sd.as_ref());
         // The text fields of the game texts read the font of the game from the dump.
         sango_ui::game_text::set_dump(self.session.dump.as_ref());
         let page = egui::CentralPanel::default().frame(frame).show(ctx, |ui| {

@@ -33,6 +33,8 @@ pub struct ItemIcons {
     custom_pending: HashSet<usize>,
     /// The item of the game whose picture a new item shows while it has no picture of its own.
     fallbacks: HashMap<usize, usize>,
+    /// The state of the pictures of the SD card that were read (see [`sango_ui::item_menu::set_card`]).
+    card: u32,
 }
 
 impl ItemIcons {
@@ -89,6 +91,27 @@ impl ItemIcons {
         }
     }
 
+    /// Reads the pictures of the SD card again when another part of the studio changed them (a pack). The changes that are not
+    /// saved stay.
+    pub fn follow_card(&mut self, sd: Option<&SdCard>) {
+        let card = sango_ui::item_menu::card_generation();
+        if card == self.card {
+            return;
+        }
+        self.card = card;
+        let changed: Vec<(usize, Vec<u8>)> = self.pending.iter().filter_map(|file| Some((*file, self.overrides.get(file)?.clone()))).collect();
+        let new_items: Vec<(usize, Vec<u8>)> = self.custom_pending.iter().filter_map(|id| Some((*id, self.custom.get(id)?.clone()))).collect();
+        self.load_card(sd);
+        for (file, bytes) in changed {
+            self.overrides.insert(file, bytes);
+            self.pending.insert(file);
+        }
+        for (id, bytes) in new_items {
+            self.custom.insert(id, bytes);
+            self.custom_pending.insert(id);
+        }
+    }
+
     /// True when a picture changed and was not saved.
     pub fn changed(&self) -> bool {
         !self.pending.is_empty() || !self.custom_pending.is_empty()
@@ -124,7 +147,7 @@ impl ItemIcons {
         if let Some(found) = self.textures.get(&item) {
             return found.clone();
         }
-        let made = self.rgba(item).map(|rgba| sango_ui::textures::load(ctx, format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([SIZE, SIZE], &rgba), egui::TextureOptions::NEAREST));
+        let made = self.rgba(item).map(|rgba| sango_ui::textures::load(ctx, format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([SIZE, SIZE], &rgba), sango_ui::textures::icon_filter(&rgba)));
         self.textures.insert(item, made.clone());
         made
     }
@@ -138,7 +161,7 @@ impl ItemIcons {
         if image.width() as usize != SIZE || image.height() as usize != SIZE {
             return Err(format!("The picture must have {SIZE} × {SIZE} pixels. This image has {} × {}.", image.width(), image.height()));
         }
-        let clim = Clim::from_rgba(SIZE, SIZE, image.as_raw())?;
+        let clim = Clim::from_rgba_icon(SIZE, SIZE, image.as_raw())?;
         if Self::is_custom(item) {
             self.custom.insert(item, clim.to_bytes());
             self.custom_pending.insert(item);

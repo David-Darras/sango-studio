@@ -103,7 +103,7 @@ impl PackContent {
         if !self.textures.contains_key(&key) {
             let texture = make(self).map(|rgba| {
                 let picture = egui::ColorImage::from_rgba_unmultiplied([size.0, size.1], &rgba);
-                textures::load(ctx, format!("pack_icon_{key}"), picture, egui::TextureOptions::NEAREST)
+                textures::load(ctx, format!("pack_icon_{key}"), picture, sango_species::icon_filter(&rgba))
             });
             self.textures.insert(key.clone(), texture);
         }

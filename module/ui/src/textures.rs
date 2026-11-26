@@ -30,6 +30,16 @@ pub fn load(ctx: &egui::Context, name: impl Into<String>, image: impl Into<egui:
     handle
 }
 
+/// How the computer draws an icon: the pixels of an icon of the game stay sharp squares, and an icon with a partial transparency
+/// is drawn smooth.
+pub fn icon_filter(rgba: &[u8]) -> egui::TextureOptions {
+    if rgba.chunks_exact(4).any(|pixel| pixel[3] != 0 && pixel[3] != 255) {
+        egui::TextureOptions::LINEAR
+    } else {
+        egui::TextureOptions::NEAREST
+    }
+}
+
 /// Call it once for each frame: lets go of the textures that nobody holds any more since a few frames.
 pub fn sweep(ctx: &egui::Context) {
     let Ok(mut held) = HELD.lock() else { return };

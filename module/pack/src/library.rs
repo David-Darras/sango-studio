@@ -109,13 +109,14 @@ pub const ICON_MAP_PATH: &str = "species/icon_map.bin";
 /// The number of the first species of a pack.
 const FIRST_PACK_SPECIES: u16 = FIRST_SPECIES;
 
-/// An icon file of the game: a picture of 40 × 30 pixels as a CLIM compressed with LZ11.
+/// An icon file of a Pokémon: a picture of 40 × 30 pixels as a CLIM compressed with LZ11. A partial transparency stays (see
+/// [`sango_core::Clim::from_rgba_icon`]).
 pub fn icon_file_bytes(png: &[u8]) -> Result<Vec<u8>, String> {
     let image = image::load_from_memory(png).map_err(|e| format!("icon: {e}"))?.to_rgba8();
     if image.width() != 40 || image.height() != 30 {
         return Err(format!("An icon must have 40 × 30 pixels, this one has {} × {}.", image.width(), image.height()));
     }
-    let clim = sango_core::Clim::from_rgba(40, 30, image.as_raw())?;
+    let clim = sango_core::Clim::from_rgba_icon(40, 30, image.as_raw())?;
     Ok(sango_core::lz::compress_lz11(&clim.to_bytes()))
 }
 
@@ -126,7 +127,7 @@ pub fn item_icon_file_bytes(png: &[u8]) -> Result<Vec<u8>, String> {
     if image.width() != side || image.height() != side {
         return Err(format!("An item icon must have {side} × {side} pixels, this one has {} × {}.", image.width(), image.height()));
     }
-    let clim = sango_core::Clim::from_rgba(side as usize, side as usize, image.as_raw())?;
+    let clim = sango_core::Clim::from_rgba_icon(side as usize, side as usize, image.as_raw())?;
     Ok(sango_core::lz::compress_lz11(&clim.to_bytes()))
 }
 

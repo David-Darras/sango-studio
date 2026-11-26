@@ -139,15 +139,68 @@ impl Clim {
         if palette.len() > 256 {
             return Err("The image has too many colours.".into());
         }
+        Clim::with_palette(width, height, Format::Rgba5551, 7, &palette, &indexes)
+    }
+
+    /// The icon of a Pokémon or of an item from RGBA pixels. A picture whose pixels are all empty or full gets the format of
+    /// the icons of the game ([`Clim::from_rgba`]). A picture with a partial transparency (smooth edges) gets 16 levels of
+    /// transparency ([`Clim::from_rgba4_palette`]). For the icon of a Pokémon, the plugin must be there to show it everywhere.
+    pub fn from_rgba_icon(width: usize, height: usize, rgba: &[u8]) -> Result<Clim, String> {
+        if rgba.chunks_exact(4).any(|pixel| pixel[3] != 0 && pixel[3] != 255) {
+            Clim::from_rgba4_palette(width, height, rgba)
+        } else {
+            Clim::from_rgba(width, height, rgba)
+        }
+    }
+
+    /// Makes an image of the format RGBA4 with a palette of at most 256 colours: 4 bits for each of red, green, blue and alpha.
+    /// The first colour of the palette is the empty one. When the picture has more colours, the colours that change the picture
+    /// the least take the nearest colour that stays.
+    pub fn from_rgba4_palette(width: usize, height: usize, rgba: &[u8]) -> Result<Clim, String> {
+        if width == 0 || height == 0 || width > 512 || height > 512 {
+            return Err("The image must be from 1 to 512 pixels on each side.".into());
+        }
+        if rgba.len() != width * height * 4 {
+            return Err("The pixels do not match the size of the image.".into());
+        }
+        // The nearest of the 16 values of 4 bits.
+        let nibble = |value: u8| (u16::from(value) + 8) / 17;
+        let pixels: Vec<u16> = rgba
+            .chunks_exact(4)
+            .map(|p| if nibble(p[3]) == 0 { 0 } else { nibble(p[0]) << 12 | nibble(p[1]) << 8 | nibble(p[2]) << 4 | nibble(p[3]) })
+            .collect();
+        // Each colour and the number of pixels that have it, the empty colour first.
+        let mut colours: Vec<(u16, u32)> = vec![(0, 0)];
+        for &pixel in &pixels {
+            match colours.iter_mut().find(|(colour, _)| *colour == pixel) {
+                Some(found) => found.1 += 1,
+                None => colours.push((pixel, 1)),
+            }
+        }
+        let palette = fewer_colours(colours, 256);
+        let indexes: Vec<usize> = pixels
+            .iter()
+            .map(|&pixel| palette.iter().position(|&c| c == pixel).unwrap_or_else(|| (0..palette.len()).min_by_key(|&at| distance_rgba4(pixel, palette[at])).expect("the palette has colours")))
+            .collect();
+        Clim::with_palette(width, height, Format::Rgba4, 8, &palette, &indexes)
+    }
+
+    /// An image with a palette: the colours, then the index of each pixel (`indexes`, row by row). The file has the size that the
+    /// icons of the game have: the room of a texture of 16-bit pixels, which the game fills with the colours.
+    fn with_palette(width: usize, height: usize, format: Format, number: u32, palette: &[u16], indexes: &[usize]) -> Result<Clim, String> {
         let (side_x, side_y) = (texture_side(width), texture_side(height));
         let pixel_count = side_x * side_y;
+        let first_index = 4 + 2 * palette.len();
+        let index_bytes = if palette.len() <= 16 { pixel_count.div_ceil(2) } else { pixel_count };
+        if first_index + index_bytes > pixel_count * 2 {
+            return Err("The palette and the indexes do not fit in the texture.".into());
+        }
         let mut body = vec![0u8; pixel_count * 2];
         body[..2].copy_from_slice(&2u16.to_le_bytes());
         body[2..4].copy_from_slice(&(palette.len() as u16).to_le_bytes());
         for (place, color) in palette.iter().enumerate() {
             body[4 + 2 * place..][..2].copy_from_slice(&color.to_le_bytes());
         }
-        let first_index = 4 + 2 * palette.len();
         let tiles_per_row = side_x / 8;
         for i in 0..pixel_count {
             let (dx, dy) = morton_position(i % 64);
@@ -159,10 +212,7 @@ impl Clim {
                 body[first_index + i] = index as u8;
             }
         }
-        if first_index + if palette.len() <= 16 { pixel_count.div_ceil(2) } else { pixel_count } > body.len() {
-            return Err("The palette and the indexes do not fit in the texture.".into());
-        }
-        Ok(Clim::with_footer(width, height, Format::Rgba5551, 7, body))
+        Ok(Clim::with_footer(width, height, format, number, body))
     }
 
     /// Makes an image of the format RGBA4 (4 bits for each of red, green, blue and alpha, no palette) from RGBA pixels (4
@@ -438,6 +488,37 @@ impl Clim {
     }
 }
 
+/// How different two colours of 4 bits look: the colours count as much as they are opaque.
+fn distance_rgba4(a: u16, b: u16) -> u32 {
+    let parts = |colour: u16| {
+        let alpha = i32::from(colour & 0xF);
+        let part = |shift: u32| i32::from((colour >> shift) & 0xF) * alpha;
+        [part(12), part(8), part(4), alpha * 24]
+    };
+    parts(a).iter().zip(parts(b)).map(|(x, y)| ((x - y) * (x - y)) as u32).sum()
+}
+
+/// Keeps at most `most` colours of 4 bits. `colours` has each colour and its number of pixels; the first one always stays. The
+/// colour that goes first is the one whose loss changes the picture the least: few pixels, and another colour near it.
+fn fewer_colours(colours: Vec<(u16, u32)>, most: usize) -> Vec<u16> {
+    let mut stays = vec![true; colours.len()];
+    let mut pixels: Vec<u64> = colours.iter().map(|(_, count)| u64::from(*count)).collect();
+    let nearest = |stays: &[bool], from: usize| (0..colours.len()).filter(|&to| to != from && stays[to]).map(|to| (distance_rgba4(colours[from].0, colours[to].0), to)).min().unwrap_or((0, 0));
+    // The nearest other colour of each colour: it is searched again only when it goes.
+    let mut near: Vec<(u32, usize)> = if colours.len() > most { (0..colours.len()).map(|from| nearest(&stays, from)).collect() } else { Vec::new() };
+    for _ in most..colours.len() {
+        let from = (1..colours.len()).filter(|&at| stays[at]).min_by_key(|&at| u64::from(near[at].0) * pixels[at]).expect("more colours than the most");
+        stays[from] = false;
+        pixels[near[from].1] += pixels[from];
+        for other in 1..colours.len() {
+            if stays[other] && near[other].1 == from {
+                near[other] = nearest(&stays, other);
+            }
+        }
+    }
+    colours.iter().zip(stays).filter(|(_, stays)| *stays).map(|((colour, _), _)| *colour).collect()
+}
+
 /// The RGBA pixels of a picture file (compressed or not) that has the size `width` × `height`.
 pub fn decode_sized(bytes: &[u8], width: usize, height: usize) -> Result<Vec<u8>, String> {
     let raw = if crate::lz::is_compressed(bytes) { crate::lz::decompress(bytes)? } else { bytes.to_vec() };
@@ -587,6 +668,34 @@ mod test {
         let back = Clim::parse(&bytes).unwrap();
         assert_eq!(back.to_rgba().unwrap(), rgba, "the colours of 4 bits come back as they went");
         assert!(Clim::from_rgba4(0, 5, &[]).is_err());
+    }
+
+    #[test]
+    fn a_smooth_icon_keeps_its_levels_of_transparency() {
+        let (width, height) = (40, 30);
+        // Pixels that are all empty or full: the format of the game.
+        let hard: Vec<u8> = (0..width * height).flat_map(|n| if n % 2 == 0 { [0, 0, 0, 0] } else { [255, 0, 0, 255] }).collect();
+        assert_eq!(Clim::from_rgba_icon(width, height, &hard).unwrap().format(), Format::Rgba5551);
+        let smooth: Vec<u8> = (0..width * height).flat_map(|n| [(n % 16) as u8 * 17, 0, 255, (n / 16 % 16) as u8 * 17]).collect();
+        let image = Clim::from_rgba_icon(width, height, &smooth).unwrap();
+        assert_eq!((image.format(), image.to_bytes().len()), (Format::Rgba4, 64 * 32 * 2 + FOOTER_SIZE));
+        let count = image.palette_size().unwrap();
+        assert!(count > 16 && count <= 256);
+        let back = Clim::parse(&image.to_bytes()).unwrap().to_rgba().unwrap();
+        for (before, after) in smooth.chunks_exact(4).zip(back.chunks_exact(4)) {
+            assert_eq!(after, if before[3] == 0 { &[0, 0, 0, 0][..] } else { before });
+        }
+    }
+
+    #[test]
+    fn too_many_smooth_colours_take_the_nearest_ones() {
+        let (width, height) = (40, 30);
+        let rgba: Vec<u8> = (0..width * height).flat_map(|n| [(n % 16) as u8 * 17, (n / 16 % 16) as u8 * 17, (n / 256) as u8 * 17, 255 - (n % 3) as u8 * 17]).collect();
+        let image = Clim::from_rgba4_palette(width, height, &rgba).unwrap();
+        assert_eq!(image.palette_size(), Some(256));
+        let back = image.to_rgba().unwrap();
+        let far = rgba.chunks_exact(4).zip(back.chunks_exact(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 68)).count();
+        assert!(far < width * height / 50, "{far} pixels are far from their colour");
     }
 
     #[test]

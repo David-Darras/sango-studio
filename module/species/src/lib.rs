@@ -35,7 +35,7 @@ pub use names::ITEM as ITEM_NAMES;
 pub use names::TYPE as TYPE_NAMES;
 
 pub use sango_species_base::{battle_icons, data, extras, form_names, icons, move_names, names};
-pub use sango_species_base::{form_choices, form_key, form_leveling_rates, from_form_key, menu_form_count, species_form_menu, species_form_name, game_type_menu, leveling_rates, open_species, open_species_form, searchable_picker, species_abilities, summaries, type_menu, SpeciesAbilities, SpeciesIcons, Summary};
+pub use sango_species_base::{icon_filter, form_choices, form_key, form_leveling_rates, from_form_key, menu_form_count, species_form_menu, species_form_name, game_type_menu, leveling_rates, open_species, open_species_form, searchable_picker, species_abilities, summaries, type_menu, SpeciesAbilities, SpeciesIcons, Summary};
 use sango_species_base::{file_index, game_data, menu, name_from, sd_path, OPEN_SPECIES, SPECIES_COUNT};
 use data::SpeciesData;
 use examples::{Examples, Field};
@@ -239,7 +239,7 @@ struct ListEntry {
 }
 
 /// The texture of the icon of a species and a form (the SD card first, then the romfs): decoded at the first display, then kept in
-/// `textures`.
+/// `textures`. The textures are made again when the icons of the SD card change.
 pub(crate) fn form_icon<'a>(
     textures: &'a mut HashMap<(usize, usize), Option<egui::TextureHandle>>,
     icon_garc: Option<&Garc>,
@@ -248,6 +248,12 @@ pub(crate) fn form_icon<'a>(
     species: usize,
     form: usize,
 ) -> Option<&'a egui::TextureHandle> {
+    // The key with the species `usize::MAX` marks the state of the SD card that the textures of this list come from.
+    let marker = (usize::MAX, sango_species_base::icon_generation(sd) as usize);
+    if !textures.contains_key(&marker) {
+        textures.clear();
+        textures.insert(marker, None);
+    }
     let file = crate::icon_tab::icon_file(species, form, false).or_else(|| crate::icon_tab::icon_file(species, 0, false))?;
     textures
         .entry((species, form))
@@ -256,7 +262,7 @@ pub(crate) fn form_icon<'a>(
             let bytes = on_card.or_else(|| icon_garc?.first_file(file).map(|b| b.to_vec()))?;
             let rgba = sango_core::clim::decode_sized(&bytes, 40, 30).ok()?;
             let pixels = egui::ColorImage::from_rgba_unmultiplied([40, 30], &rgba);
-            Some(sango_ui::textures::load(ctx, format!("form_icon_{species}_{form}"), pixels, egui::TextureOptions::NEAREST))
+            Some(sango_ui::textures::load(ctx, format!("form_icon_{species}_{form}"), pixels, icon_filter(&rgba)))
         })
         .as_ref()
 }
@@ -2916,5 +2922,30 @@ mod test {
         assert_eq!(compute_boundary(127, width), 55.0);
         // 87.5% male (starter like Bulbasaur, value 31) -> blue width is 87.5% of 110 = 96.0
         assert_eq!(compute_boundary(31, width), 96.0);
+    }
+
+    /// The icon of a Pokémon that the page already shows is made again when its file changes on the SD card.
+    #[test]
+    fn an_icon_that_changes_on_the_card_is_made_again() {
+        let folder = std::env::temp_dir().join(format!("sango_species_icon_cache_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = sango_core::SdCard::open(&folder.to_string_lossy()).unwrap();
+        let file = crate::icon_tab::icon_file(1, 0, false).unwrap();
+        let write = |colour: [u8; 4]| {
+            let image = sango_core::Clim::from_rgba(40, 30, &colour.repeat(40 * 30)).unwrap();
+            sd.write(&crate::icon_tab::sd_path(file), &sango_core::lz::compress_lz11(&image.to_bytes())).unwrap();
+        };
+        let ctx = egui::Context::default();
+        let mut textures = HashMap::new();
+        let mut icon = || form_icon(&mut textures, None, Some(&sd), &ctx, 1, 0).expect("the card has the icon").id();
+        write([255, 0, 0, 255]);
+        let first = icon();
+        assert_eq!(icon(), first, "the picture is kept");
+        write([0, 0, 255, 255]);
+        // The card is looked at once each second and a half at most.
+        std::thread::sleep(std::time::Duration::from_millis(1600));
+        assert_ne!(icon(), first, "the picture is made again");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

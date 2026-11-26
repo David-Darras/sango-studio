@@ -273,7 +273,9 @@ pub fn refresh_icons(sd: Option<&sango_core::SdCard>) {
     source.checked = Some(std::time::Instant::now());
     let folder = sd.and_then(|sd| sd.path("species/icon").ok());
     let bytes = sd.and_then(|sd| sd.read(sango_pack::library::ICON_MAP_PATH)).unwrap_or_default();
-    let time = folder.as_ref().and_then(|f| std::fs::metadata(f).ok()).and_then(|m| m.modified().ok());
+    // A file that is written again does not change the date of its folder: the list of the files is written at each change.
+    let date = |path: &std::path::Path| std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    let time = folder.as_ref().and_then(|folder| date(folder).max(date(&folder.join("index.bin"))));
     if source.stamp == (bytes.clone(), time) && source.folder == folder {
         return;
     }
@@ -292,6 +294,13 @@ pub fn refresh_icons(sd: Option<&sango_core::SdCard>) {
     source.generation += 1;
 }
 
+/// A number that grows each time that the icons of the SD card change (see [`refresh_icons`], which it calls): a page that keeps
+/// textures of icons makes them again then.
+pub fn icon_generation(sd: Option<&sango_core::SdCard>) -> u32 {
+    refresh_icons(sd);
+    ICON_SOURCE.lock().ok().and_then(|g| g.as_ref().map(|s| s.generation)).unwrap_or(0)
+}
+
 /// The icon file of a species and the bytes of the file: the SD card first (the icons of the packs and the icons that the user changed),
 /// then the archive of the game. A species without an icon gets the black Poké Ball, as in the game.
 fn icon_bytes(garc: Option<&Garc>, species: usize) -> Option<Vec<u8>> {
@@ -304,6 +313,8 @@ fn icon_bytes(garc: Option<&Garc>, species: usize) -> Option<Vec<u8>> {
     let bytes = on_card.or_else(|| garc?.first_file(file).map(|b| b.to_vec()))?;
     Some(if sango_core::lz::is_compressed(&bytes) { sango_core::lz::decompress(&bytes).ok()? } else { bytes })
 }
+
+pub use sango_ui::textures::icon_filter;
 
 /// The texture of the icon of a species: decoded at the first display, then kept. It is made again when the icons of the SD card changed
 /// (see [`refresh_icons`]).
@@ -327,7 +338,7 @@ pub fn icon_texture<'a>(
             let image = Clim::parse(&bytes).ok()?;
             let rgba = image.to_rgba().ok()?;
             let pixels = egui::ColorImage::from_rgba_unmultiplied([image.width(), image.height()], &rgba);
-            Some(sango_ui::textures::load(ctx, format!("species_icon_{species}_{generation}"), pixels, egui::TextureOptions::NEAREST))
+            Some(sango_ui::textures::load(ctx, format!("species_icon_{species}_{generation}"), pixels, icon_filter(&rgba)))
         })
         .as_ref()
 }

@@ -26,7 +26,56 @@ pub struct Row {
     pub modified: bool,
 }
 
-/// The pictures of the items as textures of the window, decoded at the first display and then kept.
+/// The folder of the item pictures that replace the ones of the game, on the SD card.
+const CARD_FOLDER: &str = "item/icon";
+
+/// Where the item pictures of the SD card are, and what tells that they changed.
+struct CardPictures {
+    folder: Option<std::path::PathBuf>,
+    /// The date of the folder and of the list of its files.
+    date: Option<std::time::SystemTime>,
+    checked: Option<std::time::Instant>,
+    /// Grows each time that the pictures changed.
+    generation: u32,
+}
+
+static CARD: std::sync::Mutex<CardPictures> = std::sync::Mutex::new(CardPictures { folder: None, date: None, checked: None, generation: 0 });
+
+/// Gives the SD card to the item pictures of every list: a picture of the card takes the place of the one of the game. The
+/// application calls it at each frame; it looks at the card once each second and a half at most. Gives a number that grows each
+/// time that the pictures changed.
+pub fn set_card(sd: Option<&SdCard>) -> u32 {
+    let Ok(mut card) = CARD.lock() else { return 0 };
+    let folder = sd.and_then(|sd| sd.path(CARD_FOLDER).ok());
+    let same = card.folder == folder;
+    if same && card.checked.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(1500)) {
+        return card.generation;
+    }
+    card.checked = Some(std::time::Instant::now());
+    // A file that is written again does not change the date of its folder: the list of the files is written at each change.
+    let date = |path: &std::path::Path| std::fs::metadata(path).ok().and_then(|m| m.modified().ok());
+    let now = folder.as_ref().and_then(|folder| date(folder).max(date(&folder.join("index.bin"))));
+    if !same || card.date != now {
+        card.folder = folder;
+        card.date = now;
+        card.generation += 1;
+    }
+    card.generation
+}
+
+/// The number of the last [`set_card`]: a page that keeps item pictures reads them again when it grows.
+pub fn card_generation() -> u32 {
+    CARD.lock().map_or(0, |card| card.generation)
+}
+
+/// The file of the SD card that replaces a picture of the archive, when there is one.
+fn card_picture(file: usize) -> Option<Vec<u8>> {
+    let folder = CARD.lock().ok()?.folder.clone()?;
+    std::fs::read(folder.join(format!("{file}.bin"))).ok()
+}
+
+/// The pictures of the items as textures of the window, decoded at the first display and then kept. They are made again when the
+/// pictures of the SD card change (see [`set_card`]).
 #[derive(Default)]
 pub struct IconCache {
     garc: Option<Garc>,
@@ -35,6 +84,8 @@ pub struct IconCache {
     custom: HashMap<usize, Vec<u8>>,
     /// The textures that were forgotten: they live on a few frames, because the frame may still draw them.
     retired: crate::retired::Retired,
+    /// The state of the pictures of the SD card that the textures come from.
+    card: u32,
 }
 
 impl IconCache {
@@ -56,18 +107,22 @@ impl IconCache {
     /// The texture of the picture of an item, when it has one.
     pub fn texture(&mut self, ctx: &egui::Context, item: usize) -> Option<egui::TextureHandle> {
         self.retired.tick(ctx);
+        let card = card_generation();
+        if card != self.card {
+            self.card = card;
+            self.retired.forget_all(&mut self.textures);
+        }
         if let Some(found) = self.textures.get(&item) {
             return found.clone();
         }
         if item >= sango_core::custom_item::FIRST_ID {
-            let made = self.custom.get(&item).map(|rgba| crate::textures::load(ctx, format!("custom_item_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], rgba), egui::TextureOptions::NEAREST));
+            let made = self.custom.get(&item).map(|rgba| crate::textures::load(ctx, format!("custom_item_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], rgba), crate::textures::icon_filter(rgba)));
             self.textures.insert(item, made.clone());
             return made;
         }
         let made = item_icons::file_of(item)
-            .and_then(|file| self.garc.as_ref()?.first_file(file))
-            .and_then(|bytes| item_icons::decode(bytes).ok())
-            .map(|rgba| crate::textures::load(ctx, format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], &rgba), egui::TextureOptions::NEAREST));
+            .and_then(|file| card_picture(file).and_then(|bytes| item_icons::decode(&bytes).ok()).or_else(|| item_icons::decode(self.garc.as_ref()?.first_file(file)?).ok()))
+            .map(|rgba| crate::textures::load(ctx, format!("item_icon_{item}"), egui::ColorImage::from_rgba_unmultiplied([item_icons::SIZE, item_icons::SIZE], &rgba), crate::textures::icon_filter(&rgba)));
         self.textures.insert(item, made.clone());
         made
     }
@@ -414,5 +469,33 @@ mod test {
         };
         frame(&mut value, down, true);
         assert_eq!(value, 3);
+    }
+
+    #[test]
+    fn the_picture_of_the_card_shows_and_follows_its_changes() {
+        let folder = std::env::temp_dir().join(format!("sango_item_menu_card_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(&folder.to_string_lossy()).unwrap();
+        let file = item_icons::file_of(1).unwrap();
+        let write = |colour: [u8; 4]| {
+            let image = sango_core::Clim::from_rgba(30, 30, &colour.repeat(30 * 30)).unwrap();
+            sd.write(&format!("{CARD_FOLDER}/{file}.bin"), &sango_core::lz::compress_lz11(&image.to_bytes())).unwrap();
+        };
+        let ctx = egui::Context::default();
+        // No dump: the picture can only come from the card.
+        let mut icons = IconCache::default();
+        write([255, 0, 0, 255]);
+        let first_state = set_card(Some(&sd));
+        let first = icons.texture(&ctx, 1).expect("the card has the picture").id();
+        assert_eq!(icons.texture(&ctx, 1).unwrap().id(), first, "the picture is kept");
+        write([0, 0, 255, 255]);
+        // The card is looked at once each second and a half at most.
+        std::thread::sleep(std::time::Duration::from_millis(1600));
+        assert!(set_card(Some(&sd)) > first_state);
+        assert_ne!(icons.texture(&ctx, 1).unwrap().id(), first, "the picture is made again");
+        set_card(None);
+        assert!(icons.texture(&ctx, 1).is_none(), "without a card and a dump there is no picture");
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }
