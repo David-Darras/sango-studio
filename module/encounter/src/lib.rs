@@ -2,7 +2,7 @@
 //!
 //! The user chooses a map in a menu, then a kind of place (the grass, the water, the fishing rods, the hordes...), and gives a Pokémon, a form
 //! and two levels to each place of the table. The page shows the chance that the game gives to each place. The table goes in the file of the map
-//! on the SD card (`overworld/zone/<map>.bin`, with the events that the Overworld page wrote), and the game reads it instead of its own.
+//! on the SD card (`overworld/zone/<map>.bin`, with the events that the 3D Maps page wrote), and the game reads it instead of its own.
 //! The DexNav shows the same table.
 
 pub mod data;

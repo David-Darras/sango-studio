@@ -1516,7 +1516,7 @@ impl Viewer {
                 result = events::write_map_override(&self.arc_dir, &self.export_dir, map, &for_file).map(|_| ());
             } else if had_file && !events::is_made(map) {
                 // (The file of a map that the tool made is the whole map: it stays.)
-                result = events::remove_map_file(&self.export_dir, map);
+                result = events::remove_map_events(&self.arc_dir, &self.export_dir, map);
             }
             if result.is_ok() {
                 result = events::write_character_lines(&self.export_dir, map, base, now);

@@ -1,0 +1,12 @@
+[package]
+name = "sango-zone"
+version.workspace = true
+edition.workspace = true
+description = "The Map Data page of Sango Studio: the settings of each map, its name, its water and its cameras."
+
+[dependencies]
+sango-core.workspace = true
+sango-ui.workspace = true
+sango-overworld.workspace = true
+sango-music.workspace = true
+rfd.workspace = true

@@ -49,7 +49,7 @@ const PUBLISHED: [&str; 33] = [
 ];
 
 /// The files that stay on the SD card only: the 3D models of the packs (some hundreds of megabytes, made again from the packs) and the maps of
-/// the Overworld page (the editor of the maps writes them there).
+/// the 3D Maps page (the editor of the maps writes them there).
 const CARD_ONLY: [&str; 3] = ["species/model/", "overworld/", "music/"];
 
 /// The folder of the maps in the folder of the studio of the SD card.
@@ -188,7 +188,7 @@ impl SdCard {
             let bytes = found.iter().map(|file| std::fs::metadata(folder.join(file.trim_start_matches('/'))).map_or(0, |m| m.len())).sum();
             (found.len(), bytes)
         };
-        // The maps are the work of the user on the Overworld page: starting from zero does not remove them.
+        // The maps are the work of the user on the 3D Maps page: starting from zero does not remove them.
         let (all, models, maps) = (count(&self.root), count(&self.models_folder()), count(&self.overworld_folder()));
         Erased {
             computer: if self.is_split() { count(&self.local) } else { (0, 0) },

@@ -1238,7 +1238,7 @@ impl Viewer {
         match what {
             Confirm::ResetMap => {
                 if let Some(at) = self.ev.at().cloned() {
-                    let result = crate::events::reset_map(&self.export_dir, at.map);
+                    let result = crate::events::reset_map(&self.arc_dir, &self.export_dir, at.map);
                     let blocks = crate::events::blocks_of_map(&self.arc_dir, at.matrix, at.map);
                     let mut failed = None;
                     for &id in &blocks {
@@ -1259,7 +1259,7 @@ impl Viewer {
                     let maps: Vec<usize> = self.ev.maps.iter().map(|m| m.map).collect();
                     let mut failed = None;
                     for &map in &maps {
-                        if let Err(e) = crate::events::reset_map(&self.export_dir, map) {
+                        if let Err(e) = crate::events::reset_map(&self.arc_dir, &self.export_dir, map) {
                             failed = Some(format!("map {map}: {e}"));
                         }
                     }
@@ -1297,7 +1297,7 @@ impl Viewer {
                 let maps: Vec<usize> = self.ev.maps.iter().map(|m| m.map).collect();
                 let mut failed = None;
                 for &map in &maps {
-                    if let Err(e) = crate::events::reset_map(&self.export_dir, map) {
+                    if let Err(e) = crate::events::reset_map(&self.arc_dir, &self.export_dir, map) {
                         failed = Some(format!("map {map}: {e}"));
                     }
                 }

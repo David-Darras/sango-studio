@@ -31,4 +31,5 @@ sango-layout.workspace = true
 sango-battle.workspace = true
 sango-character.workspace = true
 sango-player.workspace = true
+sango-zone.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }

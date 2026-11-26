@@ -704,20 +704,42 @@ pub fn write_map_override(arc_dir: &str, sd_dir: &str, map: usize, events: &MapE
     Ok(format!("{} ({} bytes)", path.display(), bytes.len()))
 }
 
-/// Gives the map its events of the game again: the file of the map leaves the
+/// Gives the file of a map on the SD card its events of the game again. The rest of the file (the settings, the water and the wild
+/// Pokémon, that other pages edit) stays: the file leaves the card only when all of it is again the one of the game. True when the
+/// events of the file changed.
+fn restore_game_events(arc_dir: &str, sd_dir: &str, map: usize) -> Result<bool, String> {
+    let folder = crate::plugin_dir::maps(sd_dir, "zone");
+    let file = folder.join(format!("{map}.bin"));
+    let Ok(raw) = std::fs::read(&file) else { return Ok(false) };
+    let maps = garc::read(&crate::garc::locate(arc_dir, crate::garc::Archive::Maps))?;
+    let game = maps.get(map).and_then(|f| f.first()).ok_or("no such map")?;
+    let events = map_parts(game)?.get(1).cloned().ok_or("the map has no events")?;
+    let current = unpack(&raw)?;
+    let restored = sango_core::bundle::replace_part_with(&current, 1, &events, 4)?;
+    if restored == unpack(game)? {
+        std::fs::remove_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        crate::edit::remove_index(&folder, map)?;
+        return Ok(true);
+    }
+    if restored == current {
+        return Ok(false);
+    }
+    let bytes = if raw.first() == Some(&0x11) { sango_core::lz::compress_lz11(&restored) } else { restored };
+    std::fs::write(&file, &bytes).map_err(|e| format!("{}: {e}", file.display()))?;
+    crate::edit::write_index(&folder, map, bytes.len())?;
+    Ok(true)
+}
+
+/// Gives the map its events of the game again: in the file of the map on the
 /// SD card, and the lines of the map leave `map_events.txt`.
-pub fn reset_map(sd_dir: &str, map: usize) -> Result<String, String> {
+pub fn reset_map(arc_dir: &str, sd_dir: &str, map: usize) -> Result<String, String> {
     // The file of a map that the tool made is the whole map (the game has only an empty one for it): it stays.
     if made_maps().contains(&map) {
         return Ok("this map was made by the tool: its file stays".into());
     }
-    let folder = crate::plugin_dir::maps(sd_dir, "zone");
-    let file = folder.join(format!("{map}.bin"));
     let mut done = Vec::new();
-    if file.exists() {
-        std::fs::remove_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        crate::edit::remove_index(&folder, map)?;
-        done.push("the file of the map");
+    if restore_game_events(arc_dir, sd_dir, map)? {
+        done.push("the events of the file of the map");
     }
     let path = file_path(sd_dir);
     if let Ok(old) = std::fs::read_to_string(&path) {
@@ -740,19 +762,13 @@ pub fn map_has_lines(sd_dir: &str, map: usize) -> bool {
     std::fs::read_to_string(file_path(sd_dir)).map(|text| text.lines().filter_map(parse_line).any(|l| l.map == map)).unwrap_or(false)
 }
 
-/// Takes the file of a map away from the SD card (the signs, the triggers and the warps of the game come back).
-pub fn remove_map_file(sd_dir: &str, map: usize) -> Result<(), String> {
+/// Gives the file of a map on the SD card its signs, its triggers and its warps of the game again (see [`restore_game_events`]).
+pub fn remove_map_events(arc_dir: &str, sd_dir: &str, map: usize) -> Result<(), String> {
     // The file of a map that the tool made is the whole map: it stays.
     if made_maps().contains(&map) {
         return Ok(());
     }
-    let folder = crate::plugin_dir::maps(sd_dir, "zone");
-    let file = folder.join(format!("{map}.bin"));
-    if file.exists() {
-        std::fs::remove_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        crate::edit::remove_index(&folder, map)?;
-    }
-    Ok(())
+    restore_game_events(arc_dir, sd_dir, map).map(|_| ())
 }
 
 /// Writes the lines of the characters of a map in the file of the plugin: `C=` for a character of

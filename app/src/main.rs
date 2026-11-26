@@ -8,7 +8,7 @@ use sango_ui::{widget, Module, Session};
 const SIDE_BAR_WIDTH: f32 = 210.0;
 
 /// The sections of the side bar: the place of their first page in [`App::pages`], and their title.
-const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (18, "Look and sound"), (21, "Tools")];
+const SECTIONS: [(usize, &str); 5] = [(1, "Pokémon"), (8, "Battle"), (13, "World"), (19, "Look and sound"), (22, "Tools")];
 
 struct App {
     modules: Vec<Box<dyn Module>>,
@@ -31,7 +31,7 @@ struct App {
 impl App {
     fn new(cc: &eframe::CreationContext<'_>) -> Self {
         sango_ui::theme::apply(&cc.egui_ctx);
-        // The Overworld page draws in 3D with the graphics of the window.
+        // The 3D Maps page draws in 3D with the graphics of the window.
         if let Some(state) = cc.wgpu_render_state.clone() {
             cc.egui_ctx.data_mut(|d| d.insert_temp(egui::Id::new(sango_overworld::RENDER_STATE_KEY), state));
         }
@@ -64,6 +64,7 @@ impl App {
             Box::new(sango_effect::EffectPage::default()),
             // World.
             Box::new(sango_overworld::Overworld::default()),
+            Box::new(sango_zone::ZonePage::default()),
             Box::new(sango_encounter::EncounterPage::default()),
             Box::new(sango_player::PlayerPage::default()),
             Box::new(sango_character::Character::default()),
@@ -296,8 +297,8 @@ impl App {
                 }
             }
         } else {
-            // The Overworld page uses Escape to cancel a placement: only F6 goes back to the side bar there.
-            let escape_free = self.modules.get(self.current).is_some_and(|module| module.title() == "Overworld");
+            // The 3D Maps page uses Escape to cancel a placement: only F6 goes back to the side bar there.
+            let escape_free = self.modules.get(self.current).is_some_and(|module| module.title() == "3D Maps");
             let key_return = ctx.input_mut(|i| (!escape_free && i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) || i.consume_key(egui::Modifiers::NONE, egui::Key::F6));
             if key_return || widget::take_sidebar_focus_request(ctx) {
                 self.side_bar_focus = true;
@@ -315,8 +316,8 @@ impl App {
         self.session.focus_page = !self.side_bar_focus;
         widget::set_page_focus(ctx, self.session.focus_page);
         self.side_bar(ctx);
-        // The Overworld page uses all the area, for the 3D view.
-        let margin = if self.modules.get(self.current).is_some_and(|module| module.title() == "Overworld") { 0.0 } else { 18.0 };
+        // The 3D Maps page uses all the area, for the 3D view.
+        let margin = if self.modules.get(self.current).is_some_and(|module| module.title() == "3D Maps") { 0.0 } else { 18.0 };
         let frame = egui::Frame::none().fill(color::WHITE).inner_margin(egui::Margin::same(margin));
         // The menus of Pokémon, items and moves read the dump and the SD card of the session.
         sango_species::menus::set_source(&self.session);
@@ -399,7 +400,7 @@ fn run() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Wgpu,
-        // The Overworld page draws a 3D scene that needs a depth buffer.
+        // The 3D Maps page draws a 3D scene that needs a depth buffer.
         depth_buffer: 32,
         wgpu_options: wgpu_options(),
         ..Default::default()
@@ -1028,8 +1029,8 @@ mod side_bar_test {
     fn the_sections_start_at_their_first_page() {
         let pages = App::pages();
         let first: Vec<&str> = SECTIONS.iter().map(|(place, _)| pages[*place].title()).collect();
-        assert_eq!(first, ["Species", "Formula", "Overworld", "Layout", "Packs"]);
+        assert_eq!(first, ["Species", "Formula", "3D Maps", "Layout", "Packs"]);
         assert_eq!(pages[0].title(), "Home");
-        assert_eq!(pages.len(), 23);
+        assert_eq!(pages.len(), 24);
     }
 }

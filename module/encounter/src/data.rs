@@ -240,7 +240,7 @@ impl Zones {
     }
 
     /// Writes the wild Pokémon of a map in the file of the SD card, with the rest of the map as it is there (the events that the
-    /// Overworld page wrote stay).
+    /// 3D Maps page wrote stay).
     pub fn write(&self, zone: usize, table: &Encounter) -> Result<usize, String> {
         let pack = self.pack(zone)?;
         let ranges = bundle::ranges(&pack.bytes)?;

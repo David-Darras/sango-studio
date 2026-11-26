@@ -167,7 +167,7 @@ impl Creator {
             ui.horizontal_wrapped(|ui| {
                 ui.label(widget::hint("Name"));
                 ui.add(egui::TextEdit::singleline(&mut self.events[number].name).desired_width(240.0).hint_text("(optional)"));
-                ui.label(widget::hint(&format!("Script number {}: give it to a sign, a trigger or a character on the Overworld page.", FIRST_SCRIPT as usize + number)));
+                ui.label(widget::hint(&format!("Script number {}: give it to a sign, a trigger or a character on the 3D Maps page.", FIRST_SCRIPT as usize + number)));
             });
             match model::step_count(&self.events[number]) {
                 Ok(count) => {

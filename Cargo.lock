@@ -3066,6 +3066,7 @@ dependencies = [
  "sango-trainer",
  "sango-type",
  "sango-ui",
+ "sango-zone",
 ]
 
 [[package]]
@@ -3098,6 +3099,17 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "sango-core",
+]
+
+[[package]]
+name = "sango-zone"
+version = "0.1.0"
+dependencies = [
+ "rfd",
+ "sango-core",
+ "sango-music",
+ "sango-overworld",
+ "sango-ui",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-//! The Overworld page of Sango Studio: the editor of the blocks, the tiles, the events and the models of the maps.
+//! The 3D Maps page of Sango Studio: the editor of the blocks, the tiles, the events and the models of the maps.
 #![allow(dead_code)]
 
 mod bch;
@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 /// The key where the application keeps the graphics of the window, for the pages that draw in 3D.
 pub const RENDER_STATE_KEY: &str = "sango_wgpu_render_state";
 
-/// The Overworld page: the maps of the game, their ground, their objects, their events and their models.
+/// The 3D Maps page: the maps of the game, their ground, their objects, their events and their models.
 #[derive(Default)]
 pub struct Overworld {
     viewer: Option<viewer::Viewer>,
@@ -53,7 +53,7 @@ fn open(state: &eframe::egui_wgpu::RenderState, root: &Path, sango: &Path, maps:
 
 impl Module for Overworld {
     fn title(&self) -> &str {
-        "Overworld"
+        "3D Maps"
     }
 
     fn icon(&self) -> &str {
@@ -66,7 +66,7 @@ impl Module for Overworld {
             return;
         }
         let (Some(dump), Some(sd)) = (session.dump.as_ref(), session.sd.as_ref()) else {
-            ui.heading("Overworld");
+            ui.heading("3D Maps");
             ui.add_space(8.0);
             widget::missing_card(ui, session.missing().unwrap_or("Choose the dump of the game and the SD card on the Home page."));
             return;
@@ -82,7 +82,7 @@ impl Module for Overworld {
         if self.viewer.is_none() && self.error.is_none() {
             if self.waited < 2 {
                 self.waited += 1;
-                ui.heading("Overworld");
+                ui.heading("3D Maps");
                 ui.add_space(8.0);
                 ui.label(widget::hint("Opening the map…"));
                 ui.ctx().request_repaint();
@@ -98,7 +98,7 @@ impl Module for Overworld {
             }
         }
         if let Some(message) = self.error.clone() {
-            ui.heading("Overworld");
+            ui.heading("3D Maps");
             ui.add_space(8.0);
             widget::card(ui, |ui| {
                 ui.set_width(560.0_f32.min(ui.available_width()));
@@ -174,6 +174,36 @@ mod test {
             }
         }
         assert!(read > 100 && same == read, "{same} of {read} maps are identical");
+    }
+
+    /// With the dump: the events of a map go back to the game; what other pages wrote in the file of the map stays.
+    #[test]
+    fn the_events_of_the_game_come_back_without_the_rest_of_the_file() {
+        let Some(arc) = dump() else { return };
+        let maps = garc::read(&garc::locate(&arc, garc::Archive::Maps)).unwrap();
+        let game = sango_core::lz::decompress(&maps[6][0]).unwrap();
+        let folder = std::env::temp_dir().join(format!("sango_overworld_reset_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(folder.join("zone")).unwrap();
+        let (sd, file) = (folder.to_string_lossy().to_string(), folder.join("zone/6.bin"));
+        // The file of the card has other events and other settings.
+        let parts = sango_core::bundle::split(&game).unwrap().1;
+        let mut changed_events = events::MapEvents::parse(parts[1]).unwrap();
+        changed_events.warps.clear();
+        let mut settings = parts[0].to_vec();
+        settings[8] ^= 1;
+        let with_events = sango_core::bundle::replace_part_with(&game, 1, &changed_events.to_bytes(), 4).unwrap();
+        let both = sango_core::bundle::replace_part_with(&with_events, 0, &settings, 4).unwrap();
+        std::fs::write(&file, sango_core::lz::compress_lz11(&both)).unwrap();
+        events::remove_map_events(&arc, &sd, 6).unwrap();
+        let after = sango_core::lz::decompress(&std::fs::read(&file).unwrap()).unwrap();
+        let after = sango_core::bundle::split(&after).unwrap().1;
+        assert!(after[1] == parts[1] && after[0] == settings.as_slice());
+        // Only the events are changed: the file leaves the card.
+        std::fs::write(&file, sango_core::lz::compress_lz11(&with_events)).unwrap();
+        events::reset_map(&arc, &sd, 6).unwrap();
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// The list of a folder: a file is added, and taken away again.

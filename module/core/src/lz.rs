@@ -105,6 +105,66 @@ const LZ11_MAX_COPY: usize = 0x110;
 /// The farthest place that a copy can read from.
 const LZ11_WINDOW: usize = 4096;
 
+/// For each place of `data`, the longest copy of what comes next from the bytes before it, as its length and its distance (the
+/// nearest one for this length). The length is 0 when there is no copy of 3 bytes or more.
+fn longest_copies(data: &[u8]) -> Vec<(u16, u16)> {
+    const NONE: usize = usize::MAX;
+    let mut copies = vec![(0u16, 0u16); data.len()];
+    // The places that start with the same 3 bytes are in a chain, from the nearest one.
+    let mut first = vec![NONE; 1 << 16];
+    let mut before = vec![NONE; data.len()];
+    for at in 0..data.len().saturating_sub(2) {
+        let word = u32::from(data[at]) | u32::from(data[at + 1]) << 8 | u32::from(data[at + 2]) << 16;
+        let key = (word.wrapping_mul(0x9E37_79B1) >> 16) as usize;
+        let longest = LZ11_MAX_COPY.min(data.len() - at);
+        let (mut best_length, mut best_distance) = (2, 0);
+        let mut start = first[key];
+        while start != NONE && at - start <= LZ11_WINDOW {
+            // Only a copy that is longer than the best one counts, so its byte after the best length is looked at first.
+            if data[start + best_length] == data[at + best_length] {
+                // A copy can read bytes that it writes itself, so it can repeat a short pattern.
+                let length = data[start..].iter().zip(&data[at..at + longest]).take_while(|(a, b)| a == b).count();
+                if length > best_length {
+                    (best_length, best_distance) = (length, at - start);
+                    if length == longest {
+                        break;
+                    }
+                }
+            }
+            start = before[start];
+        }
+        if best_distance != 0 {
+            copies[at] = (best_length as u16, best_distance as u16);
+        }
+        before[at] = first[key];
+        first[key] = at;
+    }
+    copies
+}
+
+/// The number of bytes to take at each place (1: the byte as it is) so that the whole stream is small. A byte costs 9 bits, a
+/// copy of 16 bytes or less 17 bits, a longer one 25 bits (the bit of the flags counts).
+fn chosen_lengths(copies: &[(u16, u16)]) -> Vec<u16> {
+    let count = copies.len();
+    let mut cost = vec![0u64; count + 1];
+    let mut chosen = vec![1u16; count];
+    for at in (0..count).rev() {
+        let mut best = (cost[at + 1] + 9, 1);
+        let longest = usize::from(copies[at].0);
+        // Every short length, and the longest of the long ones.
+        let short = 3..=longest.min(16);
+        let long = longest.saturating_sub(15).max(17)..=longest;
+        for length in short.chain(long) {
+            let total = cost[at + length] + if length <= 16 { 17 } else { 25 };
+            if total <= best.0 {
+                best = (total, length);
+            }
+        }
+        (cost[at], chosen[at]) = (best.0, best.1 as u16);
+    }
+    chosen
+}
+
 /// Compresses data with LZ11. The result decompresses to the same data, but it is not the same bytes that the
 /// tools of Nintendo give: the compressor takes the longest copy that it finds in the last 4096 bytes.
 pub fn compress_lz11(data: &[u8]) -> Vec<u8> {
@@ -115,6 +175,8 @@ pub fn compress_lz11(data: &[u8]) -> Vec<u8> {
         out.extend([0, 0, 0]);
         out.extend((data.len() as u32).to_le_bytes());
     }
+    let copies = longest_copies(data);
+    let lengths = chosen_lengths(&copies);
     let mut at = 0;
     while at < data.len() {
         let flag_place = out.len();
@@ -124,38 +186,20 @@ pub fn compress_lz11(data: &[u8]) -> Vec<u8> {
             if at >= data.len() {
                 break;
             }
-            // The longest copy of what comes next, from the bytes that are already written.
-            let (mut best_length, mut best_distance) = (0, 0);
-            let longest = LZ11_MAX_COPY.min(data.len() - at);
-            if longest >= 3 {
-                for distance in 1..=at.min(LZ11_WINDOW) {
-                    let start = at - distance;
-                    let mut length = 0;
-                    // A copy can read bytes that it writes itself, so it can repeat a short pattern.
-                    while length < longest && data[start + length] == data[at + length] {
-                        length += 1;
-                    }
-                    if length > best_length {
-                        (best_length, best_distance) = (length, distance);
-                        if length == longest {
-                            break;
-                        }
-                    }
-                }
-            }
-            if best_length >= 3 {
+            let length = usize::from(lengths[at]);
+            if length >= 3 {
                 flags |= 0x80 >> bit;
-                let distance = best_distance - 1;
-                if best_length <= 16 {
-                    out.push(((best_length - 1) << 4 | distance >> 8) as u8);
+                let distance = usize::from(copies[at].1) - 1;
+                if length <= 16 {
+                    out.push(((length - 1) << 4 | distance >> 8) as u8);
                     out.push(distance as u8);
                 } else {
-                    let length = best_length - 0x11;
-                    out.push((length >> 4) as u8);
-                    out.push((length << 4 | distance >> 8) as u8);
+                    let rest = length - 0x11;
+                    out.push((rest >> 4) as u8);
+                    out.push((rest << 4 | distance >> 8) as u8);
                     out.push(distance as u8);
                 }
-                at += best_length;
+                at += length;
             } else {
                 out.push(data[at]);
                 at += 1;

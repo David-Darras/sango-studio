@@ -39,6 +39,7 @@ sango-character = { path = "module/character" }
 sango-nature = { path = "module/nature" }
 sango-font = { path = "module/font" }
 sango-player = { path = "module/player" }
+sango-zone = { path = "module/zone" }
 sango-layout = { path = "module/layout" }
 sango-battle = { path = "module/battle" }
 
@@ -52,6 +53,10 @@ debug = "line-tables-only"
 [profile.dev.package."*"]
 opt-level = 3
 debug = false
+
+# The compression of the files of the game is slow without it.
+[profile.dev.package.sango-core]
+opt-level = 3
 
 [profile.release]
 lto = "thin"
