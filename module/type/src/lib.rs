@@ -250,7 +250,7 @@ impl Type {
     fn name_row(&mut self, ui: &mut egui::Ui, sd: Option<&SdCard>, id: usize, asked: &mut Option<RowAction>) {
         let language = self.texts.language();
         let has_override = self.icons.has_override(id, language);
-        ui.menu_button("⋯", |ui| {
+        ui.menu_button("⚙", |ui| {
             if ui.button("Export the icon (PNG)").clicked() {
                 *asked = Some(RowAction::Icon(IconAction::Export, id, language));
                 ui.close_menu();
@@ -278,7 +278,7 @@ impl Type {
             }
         })
         .response
-        .on_hover_text("The icon of the type in this language, and more");
+        .on_hover_text("The settings of the type: its icon in this language, and more");
         let changed = if let Some(entry) = self.list.custom.iter_mut().find(|c| c.id == id) {
             // A new type: its names are in the list of the types. Without a name of its own, a language shows the English name.
             let mut text = entry.name_in(language).to_string();
