@@ -59,6 +59,10 @@ struct Shared {
     active: Option<egui::Id>,
     /// The field that the keyboard is open for.
     keyboard: Option<egui::Id>,
+    /// The last frame that showed the field of the keyboard.
+    keyboard_frame: u64,
+    /// The height of the keyboard without its characters (the title and the groups), measured when it shows.
+    keyboard_head: f32,
     /// The chosen group of the keyboard.
     group: usize,
     /// The colours of the buttons "Colour" and "Gradient".
@@ -173,8 +177,11 @@ fn edit_with(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, text: &mut String
     let ctx = ui.ctx().clone();
     let mut layouter = |ui: &egui::Ui, text: &str, wrap: f32| ui.fonts(|f| f.layout_job(layout(ui, text, wrap)));
     let editor = if rows <= 1 { egui::TextEdit::singleline(text) } else { egui::TextEdit::multiline(text).desired_rows(rows) };
-    let output = editor.id(id).desired_width(width).margin(egui::Margin { left: 4.0, right: 26.0, top: 2.0, bottom: 2.0 }).layouter(&mut layouter).show(ui);
+    let margin = egui::Margin { left: 4.0, right: KEY_MARGIN, top: 2.0, bottom: 2.0 };
+    let output = editor.id(id).desired_width(width).margin(margin).layouter(&mut layouter).show(ui);
     let mut response = output.response;
+    // The frame of the field: the rectangle of the response does not have the margins.
+    let field = egui::Rect::from_min_max(response.rect.min - margin.left_top(), response.rect.max + margin.right_bottom());
     // The mark under the pointer: a bubble shows what it is.
     if let Some(pointer) = response.hover_pos() {
         let cursor = output.galley.cursor_from_pos(pointer - output.galley_pos);
@@ -187,21 +194,33 @@ fn edit_with(ui: &mut egui::Ui, id_salt: impl std::hash::Hash, text: &mut String
         state.active = Some(id);
         set_shared(&ctx, state.clone());
     }
-    // The button of the keyboard, inside the field on the right.
-    let button = egui::Rect::from_min_size(egui::pos2(response.rect.right() - 24.0, response.rect.top() + 3.0), egui::vec2(20.0, 16.0));
-    let keyboard = ui.interact(button, id.with("keyboard_button"), egui::Sense::click()).on_hover_text("Characters of the game");
+    let button = keyboard_button(field, rows > 1);
+    let keyboard = ui.interact(button, id.with("keyboard_button"), egui::Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand).on_hover_text("Characters of the game");
     paint_keyboard_icon(ui, button, keyboard.hovered() || state.keyboard == Some(id));
+    let frame = ctx.cumulative_pass_nr();
     if keyboard.clicked() {
         state.keyboard = if state.keyboard == Some(id) { None } else { Some(id) };
+        state.keyboard_frame = frame;
         state.active = Some(id);
         set_shared(&ctx, state.clone());
     }
     let mut changed = false;
+    // The field and its bar: the keyboard does not cover them.
+    let mut anchor = field;
     if bar && state.active == Some(id) {
-        changed |= format_bar(ui, id, text, rows > 1, &mut state);
+        let (bar_changed, bar_rect) = format_bar(ui, id, text, rows > 1, &mut state);
+        changed |= bar_changed;
+        anchor = anchor.union(bar_rect);
     }
     if state.keyboard == Some(id) {
-        changed |= keyboard_window(&ctx, id, text, button, &mut state);
+        // The keyboard closes when its field was not on the screen: another page, or a row that scrolled out.
+        if frame > state.keyboard_frame + 1 || !ui.clip_rect().intersects(field) {
+            state.keyboard = None;
+            set_shared(&ctx, state.clone());
+        } else {
+            state.keyboard_frame = frame;
+            changed |= keyboard_window(&ctx, id, text, field, anchor, &mut state);
+        }
     }
     if changed {
         response.mark_changed();
@@ -276,6 +295,12 @@ fn mark_tooltip(ui: &mut egui::Ui, mark: &str) {
     }
 }
 
+/// The button of the keyboard: in the right margin of the field, in the middle of a field of one line, at the top of a larger one.
+fn keyboard_button(field: egui::Rect, large: bool) -> egui::Rect {
+    let y = if large { field.top() + 11.0 } else { field.center().y };
+    egui::Rect::from_center_size(egui::pos2(field.right() - KEY_MARGIN / 2.0, y), egui::vec2(20.0, 16.0))
+}
+
 /// A small keyboard: a frame and two rows of keys.
 fn paint_keyboard_icon(ui: &egui::Ui, rect: egui::Rect, strong: bool) {
     let painter = ui.painter();
@@ -291,11 +316,11 @@ fn paint_keyboard_icon(ui: &egui::Ui, rect: egui::Rect, strong: bool) {
     painter.line_segment([egui::pos2(body.left() + 5.0, body.bottom() - 2.4), egui::pos2(body.right() - 5.0, body.bottom() - 2.4)], egui::Stroke::new(1.4_f32, ink));
 }
 
-/// The bar of the buttons that put tags around the selection. True when the text changed.
-fn format_bar(ui: &mut egui::Ui, id: egui::Id, text: &mut String, dialogue: bool, state: &mut Shared) -> bool {
+/// The bar of the buttons that put tags around the selection. Gives true when the text changed, and the place of the bar.
+fn format_bar(ui: &mut egui::Ui, id: egui::Id, text: &mut String, dialogue: bool, state: &mut Shared) -> (bool, egui::Rect) {
     let ctx = ui.ctx().clone();
     let before = text.clone();
-    ui.horizontal_wrapped(|ui| {
+    let shown = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
         // The colours of the game.
         for (name, rgb) in text_tags::GAME_COLORS {
@@ -352,7 +377,7 @@ fn format_bar(ui: &mut egui::Ui, id: egui::Id, text: &mut String, dialogue: bool
         }
     });
     set_shared(&ctx, state.clone());
-    *text != before
+    (*text != before, shown.response.rect)
 }
 
 /// Removes the marks of colour and size in the selection (in all the text when nothing is selected).
@@ -374,18 +399,55 @@ fn clear_marks(ctx: &egui::Context, id: egui::Id, text: &mut String) {
     state.store(ctx, id);
 }
 
+/// The right margin of a field: the place of the button of the keyboard.
+const KEY_MARGIN: f32 = 26.0;
 /// The number of characters in a row of the keyboard, and the number of rows that show before the scroll.
 const KEYBOARD_COLUMNS: usize = 12;
 const KEYBOARD_ROWS: usize = 6;
+/// The least number of rows, when the room on the screen is small.
+const KEYBOARD_ROWS_LEAST: usize = 2;
+/// The height of a row of characters.
+const KEYBOARD_ROW_HEIGHT: f32 = 38.0;
+/// The space between the keyboard and its field.
+const KEYBOARD_GAP: f32 = 6.0;
 /// The width of the keyboard: the cells (30 points and the space between them) and the scroll bar.
 const KEYBOARD_WIDTH: f32 = KEYBOARD_COLUMNS as f32 * 34.0 + 16.0;
 
-/// The window of the characters of the font of the game. True when the text changed.
-fn keyboard_window(ctx: &egui::Context, id: egui::Id, text: &mut String, button: egui::Rect, state: &mut Shared) -> bool {
+/// Where the keyboard shows: the corner that stays in place, its position, and the height for the rows of characters.
+struct Place {
+    pivot: egui::Align2,
+    position: egui::Pos2,
+    rows: f32,
+}
+
+/// The keyboard is under `anchor` (the field and its bar), or above it when the room under it is too small. Its right side is at
+/// the right side of the field, but it stays in the screen. It has fewer rows when the chosen side does not have the room for all
+/// of them. `size` is the width of the keyboard, and its height without the rows.
+fn keyboard_place(field: egui::Rect, anchor: egui::Rect, size: egui::Vec2, screen: egui::Rect) -> Place {
+    let most = KEYBOARD_ROWS as f32 * KEYBOARD_ROW_HEIGHT;
+    let least = KEYBOARD_ROWS_LEAST as f32 * KEYBOARD_ROW_HEIGHT;
+    let under = screen.bottom() - anchor.bottom() - KEYBOARD_GAP;
+    let above = anchor.top() - screen.top() - KEYBOARD_GAP;
+    let goes_under = size.y + most <= under || (size.y + most > above && under >= above);
+    let room = if goes_under { under } else { above };
+    let x = (field.right() - size.x).min(screen.right() - size.x).max(screen.left());
+    let (pivot, y) = if goes_under { (egui::Align2::LEFT_TOP, anchor.bottom() + KEYBOARD_GAP) } else { (egui::Align2::LEFT_BOTTOM, anchor.top() - KEYBOARD_GAP) };
+    Place { pivot, position: egui::pos2(x, y), rows: (room - size.y).clamp(least, most) }
+}
+
+/// The window of the characters of the font of the game, attached to its field. It closes with Escape, with its cross, and with a
+/// click out of the field and out of the keyboard. True when the text changed.
+fn keyboard_window(ctx: &egui::Context, id: egui::Id, text: &mut String, field: egui::Rect, anchor: egui::Rect, state: &mut Shared) -> bool {
     let mut open = true;
     let mut changed = false;
     let font = game_font();
-    egui::Window::new("Characters of the game").id(id.with("keyboard")).collapsible(false).resizable(false).default_pos(button.left_bottom() + egui::vec2(-KEYBOARD_WIDTH + 20.0, 6.0)).open(&mut open).show(ctx, |ui| {
+    let window_id = id.with("keyboard");
+    // The sizes of the last frame. The first frame of a window does not show: the estimates are enough for it.
+    let width = ctx.memory(|m| m.area_rect(window_id)).map_or(KEYBOARD_WIDTH + 14.0, |rect| rect.width());
+    let head = if state.keyboard_head > 0.0 { state.keyboard_head } else { 100.0 };
+    let place = keyboard_place(field, anchor, egui::vec2(width, head), ctx.screen_rect());
+    let mut rows_height = 0.0;
+    let window = egui::Window::new("Characters of the game").id(window_id).collapsible(false).resizable(false).order(egui::Order::Foreground).pivot(place.pivot).fixed_pos(place.position).open(&mut open).show(ctx, |ui| {
         ui.set_width(KEYBOARD_WIDTH);
         let Some(font) = font.as_deref() else {
             ui.label(widget::hint("Open the dump of the game: the keyboard shows the characters of its font."));
@@ -404,7 +466,7 @@ fn keyboard_window(ctx: &egui::Context, id: egui::Id, text: &mut String, button:
         let Some((_, codes)) = groups.get(state.group) else { return };
         let columns = KEYBOARD_COLUMNS;
         let rows = codes.len().div_ceil(columns);
-        egui::ScrollArea::vertical().id_salt(id.with("keyboard_rows")).max_height(KEYBOARD_ROWS as f32 * 38.0).auto_shrink([false, true]).show_rows(ui, 38.0, rows, |ui, range| {
+        let list = egui::ScrollArea::vertical().id_salt(id.with("keyboard_rows")).max_height(place.rows).auto_shrink([false, true]).show_rows(ui, KEYBOARD_ROW_HEIGHT, rows, |ui, range| {
             ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
             for row in range {
                 ui.horizontal(|ui| {
@@ -425,8 +487,17 @@ fn keyboard_window(ctx: &egui::Context, id: egui::Id, text: &mut String, button:
                 });
             }
         });
+        rows_height = list.inner_rect.height();
     });
-    if !open {
+    if let Some(window) = &window {
+        if rows_height > 0.0 {
+            state.keyboard_head = window.response.rect.height() - rows_height;
+        }
+    }
+    // A press out of the field, of its bar and of the keyboard.
+    let pressed = ctx.input(|i| if i.pointer.any_pressed() { i.pointer.interact_pos() } else { None });
+    let outside = pressed.is_some_and(|at| !anchor.contains(at) && window.as_ref().is_some_and(|window| ctx.layer_id_at(at) != Some(window.response.layer_id)));
+    if !open || outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         state.keyboard = None;
     }
     set_shared(ctx, state.clone());
@@ -456,5 +527,67 @@ mod test {
         clear_marks(&ctx, id, &mut text);
         assert_eq!(text, "[char E08E] world");
         assert_eq!(plain_character('[' as u16), "[[");
+    }
+
+    /// Draws one frame with a field of one line at `at`, and gives the frame of the field.
+    fn frame(ctx: &egui::Context, screen: egui::Vec2, at: egui::Pos2, events: Vec<egui::Event>) -> egui::Rect {
+        let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)), events, ..Default::default() };
+        let mut text = String::from("Hello");
+        let mut field = egui::Rect::NOTHING;
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let place = egui::Rect::from_min_size(at, egui::vec2(330.0, 30.0));
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(place), |ui| {
+                    let inner = edit_line(ui, "field", &mut text, 300.0).rect;
+                    field = egui::Rect::from_min_max(inner.min - egui::vec2(4.0, 2.0), inner.max + egui::vec2(KEY_MARGIN, 2.0));
+                });
+            });
+        });
+        field
+    }
+
+    fn click(ctx: &egui::Context, screen: egui::Vec2, field_at: egui::Pos2, at: egui::Pos2) {
+        let button = |pressed| egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE };
+        frame(ctx, screen, field_at, vec![egui::Event::PointerMoved(at), button(true)]);
+        frame(ctx, screen, field_at, vec![button(false)]);
+    }
+
+    #[test]
+    fn the_keyboard_follows_its_field_and_stays_in_the_screen() {
+        // With the dump, the keyboard has the characters of the font; without it, only a hint.
+        if let Ok(root) = std::env::var("SANGO_DUMP") {
+            set_dump(Some(&Dump::open(&root).unwrap()));
+        }
+        for screen in [egui::vec2(1280.0, 800.0), egui::vec2(720.0, 480.0)] {
+            let ctx = egui::Context::default();
+            let first = egui::pos2(screen.x - 350.0, 20.0);
+            let field = frame(&ctx, screen, first, Vec::new());
+            click(&ctx, screen, first, egui::pos2(field.right() - KEY_MARGIN / 2.0, field.center().y));
+            assert!(shared(&ctx).keyboard.is_some(), "the button in the right margin opens the keyboard");
+            let whole = egui::Rect::from_min_size(egui::Pos2::ZERO, screen);
+            let mut keyboard = egui::Rect::NOTHING;
+            // The field moves: top right, bottom left, top left and the middle of the screen.
+            for at in [first, egui::pos2(10.0, screen.y - 40.0), egui::pos2(8.0, 30.0), egui::pos2(200.0, screen.y / 2.0)] {
+                let mut field = egui::Rect::NOTHING;
+                for _ in 0..4 {
+                    field = frame(&ctx, screen, at, Vec::new());
+                }
+                let open = shared(&ctx).keyboard.expect("the keyboard stays open");
+                keyboard = ctx.memory(|m| m.area_rect(open.with("keyboard"))).unwrap();
+                println!("screen {screen:?} field {field:?} keyboard {keyboard:?}");
+                assert!(whole.expand(0.5).contains_rect(keyboard), "in the screen: {keyboard:?} {screen:?}");
+                assert!(!keyboard.shrink(0.5).intersects(field), "out of the field: {keyboard:?} {field:?}");
+                let distance = (keyboard.top() - field.bottom()).abs().min((field.top() - keyboard.bottom()).abs());
+                assert!(distance <= KEYBOARD_GAP + 1.0, "next to the field: {keyboard:?} {field:?}");
+            }
+            // A click in the keyboard keeps it open; a click out of the field and of the keyboard closes it.
+            let at = egui::pos2(200.0, screen.y / 2.0);
+            click(&ctx, screen, at, keyboard.center());
+            assert!(shared(&ctx).keyboard.is_some());
+            let far = [egui::pos2(screen.x - 3.0, screen.y - 3.0), egui::pos2(screen.x - 3.0, 3.0), egui::pos2(3.0, 3.0)].into_iter().find(|p| !keyboard.contains(*p)).unwrap();
+            click(&ctx, screen, at, far);
+            assert_eq!(shared(&ctx).keyboard, None);
+        }
+        set_dump(None);
     }
 }
