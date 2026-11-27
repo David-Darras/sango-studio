@@ -541,7 +541,7 @@ mod test {
 
     fn small_model() -> (Model, HashMap<String, Texture>) {
         let vertex = |x: f32, y: f32| Vertex { position: [x, y, 0.0], normal: [0.0, 0.0, 1.0], uv: [x, y], weights: [1.0, 0.0, 0.0, 0.0], ..Vertex::default() };
-        let mesh = Mesh { material: 0, vertices: vec![vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)], triangles: vec![[0, 1, 2]] };
+        let mesh = Mesh { material: 0, vertices: vec![vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)], triangles: vec![[0, 1, 2]], ..Mesh::default() };
         let bone = sango_core::model::Bone { name: "root".into(), parent: None, scale: [1.0; 3], rotation: [0.0; 3], translation: [0.0; 3] };
         let material = Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_wrap: [2, 2], units: [Unit { texture: "t".into(), scale: [1.0, 1.0], translation: [0.0, 0.0], wrap: [2, 2] }, Unit::default(), Unit::default()], ..Material::default() };
         let texture = Texture { name: "t".into(), width: 2, height: 2, rgba: vec![255; 16] };

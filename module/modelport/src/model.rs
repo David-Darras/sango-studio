@@ -41,6 +41,26 @@ pub struct Layout {
     pub layer: u32,
 }
 
+/// How a pixel of a material goes over what is behind it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cover {
+    /// It takes its place.
+    Opaque,
+    /// It takes its place, or it is not drawn: the opacity of the picture says which.
+    Cut,
+    /// It is mixed with it, by the opacity of the picture.
+    SeeThrough,
+}
+
+/// How a material that a file of Studio describes is drawn: the file says it, so the writer sets the material to it and does
+/// not take the settings of the template for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Finish {
+    pub cover: Cover,
+    /// The light does not touch the material: it shows its picture.
+    pub unlit: bool,
+}
+
 /// A material of the source: the name, the texture of each unit, the transform of each unit (scale x and y, rotation, translation x and
 /// y), and how it blends: alpha test, alpha blend and, when known, additive.
 #[derive(Clone, Debug)]
@@ -50,6 +70,8 @@ pub struct MaterialSpec {
     pub uv: [Option<[f64; 5]>; 3],
     pub blend: Vec<bool>,
     pub layout: Layout,
+    /// `None` for a material whose drawing comes from the template (the files that other programs write).
+    pub finish: Option<Finish>,
 }
 
 /// A mesh of the model (a node): its name, its bounding box and its draws.
@@ -181,6 +203,88 @@ fn template_additive(tp: &Template, content: usize) -> bool {
         i += 2 + extra + ((extra + 2) % 2);
     }
     false
+}
+
+/// The registers of the six steps that mix the colours of a material.
+const STAGES: [u32; 6] = [0xC0, 0xC8, 0xD0, 0xD8, 0xF0, 0xF8];
+
+/// The pictures that the steps of a template material read for the colour (the sources 3 to 5), from its commands. The
+/// opacity is not looked at: an opaque material does not use it, and the writer sets it for the others.
+fn pictures_read(tp: &Template, content: usize) -> [bool; 3] {
+    let regs = registers(&words_of(tp, tp.c32(content + 0xC8), tp.c32(content + 0xCC)));
+    let mut read = [false; 3];
+    for base in STAGES {
+        let (Some(&source), mode) = (regs.get(&base), regs.get(&(base + 2)).copied().unwrap_or(0)) else { continue };
+        // The number of values that the way of mixing takes.
+        let values = match mode & 0xF {
+            0 => 1,
+            4 | 8 | 9 => 3,
+            _ => 2,
+        };
+        for k in 0..values {
+            if let source @ 3..=5 = (source >> (4 * k)) & 0xF {
+                read[source as usize - 3] = true;
+            }
+        }
+    }
+    read
+}
+
+/// How far the colour that the steps of a template material give is from the picture that they receive (0 to 1), in full
+/// light, for a red picture and a blue one. A material that darkens or tints its picture is far from it.
+fn tint(tp: &Template, content: usize) -> f32 {
+    let (stages, buffer_color) = sango_core::model::combiner_of(&words_of(tp, tp.c32(content + 0xC8), tp.c32(content + 0xCC)));
+    let unit = sango_core::model::Unit { texture: String::new(), scale: [1.0; 2], translation: [0.0; 2], wrap: [2, 2] };
+    let material = sango_core::model::Material { stages, buffer_color, units: std::array::from_fn(|_| unit.clone()), ..Default::default() };
+    let picture = |color: [u8; 3]| sango_core::model::Texture { name: String::new(), width: 1, height: 1, rgba: vec![color[0], color[1], color[2], 255] };
+    let white = picture([255; 3]);
+    [[200u8, 70, 40], [50, 150, 220]]
+        .into_iter()
+        .flat_map(|color| {
+            let own = picture(color);
+            let shown = sango_core::render::combine(&material, &[Some(&own), Some(&white), Some(&white)], [0.5; 2], 1.0, [1.0; 4]);
+            (0..3).map(move |k| (shown[k] - f32::from(color[k]) / 255.0).abs())
+        })
+        .fold(0.0, f32::max)
+}
+
+/// Changes the value that a list of commands gives to a register. A list that does not write the register stays as it is.
+fn set_register(words: &mut [u32], register: u32, value: impl Fn(u32) -> u32) {
+    if let Some(&(old, place)) = sango_core::pica::registers(words).get(&(register as u16)) {
+        words[place] = value(old);
+    }
+}
+
+/// Sets the commands of a material to the way that the file says: how its pixels go over what is behind, and where the colour
+/// and the opacity come from. Only values change: the list keeps its size.
+fn set_finish(words: &mut [u32], finish: Finish) {
+    // The mix with the colour behind: the factors of the new colour and of the old one, for the colour and for the opacity.
+    let (mix, test, writes_depth) = match finish.cover {
+        Cover::Opaque => (0x0101_0000, 0, true),
+        // The test of the opacity: on, "greater than" 127.
+        Cover::Cut => (0x0101_0000, 1 | 6 << 4 | 127 << 8, true),
+        // Greater than 0: a clear pixel is not drawn.
+        Cover::SeeThrough => (0x7676_0000, 1 | 6 << 4, false),
+    };
+    set_register(words, 0x101, |_| mix);
+    set_register(words, 0x104, |_| test);
+    set_register(words, 0x107, |old| if writes_depth { old | 0x1000 } else { old & !0x1000 });
+    if finish.unlit {
+        // The first step gives the first picture (colour and opacity), the others keep what they receive (the source 15).
+        for (k, base) in STAGES.into_iter().enumerate() {
+            set_register(words, base, |_| if k == 0 { 0x0333_0333 } else { 0x0FFF_0FFF });
+            for offset in [1, 2, 4] {
+                set_register(words, base + offset, |_| 0);
+            }
+        }
+    } else if finish.cover != Cover::Opaque {
+        // The last step takes the opacity of the first picture, and keeps its way with the colour.
+        let last = STAGES[5];
+        set_register(words, last, |old| old & 0x0000_FFFF | 0x0333_0000);
+        set_register(words, last + 1, |old| old & 0x0000_0FFF);
+        set_register(words, last + 2, |old| old & 0x0000_FFFF);
+        set_register(words, last + 4, |old| old & 0x0000_FFFF);
+    }
 }
 
 fn common_prefix(a: &str, b: &str) -> usize {
@@ -580,6 +684,8 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
         model_name: String,
         blend: (bool, bool),
         additive: bool,
+        reads: [bool; 3],
+        tint: f32,
     }
     let mut candidates: Vec<Candidate> = Vec::new();
     for (place, tp) in templates.iter().enumerate() {
@@ -596,12 +702,14 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
                 model_name: tp.string(tp.c32(tmodel_p + 33 * 4)),
                 blend: template_blend(tp, tp.c32(md)),
                 additive: template_additive(tp, tp.c32(md)),
+                reads: pictures_read(tp, tp.c32(md)),
+                tint: tint(tp, tp.c32(md)),
             });
         }
     }
-    let pick = |name: &str, slots: &[Option<String>; 3], blend: &[bool]| -> usize {
+    let pick = |name: &str, slots: &[Option<String>; 3], blend: &[bool], finish: Option<Finish>| -> usize {
         let (want, class) = (used_units(slots), material_class(name));
-        let (mut best, mut score) = (0usize, -1i64);
+        let (mut best, mut score) = (0usize, i64::MIN);
         for (index, cand) in candidates.iter().enumerate() {
             // The first unit carries the colour, so it weighs the most, and the third is only the normal map.
             let mut s: i64 = [8, 4, 2].iter().zip(cand.units.iter().zip(want.iter())).filter(|(_, (a, b))| a == b).map(|(w, _)| *w).sum();
@@ -611,6 +719,15 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
             s += if cand.blend.0 == blend[0] { 4 } else { 0 };
             if blend.len() > 2 && cand.additive == blend[2] {
                 s += 12;
+            }
+            // A material whose steps read a picture that the source does not give would show the white picture in its place.
+            if finish.is_some_and(|f| !f.unlit) {
+                s -= 100 * (1..3).filter(|&k| cand.reads[k] && !want[k]).count() as i64;
+                // The steps must show the picture. A template of the game tints it a little for its shadows (less than 0.3);
+                // some make it black when they receive a white picture or no constant colour.
+                if cand.tint > 0.4 {
+                    s -= 1000;
+                }
             }
             if s > score {
                 best = index;
@@ -627,7 +744,7 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
         let uv: [Option<[f64; 5]>; 3] = std::array::from_fn(|k| origin[k].and_then(|o| spec.uv[o]));
         let mappers: [Option<(u8, u8, u8, u8, u8, Option<u32>)>; 3] = std::array::from_fn(|k| origin[k].and_then(|o| spec.layout.units.get(&o)).map(|u| (u.wrap.0, u.wrap.1, u.mag, u.min, u.lod, u.border)));
         let sources: [f64; 4] = std::array::from_fn(|k| if k < 3 { origin[k].map_or(0.0, |o| spec.layout.sources[o]) } else { spec.layout.sources[3] });
-        let cand = &candidates[pick(&spec.name, &spec.slots, &spec.blend)];
+        let cand = &candidates[pick(&spec.name, &spec.slots, &spec.blend, spec.finish)];
         let tp = &templates[cand.place];
         let tmat = cand.material;
         let key = (cand.place, tmat);
@@ -639,7 +756,10 @@ pub fn write_model_bch(model: &ModelSpec, templates: &[Template], model_name: &s
             cache.insert(key, (tcontent, tp.c32(tmat + 24), tp.metadata(tp.c32(tcontent + 0x10C)), texfunc, tp.cmd(param_off, param_cnt)));
         }
         let (tcontent, tsamplers, tmeta, texfunc, param_words) = cache[&key].clone();
-        let param_words = texture_sources(&texture_transform(&param_words, &uv), &sources);
+        let mut param_words = texture_sources(&texture_transform(&param_words, &uv), &sources);
+        if let Some(finish) = spec.finish {
+            set_finish(&mut param_words, finish);
+        }
         let param = bch::emit_commands(&mut cmds, &param_words, &[]);
         let content = sec.tell();
         sec.raw(&tp.d[tp.c + tcontent..tp.c + tcontent + 0x110]);

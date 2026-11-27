@@ -2,7 +2,7 @@
 
 use crate::geometry::{self, Prim};
 use crate::gltf::Source;
-use crate::model::{self, Layout, MaterialSpec, MeshSpec, ModelSpec, Unit};
+use crate::model::{self, Cover, Finish, Layout, MaterialSpec, MeshSpec, ModelSpec, Unit};
 use crate::skeleton;
 use crate::template::Template;
 use crate::texture::{self, Texture};
@@ -189,6 +189,7 @@ pub fn prepare_with(source: &Source, model_name: &str, scale_factor: f64, flip_p
         additive: bool,
         wrap: [u8; 2],
         image: (usize, usize, Vec<u8>),
+        finish: Option<Finish>,
     }
     let mut infos = Vec::new();
     for material in &source.materials {
@@ -212,7 +213,17 @@ pub fn prepare_with(source: &Source, model_name: &str, scale_factor: f64, flip_p
             }
         };
         let image = if flip_pictures { (image.0, image.1, image.2.chunks(image.0 * 4).rev().flatten().copied().collect()) } else { image };
-        infos.push(Info { name: material.name.clone(), blend, additive, wrap: material.wrap, image });
+        // A file of Studio says how each material is drawn. A model that keeps the materials of the original model (a trainer)
+        // keeps their way.
+        let finish = (source.game_units && original.is_none()).then(|| {
+            let cover = match (material.blend, material.mask) {
+                (false, _) => Cover::Opaque,
+                (true, true) => Cover::Cut,
+                (true, false) => Cover::SeeThrough,
+            };
+            Finish { cover, unlit: material.unlit }
+        });
+        infos.push(Info { name: material.name.clone(), blend, additive, wrap: material.wrap, image, finish });
     }
     let mut textures: Vec<Texture> = Vec::new();
     let mut groups: HashMap<(usize, usize, Vec<u8>, bool, bool), String> = HashMap::new();
@@ -234,8 +245,13 @@ pub fn prepare_with(source: &Source, model_name: &str, scale_factor: f64, flip_p
             name: info.name.clone(),
             slots: [Some(format!("{texture_name}.tga")), None, None],
             uv: [Some([1.0, 1.0, 0.0, 0.0, 0.0]), None, None],
-            blend: vec![info.blend, info.blend, info.additive],
-            layout: material_layout(info.blend, info.wrap),
+            blend: match info.finish {
+                // The test of the opacity, and the mix.
+                Some(finish) => vec![finish.cover != Cover::Opaque, finish.cover == Cover::SeeThrough, false],
+                None => vec![info.blend, info.blend, info.additive],
+            },
+            layout: material_layout(info.finish.map_or(info.blend, |f| f.cover == Cover::SeeThrough), info.wrap),
+            finish: info.finish,
         });
     }
     textures.push(make_texture_with("DummyTex", &[255; 32 * 32 * 4], 32, 32, true, None, compress));
@@ -271,7 +287,8 @@ pub fn convert_with(source: &Source, templates: &Templates, model_name: &str, sc
 
     // The shadow: the body, coarsened, on one material.
     let size = (0..3).map(|k| aabb.1[k] - aabb.0[k]).fold(f64::MIN, f64::max);
-    let blends: HashMap<&str, bool> = materials.iter().map(|m| (m.name.as_str(), m.blend[0])).collect();
+    // The materials that let what is behind them show cast no shadow.
+    let blends: HashMap<&str, bool> = materials.iter().map(|m| (m.name.as_str(), m.finish.map_or(m.blend[0], |f| f.cover == Cover::SeeThrough))).collect();
     let mut shadow_faces = Vec::new();
     for (data, material, flip) in &all {
         if blends.get(material.as_str()).copied().unwrap_or(false) {
@@ -288,6 +305,7 @@ pub fn convert_with(source: &Source, templates: &Templates, model_name: &str, sc
         uv: [None, None, None],
         blend: vec![true, false],
         layout: Layout { units: BTreeMap::new(), sources: [0.0; 4], priority: 0, layer: 0 },
+        finish: None,
     };
     let shadow_spec = ModelSpec { aabb, joints: skeleton.joints.clone(), materials: vec![shadow_material], meshes: vec![MeshSpec { name: "BodySkin".into(), aabb, faces: shadow_faces }] };
     let shadow = model::write_model_file(&shadow_spec, std::slice::from_ref(&templates.shadow), &format!("{model_name}_shadow"), &texture_names)?;
@@ -325,6 +343,52 @@ mod test {
         match a.iter().zip(b).position(|(x, y)| x != y) {
             Some(at) => format!("first difference at {at:#x} ({:#x} against {:#x}), sizes {} and {}", a[at], b[at], a.len(), b.len()),
             None => format!("same start, sizes {} and {}", a.len(), b.len()),
+        }
+    }
+
+    /// A material of a file of Studio is drawn as the file says, whatever the template: the steps and the mix are read back by
+    /// the reader of Studio.
+    #[test]
+    fn the_materials_of_a_file_of_studio_are_drawn_as_it_says() {
+        let Some(templates) = templates() else { return };
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("golden").join("model");
+        let mut source = crate::gltf::read(&dir.join("body.gltf")).unwrap();
+        source.game_units = true;
+        for (blend, mask, unlit) in [(false, false, false), (true, true, false), (true, false, false), (true, true, true)] {
+            for material in &mut source.materials {
+                (material.blend, material.mask, material.unlit) = (blend, mask, unlit);
+            }
+            let made = convert(&source, &templates, "pm0025_01", 0.01).unwrap();
+            let model = sango_core::model::parse_model(&made.model).unwrap();
+            for material in &model.materials {
+                let state = &material.state;
+                let mixes = (state.color_source, state.color_destination) != (1, 0);
+                assert_eq!((mixes, state.alpha_test.map(|t| t.1), state.depth_write), match (blend, mask) {
+                    (false, _) => (false, None, true),
+                    (true, true) => (false, Some(127), true),
+                    (true, false) => (true, Some(0), false),
+                }, "{}", material.name);
+                // The colour comes only from the first picture, the one that the source gives.
+                let used = |stage: &sango_core::model::Stage| {
+                    let count = |mode: u8| match mode {
+                        0 => 1,
+                        4 | 8 | 9 => 3,
+                        _ => 2,
+                    };
+                    stage.color_source[..count(stage.color_mode)].iter().any(|&s| s == 4 || s == 5)
+                };
+                assert!(!material.stages.iter().any(used), "{}: {:?}", material.name, material.stages);
+                // In full light the steps give the colour of the picture.
+                let picture = sango_core::model::Texture { name: String::new(), width: 1, height: 1, rgba: vec![200, 70, 40, 255] };
+                let shown = sango_core::render::combine(material, &[Some(&picture), None, None], [0.5; 2], 1.0, [1.0; 4]);
+                let gap = (shown[0] - 200.0 / 255.0).abs().max((shown[1] - 70.0 / 255.0).abs()).max((shown[2] - 40.0 / 255.0).abs());
+                assert!(gap < 0.3, "{}: the colour is {shown:?}", material.name);
+                if unlit {
+                    assert_eq!((material.stages[0].color_source[0], material.stages[0].alpha_source[0], material.stages[1].color_source[0]), (3, 3, 15));
+                } else if blend {
+                    assert_eq!((material.stages[5].alpha_source[0], material.stages[5].alpha_mode), (3, 0));
+                }
+            }
         }
     }
 

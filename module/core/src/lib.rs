@@ -6,6 +6,7 @@ mod dump;
 mod sd;
 pub mod setting;
 
+pub mod animation;
 pub mod backup;
 pub mod bundle;
 pub mod bytes;

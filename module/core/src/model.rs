@@ -87,6 +87,8 @@ pub struct Material {
     pub state: RenderState,
     /// The colour that the steps can use as a value of their own, from the file (red, green, blue, alpha).
     pub buffer_color: [u8; 4],
+    /// The colour of the material (0 to 5) that each step takes: a motion changes the colours of the material.
+    pub colour_slots: [u8; 6],
 }
 
 /// How the game draws a material, from the data that the file adds to the material (the optional data named "PrivateMod").
@@ -176,6 +178,10 @@ pub struct Mesh {
     pub vertices: Vec<Vertex>,
     /// Three places in `vertices` for each triangle.
     pub triangles: Vec<[u32; 3]>,
+    /// The name of the node of the mesh: a motion shows and hides the meshes by it.
+    pub node: String,
+    /// True when the mesh is not drawn: the file says it, or the motion of the frame.
+    pub hidden: bool,
 }
 
 /// A picture, with the first row at the top.
@@ -197,9 +203,9 @@ pub struct Model {
 }
 
 /// A model file in memory, with the places of its parts.
-struct File<'a> {
-    data: &'a [u8],
-    content: usize,
+pub(crate) struct File<'a> {
+    pub(crate) data: &'a [u8],
+    pub(crate) content: usize,
     strings: usize,
     commands: usize,
     raw: usize,
@@ -217,7 +223,7 @@ pub fn is_second_block(kind: u8) -> bool {
 }
 
 impl<'a> File<'a> {
-    fn new(data: &'a [u8]) -> Result<File<'a>, String> {
+    pub(crate) fn new(data: &'a [u8]) -> Result<File<'a>, String> {
         if data.get(..4) != Some(b"BCH\0") {
             return Err("This is not a model file.".into());
         }
@@ -238,15 +244,15 @@ impl<'a> File<'a> {
         Ok(file)
     }
 
-    fn u32(&self, at: usize) -> Result<u32, String> {
+    pub(crate) fn u32(&self, at: usize) -> Result<u32, String> {
         self.data.get(at..at + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])).ok_or_else(|| format!("The model file stops at {at:#x}."))
     }
 
-    fn u16(&self, at: usize) -> Result<u16, String> {
+    pub(crate) fn u16(&self, at: usize) -> Result<u16, String> {
         self.data.get(at..at + 2).map(|b| u16::from_le_bytes([b[0], b[1]])).ok_or_else(|| format!("The model file stops at {at:#x}."))
     }
 
-    fn f32(&self, at: usize) -> Result<f32, String> {
+    pub(crate) fn f32(&self, at: usize) -> Result<f32, String> {
         Ok(f32::from_bits(self.u32(at)?))
     }
 
@@ -255,7 +261,7 @@ impl<'a> File<'a> {
     }
 
     /// A name: the offset is from the start of the names.
-    fn name(&self, offset: u32) -> String {
+    pub(crate) fn name(&self, offset: u32) -> String {
         let tail = self.data.get(self.strings + offset as usize..).unwrap_or(&[]);
         let end = tail.iter().position(|&b| b == 0).unwrap_or(tail.len()).min(80);
         String::from_utf8_lossy(&tail[..end]).into_owned()
@@ -741,7 +747,10 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
             _ => Default::default(),
         };
         let state = read_state(&file, params).unwrap_or_default();
-        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent, unlit: flags & 0x0010_0000 == 0, units, stages, buffer_color, state });
+        // Four bits for each step at 0xc0: the colour of the material that the step takes.
+        let assigned = file.u32(params + 0xc0).unwrap_or(0);
+        let colour_slots = std::array::from_fn(|step| (assigned >> (4 * step) & 0xf) as u8);
+        materials.push(Material { name, texture, texture_scale: scale, texture_translation: translation, texture_wrap: wrap, transparent, unlit: flags & 0x0010_0000 == 0, units, stages, buffer_color, colour_slots, state });
     }
 
     // The skeleton.
@@ -759,6 +768,20 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
             translation: file.vec3(at + 32)?,
         });
     }
+
+    // The nodes of the meshes: their names, and the bits of the ones that are shown (0x7c, their number at 0x80). The
+    // names are in a tree of 12 bytes for each node, after a first one with no name (0x8c, the number at 0x88).
+    // A model with no table that can be read shows all its meshes.
+    let word = |at: usize| file.u32(at).unwrap_or(0) as usize;
+    let (bits, shown_count) = (content + word(model + 0x7c), word(model + 0x80));
+    let (node_count, tree) = (word(model + 0x88), content + word(model + 0x8c));
+    let nodes: Vec<(String, bool)> = (0..node_count.min(256))
+        .map(|i| {
+            let name = file.u32(tree + 12 * (i + 1) + 8).map_or_else(|_| String::new(), |offset| file.name(offset));
+            let hidden = i < shown_count && file.u32(bits + 4 * (i / 32)).is_ok_and(|shown| shown >> (i % 32) & 1 == 0);
+            (name, hidden)
+        })
+        .collect();
 
     // The meshes.
     let mesh_table = content + file.u32(model + 0x40)? as usize;
@@ -806,7 +829,8 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
             };
             let indexes: Vec<u32> = (0..count).map(index).collect::<Result<_, _>>()?;
             // The vertices of this part: each place that the triangles use, in the order of the first use.
-            let mut mesh = Mesh { material, ..Mesh::default() };
+            let (node, hidden) = nodes.get(usize::from(file.u16(at + 4)?)).cloned().unwrap_or_default();
+            let mut mesh = Mesh { material, node, hidden, ..Mesh::default() };
             let mut place: HashMap<u32, u32> = HashMap::new();
             let mut local = |vertex: u32, mesh: &mut Mesh| -> Result<u32, String> {
                 if let Some(&found) = place.get(&vertex) {
@@ -880,6 +904,11 @@ fn read_state(file: &File, params: usize) -> Option<RenderState> {
         state.depth_write = mask & 0x1000 != 0;
     }
     Some(state)
+}
+
+/// The steps of the mix of a list of commands of a material, with the colour of the saved value.
+pub fn combiner_of(words: &[u32]) -> (Vec<Stage>, [u8; 4]) {
+    read_stages(&registers(words))
 }
 
 /// The steps of the mix of a material, from the registers of the graphics chip that its commands set. The six steps have

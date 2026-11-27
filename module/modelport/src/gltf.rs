@@ -52,6 +52,10 @@ pub struct Material {
     pub image: Option<usize>,
     /// True for the modes BLEND and MASK.
     pub blend: bool,
+    /// True for the mode MASK: a pixel is drawn or not.
+    pub mask: bool,
+    /// True when the file says that the light does not touch the material (`KHR_materials_unlit`).
+    pub unlit: bool,
     /// How the picture repeats outside of the square of the texture coordinates (horizontally, vertically), as the GPU numbers it: 0 clamp
     /// to the edge, 1 clamp to the border, 2 repeat, 3 mirrored repeat.
     pub wrap: [u8; 2],
@@ -326,6 +330,8 @@ fn build(binary: &Binary, folder: Option<&Path>) -> Result<Source, String> {
             base_color: floats(pbr.get("baseColorFactor"), [0.8, 0.8, 0.8, 1.0]),
             image,
             blend: mode == "BLEND" || mode == "MASK",
+            mask: mode == "MASK",
+            unlit: material["extensions"].get("KHR_materials_unlit").is_some(),
         });
     }
 
@@ -573,7 +579,7 @@ mod test {
         let mesh = &source.primitives[0];
         assert_eq!((mesh.positions.len(), mesh.indices.clone()), (3, vec![0, 1, 2]));
         assert_eq!((mesh.joints[1], mesh.weights[2]), ([1, 0, 0, 0], [0.25, 0.75, 0.0, 0.0]));
-        assert_eq!(source.materials[0], Material { name: "Body".into(), base_color: [0.8, 0.8, 0.8, 1.0], image: Some(0), blend: true, wrap: [2, 2] });
+        assert_eq!(source.materials[0], Material { name: "Body".into(), base_color: [0.8, 0.8, 0.8, 1.0], image: Some(0), blend: true, mask: false, unlit: false, wrap: [2, 2] });
         assert_eq!((source.images[0].width, source.images[0].rgba.clone()), (1, vec![255, 0, 0, 255]));
         let animation = &source.animations[0];
         assert_eq!((animation.name.as_str(), animation.channels[0].path, animation.channels[0].times.clone()), ("move", Path3::Translation, vec![0.0, 1.0]));

@@ -4,6 +4,7 @@
 //! a point of view that the user turns with the mouse and zooms with the wheel, and lists the pictures that paint it.
 //! The drawing is made on the processor (see `sango_core::render`): the window shows its result as one picture.
 
+use sango_core::animation::Look;
 use sango_core::model::{first_bone_name, parse_model, parse_textures, Model, Texture};
 use sango_core::motion::{Motion, MotionPack};
 use sango_core::posing::posed;
@@ -66,6 +67,9 @@ const VIEW_SIZE: usize = 440;
 /// The files of a model, from its first file: the model, then the pictures and the pictures of the shiny colours.
 const TEXTURE_OFFSET: usize = 2;
 const SHINY_TEXTURE_OFFSET: usize = 3;
+
+/// The face file of a model, from its first file: it holds the endless animation of the flames and the gas.
+const FACE_OFFSET: usize = 1;
 
 /// The motion files, from the first file of a model: the battle motions and the Pokémon-Amie motions.
 const BATTLE_MOTION_OFFSET: usize = 5;
@@ -164,8 +168,9 @@ pub(crate) fn glb_of_game_model(archive: &Garc, species: usize) -> Result<Vec<u8
     let variant = variants(archive, species).into_iter().next().ok_or("The species has no model.")?;
     let (model, textures) = read_model(archive, variant.file, false)?;
     let by_name = textures.iter().map(|t| (t.name.clone(), t.clone())).collect();
-    let (battle, amie) = (read_motions(archive, variant.file + BATTLE_MOTION_OFFSET), read_motions(archive, variant.file + AMIE_MOTION_OFFSET));
-    glb_of(&Loaded { species, form: 0, shiny: false, model, textures, by_name, battle, amie })
+    let (battle, amie) = (read_motion_file(archive, variant.file + BATTLE_MOTION_OFFSET), read_motion_file(archive, variant.file + AMIE_MOTION_OFFSET));
+    let endless = read_endless(archive, variant.file);
+    glb_of(&Loaded { species, form: 0, shiny: false, model, textures, by_name, battle, amie, endless })
 }
 
 /// The battle motions of the first model of a species of the archive, and the same read from other files (for the tests).
@@ -185,8 +190,10 @@ struct Loaded {
     /// The pictures by their name, for the drawing.
     by_name: HashMap<String, Texture>,
     /// The battle motions and the Pokémon-Amie motions, when the files have them.
-    battle: Option<MotionPack>,
-    amie: Option<MotionPack>,
+    battle: Option<MotionFile>,
+    amie: Option<MotionFile>,
+    /// The animation that goes round and round over every motion.
+    endless: Look,
 }
 
 /// The motion that plays: which file, which one, and the motion itself.
@@ -222,6 +229,8 @@ pub struct ModelTab {
     playing: Option<Playing>,
     running: bool,
     frame: f32,
+    /// The frames since the motion started: the endless animation follows them.
+    clock: f32,
     last_tick: Option<std::time::Instant>,
     /// The frame of the picture, from all the poses of the motion: the view does not move while the motion plays.
     focus: Option<([f32; 3], f32)>,
@@ -247,7 +256,7 @@ pub struct ModelTab {
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, last_tick: None, focus: None, slow: false, female: false, shows_own_model: true, top_form: 0, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
+        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, clock: 0.0, last_tick: None, focus: None, slow: false, female: false, shows_own_model: true, top_form: 0, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
     }
 }
 
@@ -260,9 +269,48 @@ fn parts(archive: &dyn Files, file: usize) -> Result<Vec<Vec<u8>>, String> {
 }
 
 /// Reads the motions of a file of the archive, when it has some.
+#[cfg(test)]
 fn read_motions(archive: &dyn Files, file: usize) -> Option<MotionPack> {
+    read_motion_file(archive, file).map(|motions| motions.pack)
+}
+
+/// The motions of a motion file: the moves of the bones, and what each motion changes besides them.
+struct MotionFile {
+    pack: MotionPack,
+    looks: Vec<Look>,
+}
+
+fn read_motion_file(archive: &dyn Files, file: usize) -> Option<MotionFile> {
     let parts = parts(archive, file).ok()?;
-    MotionPack::parse(parts.first()?).ok()
+    let pack = MotionPack::parse(parts.first()?).ok()?;
+    let looks = (0..pack.len()).map(|index| Look::read(&parts, index)).collect();
+    Some(MotionFile { pack, looks })
+}
+
+/// The endless animation of a model, from its first file.
+fn read_endless(archive: &dyn Files, first: usize) -> Look {
+    parts(archive, first + FACE_OFFSET).map(|parts| Look::read_loop(&parts)).unwrap_or_default()
+}
+
+impl Loaded {
+    /// The motion file of the battle motions or of the Pokémon-Amie motions.
+    fn motions(&self, battle: bool) -> Option<&MotionFile> {
+        if battle { self.battle.as_ref() } else { self.amie.as_ref() }
+    }
+
+    /// The model at a frame of a motion: the pose of its bones, then the meshes and the materials of that frame. The
+    /// endless animation goes over them, with its own count of frames (`clock`).
+    fn at(&self, playing: &Playing, frame: f32, clock: f32) -> Option<Model> {
+        let file = self.motions(playing.battle)?;
+        let mut moved = posed(&self.model, &file.pack, &playing.motion.pose(file.pack.joints.len(), frame));
+        if let Some(look) = file.looks.get(playing.index) {
+            look.apply(&mut moved, frame);
+        }
+        if self.endless.length > 0.0 {
+            self.endless.apply(&mut moved, clock % self.endless.length);
+        }
+        Some(moved)
+    }
 }
 
 /// The files of a model of a pack, as the page Packs reads them (the 8 files of a model, see `sango_pack::Pack::read_model`).
@@ -296,8 +344,8 @@ fn read_model(archive: &dyn Files, first: usize, shiny: bool) -> Result<(Model, 
 /// The .glb file of a loaded model: its meshes, its skeleton and its motions (one clip for each motion of the files).
 fn glb_of(loaded: &Loaded) -> Result<Vec<u8>, String> {
     let mut clips = Vec::new();
-    for (battle, pack) in [(true, &loaded.battle), (false, &loaded.amie)] {
-        let Some(pack) = pack else { continue };
+    for (battle, file) in [(true, &loaded.battle), (false, &loaded.amie)] {
+        let Some(MotionFile { pack, .. }) = file else { continue };
         for index in (0..pack.len()).filter(|&i| pack.has(i)) {
             let Ok(motion) = pack.motion(index) else { continue };
             let frames = crate::model_export::motion_frames(&loaded.model, pack, &motion);
@@ -430,13 +478,14 @@ impl ModelTab {
         match read_model(archive, file, self.shiny) {
             Ok((model, textures)) => {
                 let by_name = textures.iter().map(|texture| (texture.name.clone(), texture.clone())).collect();
-                let (battle, amie) = (read_motions(archive, file + BATTLE_MOTION_OFFSET), read_motions(archive, file + AMIE_MOTION_OFFSET));
-                let idle = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
-                    let pack = pack.as_ref()?;
+                let (battle, amie) = (read_motion_file(archive, file + BATTLE_MOTION_OFFSET), read_motion_file(archive, file + AMIE_MOTION_OFFSET));
+                let idle = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, motions)| {
+                    let pack = &motions.as_ref()?.pack;
                     let index = (0..pack.len()).find(|&i| pack.has(i))?;
                     pack.motion(index).ok().map(|motion| Playing { battle: is_battle, index, motion })
                 });
-                self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name, battle, amie });
+                let endless = read_endless(archive, file);
+                self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name, battle, amie, endless });
                 // When loading a new model or form, start in its idle motion, with the whole model in the picture. The frame
                 // comes from the model, so it is chosen after the model is in place.
                 if !only_shiny {
@@ -445,6 +494,7 @@ impl ModelTab {
                     self.playing = idle;
                     self.running = self.playing.is_some();
                     self.frame = 0.0;
+                    self.clock = 0.0;
                     self.last_tick = None;
                     self.refocus();
                 }
@@ -526,6 +576,7 @@ impl ModelTab {
         if let (true, Some(playing)) = (self.running, &self.playing) {
             let seconds = self.last_tick.map_or(0.0, |t| now.duration_since(t).as_secs_f32().min(0.25));
             self.frame += seconds * 30.0;
+            self.clock += seconds * 30.0;
             let length = playing.motion.frames.max(1) as f32;
             if self.frame >= length {
                 self.frame %= length;
@@ -536,10 +587,9 @@ impl ModelTab {
         self.last_tick = Some(now);
         if self.dirty || self.picture.is_none() {
             if let Some(loaded) = &self.loaded {
-                let pack = if self.playing.as_ref().is_some_and(|p| p.battle) { &loaded.battle } else { &loaded.amie };
-                let pixels = match (&self.playing, pack) {
-                    (Some(playing), Some(pack)) => {
-                        let moved = posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), self.frame));
+                let moved = self.playing.as_ref().and_then(|playing| loaded.at(playing, self.frame, self.clock));
+                let pixels = match moved {
+                    Some(moved) => {
                         let start = std::time::Instant::now();
                         let frame = self.focus.unwrap_or_else(|| frame_of(std::slice::from_ref(&moved)));
                         let pixels = render_framed_at(&moved, &loaded.by_name, &self.camera, frame, VIEW_SIZE, VIEW_SIZE, if self.slow { 1 } else { 2 });
@@ -710,8 +760,8 @@ impl ModelTab {
     fn motions(&mut self, ui: &mut egui::Ui) {
         let Some(loaded) = &self.loaded else { return };
         let mut entries: Vec<(bool, usize)> = Vec::new();
-        for (battle, pack) in [(true, &loaded.battle), (false, &loaded.amie)] {
-            if let Some(pack) = pack {
+        for (battle, file) in [(true, &loaded.battle), (false, &loaded.amie)] {
+            if let Some(MotionFile { pack, .. }) = file {
                 entries.extend((0..pack.len()).filter(|&i| pack.has(i)).map(|i| (battle, i)));
             }
         }
@@ -759,7 +809,8 @@ impl ModelTab {
                     let response = ui.add(egui::Slider::new(&mut frame, 0.0..=last.max(1.0)).integer().text("frame"));
                     // The slider rounds the frame while the motion plays: only the user stops the motion.
                     if response.changed() && (response.dragged() || response.has_focus() || response.is_pointer_button_down_on()) {
-                        self.frame = frame;
+                        // A frame that the user chooses always looks the same.
+                        (self.frame, self.clock) = (frame, frame);
                         self.running = false;
                         self.dirty = true;
                     }
@@ -769,11 +820,12 @@ impl ModelTab {
         });
         if let Some(choice) = chosen {
             self.playing = choice.and_then(|(battle, index)| {
-                let pack = if battle { loaded.battle.as_ref() } else { loaded.amie.as_ref() }?;
+                let pack = &loaded.motions(battle)?.pack;
                 pack.motion(index).ok().map(|motion| Playing { battle, index, motion })
             });
             self.running = self.playing.is_some();
             self.frame = 0.0;
+            self.clock = 0.0;
             self.last_tick = None;
             self.dirty = true;
             self.refocus();
@@ -784,8 +836,13 @@ impl ModelTab {
     fn refocus(&mut self) {
         self.focus = None;
         let (Some(loaded), Some(playing)) = (&self.loaded, &self.playing) else { return };
-        let Some(pack) = (if playing.battle { &loaded.battle } else { &loaded.amie }) else { return };
-        let poses: Vec<Model> = (0..16).map(|k| posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), playing.motion.frames as f32 * k as f32 / 16.0))).collect();
+        let poses: Vec<Model> = (0..16).filter_map(|k| {
+            let frame = playing.motion.frames as f32 * k as f32 / 16.0;
+            loaded.at(playing, frame, frame)
+        }).collect();
+        if poses.is_empty() {
+            return;
+        }
         self.focus = Some(frame_of(&poses));
     }
 
@@ -841,6 +898,27 @@ mod test {
             assert!(focus.1 > own * 0.5 && focus.1 < own * 2.0, "species {species}: the frame is {}, the model {own}", focus.1);
             assert_eq!(tab.camera.zoom, 1.0, "a new model is shown whole");
         }
+    }
+
+    /// With the dump of the game: a motion hides meshes, and the gas moves with the frames since the motion started.
+    #[test]
+    fn a_motion_changes_the_meshes_and_the_materials() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let mut tab = ModelTab::default();
+        tab.open(&Dump::open(&root).unwrap());
+        let mut shown = |species: usize, clock: f32| {
+            tab.variants = tab.models_of(species);
+            tab.variants_of = Some(species);
+            tab.load(species, 0);
+            let (loaded, playing) = (tab.loaded.as_ref().unwrap(), tab.playing.as_ref().expect("the model has an idle motion"));
+            loaded.at(playing, 0.0, clock).unwrap()
+        };
+        // Bulbasaur waits with two of its vines hidden.
+        assert_eq!(shown(1, 0.0).meshes.iter().filter(|mesh| mesh.hidden).count(), 2);
+        let gas = |model: Model| model.materials.iter().find(|m| m.name == "FireStenA").unwrap().units[0].translation;
+        let (start, later) = (gas(shown(92, 0.0)), gas(shown(92, 200.0)));
+        assert_ne!(start, later);
+        assert_eq!(gas(shown(92, 768.0 + 200.0)), later, "the animation goes round");
     }
 
     /// With the dump of the game: the models of a species come from the list of the game, and the first bone of each model

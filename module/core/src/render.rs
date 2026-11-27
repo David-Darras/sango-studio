@@ -33,7 +33,7 @@ impl Default for Camera {
 pub fn bounds(model: &Model) -> ([f32; 3], f32) {
     let mut low = [f32::MAX; 3];
     let mut high = [f32::MIN; 3];
-    for mesh in &model.meshes {
+    for mesh in model.meshes.iter().filter(|mesh| !mesh.hidden) {
         for vertex in &mesh.vertices {
             for axis in 0..3 {
                 low[axis] = low[axis].min(vertex.position[axis]);
@@ -56,7 +56,7 @@ const FRAME_PITCH: f32 = 0.35;
 /// picture shows around it. The size is the tightest one from every side: the models fill the picture, and they stay in it
 /// when the point of view turns around them, tilted by up to `FRAME_PITCH`.
 pub fn frame_of(models: &[Model]) -> ([f32; 3], f32) {
-    let vertices = || models.iter().flat_map(|model| &model.meshes).flat_map(|mesh| &mesh.vertices);
+    let vertices = || models.iter().flat_map(|model| &model.meshes).filter(|mesh| !mesh.hidden).flat_map(|mesh| &mesh.vertices);
     let mut low = [f32::MAX; 3];
     let mut high = [f32::MIN; 3];
     for vertex in vertices() {
@@ -151,7 +151,7 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
     };
     // Inside: the point of view is in the middle of the model, at 12% of the radius above its lowest point. The positions are
     // relative to it, and the picture has perspective: a field of view of 70 degrees, narrower with the zoom.
-    let lowest = model.meshes.iter().flat_map(|mesh| mesh.vertices.iter()).map(|v| v.position[1]).fold(f32::MAX, f32::min);
+    let lowest = model.meshes.iter().filter(|mesh| !mesh.hidden).flat_map(|mesh| mesh.vertices.iter()).map(|v| v.position[1]).fold(f32::MAX, f32::min);
     let eye = [centre[0], lowest.min(centre[1]) + radius * 0.12, centre[2]];
     let focal = (width.min(height) as f32 / 2.0) / (35f32.to_radians().tan()) * camera.zoom;
     let near = radius * 0.002;
@@ -174,7 +174,7 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
         let material = model.materials.get(mesh.material);
         let mixed = material.is_some_and(is_mixed);
         let combined = mixed || material.is_some_and(|m| m.unlit && !m.stages.is_empty());
-        if mixed != (pass == 1) {
+        if mixed != (pass == 1) || mesh.hidden {
             continue;
         }
         let texture = material.and_then(|material| textures.get(&material.texture));
@@ -553,7 +553,7 @@ fn blend(state: &crate::model::RenderState, source: [f32; 3], source_alpha: f32,
 
 /// The colour and the opacity of a pixel (from 0 to 1) that a material gives at a texture position, with the steps of
 /// the mix that the file gives. `light` is the light of the surface, from 0 to 1.
-fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], uv: [f32; 2], light: f32, primary: [f32; 4]) -> [f32; 4] {
+pub fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], uv: [f32; 2], light: f32, primary: [f32; 4]) -> [f32; 4] {
     use crate::model::Stage;
     // The three pictures, at this place. A unit with no picture gives white.
     let mut pictures = [[1.0f32; 4]; 3];
@@ -682,25 +682,43 @@ fn uv_box(mesh: &crate::model::Mesh) -> [f32; 4] {
 }
 
 /// The material, the picture and the opening of the eye that an iris mesh lies on. The eye is the mesh that is not
-/// transparent and that covers all the texture positions of the iris. `None` when there is no such mesh.
+/// transparent and that covers all the texture positions of the iris. `None` when there is no such mesh, and when the
+/// transparent mesh goes all around it: it does not lie on it (a sphere of gas around its core). An iris or an eye, by the
+/// name of its material, lies only on an eye: after an export and an import, the texture positions of a part of the body can
+/// cover the ones of the eyes.
 fn eye_under<'a>(model: &'a Model, textures: &'a HashMap<String, Texture>, iris: &crate::model::Mesh) -> Option<(&'a crate::model::Material, &'a Texture, std::rc::Rc<Vec<bool>>)> {
     if iris.vertices.is_empty() {
         return None;
     }
+    let is_eye = |name: &str| name.to_lowercase().contains("eye");
+    let own = model.materials.get(iris.material)?.name.to_lowercase();
+    let of_an_eye = is_eye(&own) || own.contains("iris");
     let area = uv_box(iris);
     let margin = 0.01;
     // Of the meshes that cover the iris, the eye is the one with the smallest box of texture positions.
     model
         .meshes
         .iter()
+        .filter(|mesh| !mesh.hidden)
         .filter_map(|mesh| {
-            let material = model.materials.get(mesh.material).filter(|material| !material.transparent)?;
+            let material = model.materials.get(mesh.material).filter(|material| !material.transparent && (!of_an_eye || is_eye(&material.name)))?;
             let texture = textures.get(&material.texture)?;
             let b = uv_box(mesh);
-            (!mesh.vertices.is_empty() && b[0] <= area[0] + margin && b[1] >= area[1] - margin && b[2] <= area[2] + margin && b[3] >= area[3] - margin).then_some(((b[1] - b[0]) * (b[3] - b[2]), material, texture))
+            (!mesh.vertices.is_empty() && b[0] <= area[0] + margin && b[1] >= area[1] - margin && b[2] <= area[2] + margin && b[3] >= area[3] - margin).then_some(((b[1] - b[0]) * (b[3] - b[2]), material, texture, mesh))
         })
         .min_by(|a, b| a.0.total_cmp(&b.0))
-        .map(|(_, material, texture)| (material, texture, cached_opening(texture)))
+        .filter(|(_, _, _, eye)| !goes_around(iris, eye))
+        .map(|(_, material, texture, _)| (material, texture, cached_opening(texture)))
+}
+
+/// True when the box of the space of a mesh holds the box of another one and is larger on every side.
+fn goes_around(mesh: &crate::model::Mesh, other: &crate::model::Mesh) -> bool {
+    let bounds = |mesh: &crate::model::Mesh| {
+        mesh.vertices.iter().fold(([f32::MAX; 3], [f32::MIN; 3]), |(low, high), v| (std::array::from_fn(|k| low[k].min(v.position[k])), std::array::from_fn(|k| high[k].max(v.position[k]))))
+    };
+    let ((low, high), (from, to)) = (bounds(mesh), bounds(other));
+    let margin = 0.1 * (0..3).map(|k| to[k] - from[k]).fold(0.0, f32::max);
+    (0..3).all(|k| low[k] < from[k] - margin && high[k] > to[k] + margin)
 }
 
 thread_local! {
@@ -788,7 +806,7 @@ mod test {
     /// A model that is one triangle with the material 0, whose picture is a red pixel row.
     fn triangle() -> (Model, HashMap<String, Texture>) {
         let vertex = |x: f32, y: f32, u: f32, v: f32| Vertex { position: [x, y, 0.0], normal: [0.0, 0.0, 1.0], uv: [u, v], ..Vertex::default() };
-        let mesh = Mesh { material: 0, vertices: vec![vertex(-1.0, -1.0, 0.0, 0.0), vertex(1.0, -1.0, 1.0, 0.0), vertex(0.0, 1.0, 0.5, 1.0)], triangles: vec![[0, 1, 2]] };
+        let mesh = Mesh { material: 0, vertices: vec![vertex(-1.0, -1.0, 0.0, 0.0), vertex(1.0, -1.0, 1.0, 0.0), vertex(0.0, 1.0, 0.5, 1.0)], triangles: vec![[0, 1, 2]], ..Mesh::default() };
         let model = Model { bones: Vec::new(), materials: vec![Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_translation: [0.0, 0.0], texture_wrap: [2, 2], ..Material::default() }], meshes: vec![mesh] };
         let texture = Texture { name: "t".into(), width: 8, height: 8, rgba: [255u8, 0, 0, 255].repeat(64) };
         (model, HashMap::from([("t".to_string(), texture)]))
@@ -843,6 +861,38 @@ mod test {
         let image = render(&model, &textures, &inside, 64, 64);
         let (left, right) = halves(&image, 64);
         assert!(left > 0 && right == 0, "{left} pixels on the left, {right} on the right");
+    }
+
+    #[test]
+    fn a_mesh_is_cut_only_by_the_eye_that_it_lies_on() {
+        let (mut model, mut textures) = triangle();
+        // A transparent green triangle in front of a triangle with a light picture of one colour: seen as the picture of an
+        // eye, it is skin everywhere.
+        textures.get_mut("t").unwrap().rgba = [255u8, 210, 180, 255].repeat(64);
+        let green = Texture { name: "green".to_string(), width: 1, height: 1, rgba: vec![0, 255, 0, 255] };
+        textures.insert(green.name.clone(), green);
+        let mut material = model.materials[0].clone();
+        (material.texture, material.transparent, material.state.known) = ("green".to_string(), true, true);
+        let mut mesh = model.meshes[0].clone();
+        mesh.material = model.materials.len();
+        for vertex in &mut mesh.vertices {
+            vertex.position[2] += 0.1;
+        }
+        model.materials.push(material);
+        model.meshes.push(mesh);
+        let green_seen = |model: &Model| render(model, &textures, &front(), 64, 64).chunks(4).any(|p| p[1] > 100 && p[0] < 50);
+        assert!(!green_seen(&model), "a mesh that lies on a skin is not drawn there");
+        // An iris lies only on an eye.
+        model.materials[1].name = "LIris".to_string();
+        assert!(green_seen(&model), "the other mesh is not an eye");
+        model.materials[0].name = "Eye".to_string();
+        assert!(!green_seen(&model), "the iris is not drawn on the skin around the eye");
+        (model.materials[0].name, model.materials[1].name) = ("m".to_string(), "m".to_string());
+        // Larger than the mesh under it on every side, like a sphere of gas around its core.
+        for (vertex, depth) in model.meshes[1].vertices.iter_mut().zip([-0.5, 0.5, 0.5]) {
+            vertex.position = [vertex.position[0] * 1.5, vertex.position[1] * 1.5, depth];
+        }
+        assert!(green_seen(&model), "the gas is drawn");
     }
 
     #[test]

@@ -302,7 +302,7 @@ mod test {
         let model = Model {
             bones: vec![bone("root", None), bone("arm", Some(0))],
             materials: Vec::new(),
-            meshes: vec![Mesh { material: 0, vertices: vec![Vertex { position: [1.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], weights: [1.0, 0.0, 0.0, 0.0], bones: [1, 0, 0, 0], ..Vertex::default() }], triangles: Vec::new() }],
+            meshes: vec![Mesh { material: 0, vertices: vec![Vertex { position: [1.0, 0.0, 0.0], normal: [1.0, 0.0, 0.0], weights: [1.0, 0.0, 0.0, 0.0], bones: [1, 0, 0, 0], ..Vertex::default() }], triangles: Vec::new(), ..Mesh::default() }],
         };
         let joint = |name: &str, parent: Option<usize>| Joint { name: name.into(), parent, translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0] };
         let pack = MotionPack::parse_for_test(vec![joint("", None), joint("arm", Some(0))]);
