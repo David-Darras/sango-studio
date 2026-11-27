@@ -5,15 +5,12 @@
 //! that have the same names as in the original model.
 
 use crate::convert;
-use crate::files::box_of;
+use crate::files::metres_per_unit;
 use crate::gltf::Source;
 use crate::model;
 use crate::skeleton::Joint;
 use crate::template::Template;
 use crate::texture;
-
-/// A model taller than this (in the units of the file) is in the units of the game, not in metres.
-const MAX_HEIGHT_IN_METRES: f32 = 30.0;
 
 /// The file of the model of a trainer, not compressed, from a glTF file and the original file of the model.
 /// `joints` is the skeleton of the original model (the first joint has the name of the model): the new model keeps it.
@@ -26,8 +23,7 @@ pub fn trainer_model(source: &Source, original: &[u8], joints: &[Joint], scale: 
 pub fn trainer_model_within(source: &Source, original: &[u8], joints: &[Joint], scale: f64, budget: usize, compress: bool) -> Result<Vec<u8>, String> {
     let model_name = joints.first().map(|j| j.name.clone()).ok_or("The original model has no joints.")?;
     let model_name = model_name.as_str();
-    let (_, height) = box_of(source);
-    let scale = if height as f32 / 100.0 > MAX_HEIGHT_IN_METRES { scale * 0.01 } else { scale };
+    let scale = scale * metres_per_unit(source);
     let prepared = convert::prepare_with(source, model_name, scale, true, true, Some(joints), compress)?;
     let mut prepared = prepared;
     keep_picture_names(&mut prepared, original);

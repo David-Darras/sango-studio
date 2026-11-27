@@ -5,6 +5,19 @@
 use serde_json::Value;
 use std::path::Path;
 
+/// The end of the name of a node that the export of Studio puts above a bone whose parent has a scale. In the game a bone
+/// does not take the scale of its parent, and glTF has no such rule: the node holds the translation of the bone and takes the
+/// scale of the parent out. The reader merges such a node with its bone.
+pub const SCALE_NODE_SUFFIX: &str = "~scale";
+
+/// The name of the maker in the files that the export of Studio writes.
+pub const GENERATOR: &str = "Sango Studio";
+
+/// The name of the node of the meshes in the files that the export of Studio writes. The sizes of these files are in the units
+/// of the game. A program that writes the file again keeps the names of the nodes (it can add a number after them), so the
+/// reader still knows the units.
+pub const GAME_UNITS_NODE: &str = "sango_model";
+
 /// A node of the scene.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Node {
@@ -90,6 +103,11 @@ pub struct Source {
     pub materials: Vec<Material>,
     pub images: Vec<Image>,
     pub animations: Vec<Animation>,
+    /// True when the sizes of the file are in the units of the game (a file that comes from the export of Studio), not in metres.
+    pub game_units: bool,
+    /// The nodes of the bones that do not take the scale of their parent: they had a node above them (see `SCALE_NODE_SUFFIX`).
+    /// The other nodes take it, as glTF says.
+    pub own_scale: Vec<usize>,
 }
 
 /// The binary parts of a file.
@@ -359,7 +377,95 @@ fn build(binary: &Binary, folder: Option<&Path>) -> Result<Source, String> {
         }
         source.animations.push(Animation { name: animation.get("name").and_then(|n| n.as_str()).map_or_else(|| format!("animation{place}"), |n| n.to_string()), channels });
     }
+    source.game_units = json["asset"]["generator"] == GENERATOR || source.nodes.iter().any(|n| n.name.starts_with(GAME_UNITS_NODE));
+    merge_scale_nodes(&mut source);
     Ok(source)
+}
+
+/// The rotation `a` after the rotation `b` (quaternions x, y, z, w).
+fn turn_after(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [
+        a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+        a[3] * b[1] - a[0] * b[2] + a[1] * b[3] + a[2] * b[0],
+        a[3] * b[2] + a[0] * b[1] - a[1] * b[0] + a[2] * b[3],
+        a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+    ]
+}
+
+/// A point turned by a rotation, then moved by `by`.
+fn turned_and_moved(rotation: [f32; 4], point: [f32; 3], by: [f32; 3]) -> [f32; 3] {
+    let back = [-rotation[0], -rotation[1], -rotation[2], rotation[3]];
+    let turned = turn_after(turn_after(rotation, [point[0], point[1], point[2], 0.0]), back);
+    std::array::from_fn(|k| turned[k] + by[k])
+}
+
+/// Merges each node that takes the scale of a parent out (see `SCALE_NODE_SUFFIX`) with the bone below it: the bone takes the
+/// place and the translation of the node, so the skeleton is the one of the bones again. The scale of the node is dropped, as
+/// the game does not give the scale of a parent to a bone. A program that wrote the file again may have made a joint of the
+/// node: its weights go to the bone.
+fn merge_scale_nodes(source: &mut Source) {
+    let found: Vec<(usize, usize)> = (0..source.nodes.len())
+        .filter_map(|upper| {
+            let name = source.nodes[upper].name.strip_suffix(SCALE_NODE_SUFFIX)?;
+            match source.nodes[upper].children[..] {
+                [bone] if source.nodes.get(bone).is_some_and(|n| n.name == name) => Some((upper, bone)),
+                _ => None,
+            }
+        })
+        .collect();
+    for &(upper, bone) in &found {
+        let above = source.nodes[upper].clone();
+        let own = source.nodes[bone].clone();
+        for animation in &mut source.animations {
+            let take = |channels: &mut Vec<Channel>, node: usize, path: Path3| channels.iter().position(|c| c.node == node && c.path == path).map(|at| channels.remove(at));
+            let moved_above = take(&mut animation.channels, upper, Path3::Translation);
+            let moved_own = take(&mut animation.channels, bone, Path3::Translation);
+            // The translation of the bone: the one of the node, plus the one of the bone turned by the node.
+            let times = moved_above.as_ref().or(moved_own.as_ref()).map(|c| c.times.clone());
+            if let Some(times) = times {
+                let sample = |channel: &Option<Channel>, at: usize, rest: [f32; 3]| channel.as_ref().and_then(|c| c.values.get(at * 3..at * 3 + 3)).map_or(rest, |v| [v[0], v[1], v[2]]);
+                let values = (0..times.len()).flat_map(|at| turned_and_moved(above.rotation, sample(&moved_own, at, own.translation), sample(&moved_above, at, above.translation))).collect();
+                animation.channels.push(Channel { node: bone, path: Path3::Translation, times, values });
+            }
+            for channel in animation.channels.iter_mut().filter(|c| c.node == bone && c.path == Path3::Rotation) {
+                for value in channel.values.chunks_exact_mut(4) {
+                    let turned = turn_after(above.rotation, [value[0], value[1], value[2], value[3]]);
+                    value.copy_from_slice(&turned);
+                }
+            }
+            animation.channels.retain(|c| c.node != upper);
+        }
+        source.nodes[bone].translation = turned_and_moved(above.rotation, own.translation, above.translation);
+        source.nodes[bone].rotation = turn_after(above.rotation, own.rotation);
+        source.nodes[bone].parent = above.parent;
+        if let Some(parent) = above.parent {
+            for child in source.nodes[parent].children.iter_mut().filter(|c| **c == upper) {
+                *child = bone;
+            }
+        }
+        source.nodes[upper].parent = None;
+        source.nodes[upper].children.clear();
+        source.own_scale.push(bone);
+    }
+    // The joints without the nodes that are gone, and the new place of each old joint.
+    let gone = |node: usize| found.iter().find(|&&(upper, _)| upper == node).map(|&(_, bone)| bone);
+    if !source.joints.iter().any(|&node| gone(node).is_some()) {
+        return;
+    }
+    let kept: Vec<usize> = (0..source.joints.len()).filter(|&k| gone(source.joints[k]).is_none()).collect();
+    let places: Vec<u16> = (0..source.joints.len())
+        .map(|k| {
+            let node = gone(source.joints[k]).unwrap_or(source.joints[k]);
+            kept.iter().position(|&other| source.joints[other] == node).unwrap_or(0) as u16
+        })
+        .collect();
+    for primitive in &mut source.primitives {
+        for joints in &mut primitive.joints {
+            *joints = joints.map(|k| places.get(k as usize).copied().unwrap_or(0));
+        }
+    }
+    source.inverse_bind = kept.iter().filter_map(|&k| source.inverse_bind.get(k).copied()).collect();
+    source.joints = kept.iter().map(|&k| source.joints[k]).collect();
 }
 
 /// The translation, the rotation (quaternion) and the scale of a matrix of 16 floats (column by column).
@@ -474,12 +580,59 @@ mod test {
         assert_eq!(animation.channels[0].values, vec![0.0, 0.0, 0.0, 0.0, 2.0, 0.0]);
     }
 
+    /// The maker of the file, or the name of the node of the meshes, says that the sizes are in the units of the game.
+    #[test]
+    fn a_file_of_studio_is_in_the_units_of_the_game() {
+        let file = small_glb();
+        assert!(!read_bytes(&file, None).unwrap().game_units);
+        let length = u32::from_le_bytes(file[12..16].try_into().unwrap()) as usize;
+        let text = std::str::from_utf8(&file[20..20 + length]).unwrap();
+        for (old, new) in [("\"name\":\"model\"", "\"name\":\"sango_model.001\""), ("\"version\":\"2.0\"", "\"version\":\"2.0\",\"generator\":\"Sango Studio\"")] {
+            let changed = text.replace(old, new);
+            assert_ne!(changed, text);
+            let mut json = changed.into_bytes();
+            while json.len() % 4 != 0 {
+                json.push(b' ');
+            }
+            // The header with the new lengths, then the rest of the file.
+            let rest = &file[20 + length..];
+            let mut again = file[..8].to_vec();
+            again.extend_from_slice(&((20 + json.len() + rest.len()) as u32).to_le_bytes());
+            again.extend_from_slice(&(json.len() as u32).to_le_bytes());
+            again.extend_from_slice(b"JSON");
+            again.extend_from_slice(&json);
+            again.extend_from_slice(rest);
+            assert!(read_bytes(&again, None).unwrap().game_units, "{new}");
+        }
+    }
+
     #[test]
     fn a_bad_file_is_refused_with_a_reason() {
         assert!(read_bytes(b"nope", None).is_err());
         let mut cut = small_glb();
         cut.truncate(60);
         assert!(read_bytes(&cut, None).is_err());
+    }
+
+    /// A file that another program wrote again: the node above the bone is a joint too, and it has weights.
+    #[test]
+    fn a_node_that_takes_a_scale_out_is_merged_with_its_bone() {
+        let node = |name: &str, parent: Option<usize>, children: Vec<usize>, translation: [f32; 3]| Node { name: name.into(), parent, children, translation, rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3] };
+        let channel = |node: usize, path: Path3, values: Vec<f32>| Channel { node, path, times: vec![0.0, 1.0], values };
+        let mut source = Source {
+            nodes: vec![node("root", None, vec![1], [0.0; 3]), node("arm~scale", Some(0), vec![2], [1.0, 0.0, 0.0]), node("arm", Some(1), vec![], [0.0; 3])],
+            joints: vec![0, 1, 2],
+            inverse_bind: vec![[0.0; 16], [1.0; 16], [2.0; 16]],
+            primitives: vec![Primitive { joints: vec![[2, 1, 0, 0]], ..Primitive::default() }],
+            animations: vec![Animation { name: "move".into(), channels: vec![channel(1, Path3::Translation, vec![1.0, 0.0, 0.0, 3.0, 0.0, 0.0]), channel(1, Path3::Scale, vec![0.5; 6]), channel(2, Path3::Translation, vec![0.0; 6])] }],
+            ..Source::default()
+        };
+        merge_scale_nodes(&mut source);
+        assert_eq!((source.nodes[2].parent, source.nodes[0].children.clone(), source.nodes[2].translation), (Some(0), vec![2], [1.0, 0.0, 0.0]));
+        assert_eq!(source.animations[0].channels, vec![channel(2, Path3::Translation, vec![1.0, 0.0, 0.0, 3.0, 0.0, 0.0])]);
+        assert_eq!((source.joints.clone(), source.inverse_bind[1]), (vec![0, 2], [2.0; 16]));
+        assert_eq!(source.primitives[0].joints[0], [1, 1, 0, 0]);
+        assert_eq!(source.own_scale, vec![2]);
     }
 
     #[test]

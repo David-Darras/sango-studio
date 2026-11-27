@@ -85,8 +85,10 @@ const CURVE_CONSTANT_BASE_POSE: u32 = 1;
 const CURVE_CONSTANT_VALUE: u32 = 5;
 /// A smooth curve between key frames, with a slope at each key (the slope is in units for each second).
 const FC_SPLINE_SLOPES: u32 = 7;
-/// A curve that moves less than this (a position in units of the model, an angle in radians) is held still.
-const STATIC_EPS: [f64; 2] = [0.25, 0.01];
+/// A curve that moves less than this (a position in units of the model, an angle in radians, a scale) is held still.
+const STATIC_EPS: [f64; 3] = [0.25, 0.01, 0.002];
+/// The smallest scale that is written: a bone that is hidden is very small, not flat.
+const SMALLEST_SCALE: f64 = 0.01;
 /// The frames each second.
 pub const FPS: f64 = 30.0;
 /// How far (in the units of a curve: a fraction of its range) the curve between the keys may be from the sampled values.
@@ -120,11 +122,13 @@ impl Curve {
     }
 }
 
-/// The curves of a bone of a motion: the angles of the rotation (X, Y, Z) and the translation.
+/// The curves of a bone of a motion: the angles of the rotation (X, Y, Z), the translation and the scale.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoneCurves {
     pub rotation: [Curve; 3],
     pub translation: [Curve; 3],
+    /// `None` for a bone whose scale no animation changes: the scale 1.
+    pub scale: Option<[Curve; 3]>,
 }
 
 /// A motion: the number of frames and the curves of each bone, by its name.
@@ -184,6 +188,43 @@ fn matrix_from_quat(q: [f64; 4]) -> [[f64; 3]; 3] {
 
 type Channel<'a> = (&'a [f32], Vec<[f64; 4]>, usize);
 
+/// The scale channel of each node that has one, in an animation of the file.
+fn scale_channels(animation: &crate::gltf::Animation) -> HashMap<usize, Channel<'_>> {
+    animation
+        .channels
+        .iter()
+        .filter(|c| c.path == Path3::Scale && !c.times.is_empty() && c.values.len() >= 3)
+        .map(|c| (c.node, (c.times.as_slice(), c.values.chunks_exact(3).map(|v| [v[0] as f64, v[1] as f64, v[2] as f64, 0.0]).collect(), 3)))
+        .collect()
+}
+
+/// The scale that the game must give to a bone at a time, or `None` when no channel changes it.
+///
+/// In the game a bone does not take the scale of its parent. A bone of the file that does take it (see `Source::own_scale`)
+/// gets the change of the scale of the nodes above it, from their scales of rest, up to the first bone that does not take it.
+fn game_scale(source: &Source, channels: &HashMap<usize, Channel>, node: usize, t: f64) -> Option<[f64; 3]> {
+    let at = |node: usize| channels.get(&node).map(|(times, values, width)| sample(times, values, *width, t, false));
+    let rest = |node: usize| source.nodes[node].scale.map(f64::from);
+    let own = at(node);
+    let mut changed = own.is_some();
+    let mut scale = own.map_or(rest(node), |v| [v[0], v[1], v[2]]);
+    let mut current = node;
+    // The number of steps is limited: a file with a loop of parents ends.
+    for _ in 0..source.nodes.len() {
+        if source.own_scale.contains(&current) {
+            break;
+        }
+        let Some(parent) = source.nodes[current].parent else { break };
+        if let Some(v) = at(parent) {
+            changed = true;
+            let from = rest(parent);
+            scale = std::array::from_fn(|k| if from[k].abs() < 1e-9 { scale[k] } else { scale[k] * v[k] / from[k] });
+        }
+        current = parent;
+    }
+    changed.then_some(scale)
+}
+
 /// The motions of a glTF file, for the joints of the skeleton that the game gets.
 ///
 /// `names` gives the name in the game of each glTF joint that was kept (by its place in the skin), `scale` is the factor of the units.
@@ -191,6 +232,7 @@ pub fn animations(source: &Source, names: &HashMap<usize, String>, scale: f64) -
     let node_bone: HashMap<usize, &String> = names.iter().map(|(&k, name)| (source.joints[k], name)).collect();
     let mut result = Vec::new();
     for animation in &source.animations {
+        let scales = scale_channels(animation);
         let mut channels: HashMap<&String, (Option<Channel>, Option<Channel>)> = HashMap::new();
         for channel in &animation.channels {
             let Some(&bone) = node_bone.get(&channel.node) else { continue };
@@ -210,7 +252,8 @@ pub fn animations(source: &Source, names: &HashMap<usize, String>, scale: f64) -
                 entry.1 = Some((&channel.times, values, 4));
             }
         }
-        let Some(duration) = channels.values().flat_map(|(t, r)| [t, r]).flatten().map(|(times, _, _)| times[times.len() - 1]).reduce(f32::max) else { continue };
+        let ends = channels.values().flat_map(|(t, r)| [t, r]).flatten().chain(scales.values()).map(|(times, _, _)| times[times.len() - 1]);
+        let Some(duration) = ends.reduce(f32::max) else { continue };
         let frames = ((duration as f64 * FPS).round_ties_even() as usize).max(1);
         let mut bones = HashMap::new();
         for (k, name) in names {
@@ -219,6 +262,7 @@ pub fn animations(source: &Source, names: &HashMap<usize, String>, scale: f64) -
             let default_rotation: [f64; 4] = node.rotation.map(|v| v as f64);
             let ch = channels.get(name);
             let (mut rotation, mut translation) = ([Vec::new(), Vec::new(), Vec::new()], [Vec::new(), Vec::new(), Vec::new()]);
+            let mut size = [Vec::new(), Vec::new(), Vec::new()];
             for f in 0..=frames {
                 let t = f as f64 / FPS;
                 let q = match ch.and_then(|c| c.1.as_ref()) {
@@ -233,14 +277,19 @@ pub fn animations(source: &Source, names: &HashMap<usize, String>, scale: f64) -
                     }
                     None => default_translation,
                 };
+                let s = game_scale(source, &scales, source.joints[*k], t);
                 for axis in 0..3 {
                     rotation[axis].push(e[axis]);
                     translation[axis].push(v[axis]);
+                    if let Some(s) = s {
+                        size[axis].push(s[axis]);
+                    }
                 }
             }
             let [r0, r1, r2] = rotation;
             let [t0, t1, t2] = translation;
-            bones.insert(name.clone(), BoneCurves { rotation: [Curve::from_column(r0), Curve::from_column(r1), Curve::from_column(r2)], translation: [Curve::from_column(t0), Curve::from_column(t1), Curve::from_column(t2)] });
+            let scale = (!size[0].is_empty()).then(|| size.map(Curve::from_column));
+            bones.insert(name.clone(), BoneCurves { rotation: [Curve::from_column(r0), Curve::from_column(r1), Curve::from_column(r2)], translation: [Curve::from_column(t0), Curve::from_column(t1), Curve::from_column(t2)], scale });
         }
         let name = animation.name.rsplit('|').next().unwrap_or(&animation.name).to_string();
         result.push(Animation { name, frames, bones });
@@ -328,9 +377,9 @@ pub fn write_motion(order: &[(String, Option<usize>)], frames: usize, bones: &Ha
             curves.extend((0..3).map(|_| (CURVE_CONSTANT_BASE_POSE, Data::None)));
             continue;
         };
-        // The translation, then the rotation, then the scale (always 1).
+        // The translation, then the rotation, then the scale.
         for component in 0..3 {
-            if component == 2 {
+            if component == 2 && bone.scale.is_none() {
                 curves.extend((0..3).map(|_| (CURVE_CONSTANT_VALUE, Data::Value(1.0))));
                 continue;
             }
@@ -338,6 +387,11 @@ pub fn write_motion(order: &[(String, Option<usize>)], frames: usize, bones: &Ha
             for f in 0..=frames {
                 values[f] = if component == 0 {
                     std::array::from_fn(|k| bone.translation[k].at(f))
+                } else if let (2, Some(scale)) = (component, &bone.scale) {
+                    std::array::from_fn(|k| {
+                        let v = scale[k].at(f);
+                        if v.abs() < SMALLEST_SCALE { SMALLEST_SCALE } else { v }
+                    })
                 } else {
                     let e = euler_zyx(&rot_zyx(bone.rotation[0].at(f), bone.rotation[1].at(f), bone.rotation[2].at(f)));
                     if f > 0 {
@@ -359,7 +413,15 @@ pub fn write_motion(order: &[(String, Option<usize>)], frames: usize, bones: &Ha
             }
         }
     }
-    // The game sizes the curves of a motion for 9 for each bone: the last bone keeps its pose of rest.
+    // The game sizes the curves of a motion for 9 for each bone, and there are 2 more for the model. When every bone moves, the
+    // scale 1 of the first bone (the root that the importer adds, whose scale of rest is 1) takes one curve, "the pose of rest",
+    // in place of three: all the bones then fit.
+    let root_scale = 8..11;
+    let root_moves = order.first().is_some_and(|(name, _)| bones.contains_key(name));
+    if curves.len() > 9 * order.len() && root_moves && curves.get(root_scale.clone()).is_some_and(|c| c.iter().all(|(_, data)| matches!(data, Data::Value(v) if (v - 1.0).abs() < 1e-6))) {
+        curves.splice(root_scale, [(CURVE_CONSTANT_BASE_POSE, Data::None)]);
+    }
+    // Else the last bone keeps its pose of rest.
     if curves.len() > 9 * order.len() {
         curves.truncate(2 + 9 * (order.len() - 1));
     }
@@ -502,12 +564,62 @@ mod test {
         }
     }
 
+    /// A skeleton of three bones in a line, and an animation where the middle one grows from 1 to 2.
+    fn growing() -> Source {
+        let node = |parent: Option<usize>| crate::gltf::Node { name: "n".into(), parent, children: Vec::new(), translation: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0], scale: [1.0; 3] };
+        let channel = crate::gltf::Channel { node: 1, path: Path3::Scale, times: vec![0.0, 1.0], values: vec![1.0, 1.0, 1.0, 2.0, 2.0, 2.0] };
+        Source { nodes: vec![node(None), node(Some(0)), node(Some(1))], joints: vec![0, 1, 2], animations: vec![crate::gltf::Animation { name: "grow".into(), channels: vec![channel] }], ..Source::default() }
+    }
+
+    #[test]
+    fn a_scale_goes_to_the_bones_that_take_it() {
+        let names = HashMap::from([(0, "Origin".to_string()), (1, "Waist".to_string()), (2, "Arm".to_string())]);
+        let last = |source: &Source, bone: &str| -> Option<f64> {
+            let motion = animations(source, &names, 1.0).remove(0);
+            assert_eq!(motion.frames, 30, "an animation of scales only has its length");
+            motion.bones[bone].scale.as_ref().map(|s| s[0].at(30))
+        };
+        // A file of another program: the bone below takes the scale, as glTF says, so the motion of the game gives it to it.
+        let mut source = growing();
+        assert_eq!((last(&source, "Origin"), last(&source, "Waist"), last(&source, "Arm")), (None, Some(2.0), Some(2.0)));
+        // A file of Studio: the bone below keeps its own scale.
+        source.own_scale = vec![2];
+        assert_eq!((last(&source, "Waist"), last(&source, "Arm")), (Some(2.0), None));
+    }
+
+    #[test]
+    fn the_scales_of_a_motion_are_written() {
+        let order = vec![("Origin".to_string(), None), ("Waist".to_string(), Some(0)), ("Arm".to_string(), Some(1))];
+        let still = [Curve::Const(0.0), Curve::Const(0.0), Curve::Const(0.0)];
+        let scale = [Curve::Keys((0..=30).map(|f| 1.0 + f as f64 / 30.0).collect()), Curve::Const(0.0), Curve::Const(1.0)];
+        let bones = HashMap::from([("Waist".to_string(), BoneCurves { rotation: still.clone(), translation: still.clone(), scale: Some(scale) })]);
+        let bytes = write_motion(&order, 30, &bones);
+        // The kinds of the curves 11 to 13 (two for the model, three for the root, six before the scale of the joint).
+        let kind = |curve: usize| {
+            let at = 4 + 3 * (curve / 8);
+            (u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], 0]) >> (3 * (curve % 8))) & 7
+        };
+        assert_eq!((kind(11), kind(12), kind(13)), (FC_SPLINE_SLOPES, CURVE_CONSTANT_VALUE, CURVE_CONSTANT_VALUE));
+    }
+
+    #[test]
+    fn a_motion_where_every_bone_moves_keeps_its_last_bone() {
+        let order = vec![("Root".to_string(), None), ("Arm".to_string(), Some(0))];
+        let still = [Curve::Const(0.0), Curve::Const(0.0), Curve::Const(0.0)];
+        let turned = [Curve::Const(0.5), Curve::Const(0.0), Curve::Const(0.0)];
+        let bone = |rotation: &[Curve; 3]| BoneCurves { rotation: rotation.clone(), translation: still.clone(), scale: None };
+        let bones = HashMap::from([("Root".to_string(), bone(&still)), ("Arm".to_string(), bone(&turned))]);
+        let bytes = write_motion(&order, 10, &bones);
+        // Two curves for the model, seven for the root (its scale is one curve), nine for the arm.
+        assert_eq!(u16::from_le_bytes([bytes[0], bytes[1]]), 18);
+    }
+
     #[test]
     fn a_motion_with_slopes_is_read_by_the_reader_of_studio() {
         let order = vec![("Origin".to_string(), None), ("Waist".to_string(), Some(0))];
         let column: Vec<f64> = (0..=30).map(|f| (f as f64 / 5.0).sin()).collect();
         let still = Curve::Const(0.0);
-        let bones = HashMap::from([("Waist".to_string(), BoneCurves { rotation: [Curve::Keys(column.clone()), still.clone(), still.clone()], translation: [still.clone(), still.clone(), still.clone()] })]);
+        let bones = HashMap::from([("Waist".to_string(), BoneCurves { rotation: [Curve::Keys(column.clone()), still.clone(), still.clone()], translation: [still.clone(), still.clone(), still.clone()], scale: None })]);
         let bytes = write_motion(&order, 30, &bones);
         let frames = u16::from_le_bytes([bytes[2], bytes[3]]);
         assert_eq!(frames, 30);

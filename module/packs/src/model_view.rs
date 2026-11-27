@@ -145,7 +145,7 @@ impl ModelPair {
         });
         // The two pictures share the point of view.
         if dragged != egui::Vec2::ZERO {
-            self.camera.yaw -= dragged.x * 0.012;
+            self.camera.yaw += dragged.x * 0.012;
             self.camera.pitch = (self.camera.pitch + dragged.y * 0.012).clamp(-1.4, 1.4);
             self.dirty = true;
         } else if scrolled != 0.0 {

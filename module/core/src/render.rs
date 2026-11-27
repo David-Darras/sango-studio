@@ -25,7 +25,7 @@ pub struct Camera {
 
 impl Default for Camera {
     fn default() -> Self {
-        Camera { yaw: std::f32::consts::PI + 0.55, pitch: 0.15, zoom: 1.0, outline: true, inside: false }
+        Camera { yaw: std::f32::consts::PI - 0.55, pitch: 0.15, zoom: 1.0, outline: true, inside: false }
     }
 }
 
@@ -49,13 +49,35 @@ pub fn bounds(model: &Model) -> ([f32; 3], f32) {
     (centre, radius.max(1e-3))
 }
 
-/// The centre and the radius of a sphere that holds all the vertices of several models (the same model in several poses).
-pub fn bounds_of(models: &[Model]) -> ([f32; 3], f32) {
-    let mut all = Model::default();
-    for model in models {
-        all.meshes.extend(model.meshes.iter().map(|mesh| crate::model::Mesh { material: 0, vertices: mesh.vertices.clone(), triangles: Vec::new() }));
+/// The tilt of the point of view that a frame leaves room for, in radians.
+const FRAME_PITCH: f32 = 0.35;
+
+/// The frame of the picture of some models (the same model in several poses): the centre of their box, and the size that the
+/// picture shows around it. The size is the tightest one from every side: the models fill the picture, and they stay in it
+/// when the point of view turns around them, tilted by up to `FRAME_PITCH`.
+pub fn frame_of(models: &[Model]) -> ([f32; 3], f32) {
+    let vertices = || models.iter().flat_map(|model| &model.meshes).flat_map(|mesh| &mesh.vertices);
+    let mut low = [f32::MAX; 3];
+    let mut high = [f32::MIN; 3];
+    for vertex in vertices() {
+        for axis in 0..3 {
+            low[axis] = low[axis].min(vertex.position[axis]);
+            high[axis] = high[axis].max(vertex.position[axis]);
+        }
     }
-    bounds(&all)
+    if low[0] > high[0] {
+        return ([0.0; 3], 1.0);
+    }
+    let centre: [f32; 3] = std::array::from_fn(|axis| (low[axis] + high[axis]) / 2.0);
+    let (sin, cos) = FRAME_PITCH.sin_cos();
+    // A vertex goes around the vertical axis at the distance `around`: on the screen it is at most that far to a side, and that
+    // far up or down once the tilt is added to its height.
+    let size = vertices().fold(0.0f32, |size, vertex| {
+        let around = (vertex.position[0] - centre[0]).hypot(vertex.position[2] - centre[2]);
+        let height = (vertex.position[1] - centre[1]).abs();
+        size.max(around).max(height * cos + around * sin)
+    });
+    (centre, size.max(1e-3))
 }
 
 /// A picture of a model with `width` × `height` pixels, on a transparent background.
@@ -63,10 +85,12 @@ pub fn bounds_of(models: &[Model]) -> ([f32; 3], f32) {
 /// `textures` are the pictures that the materials ask for by name. A material whose picture is missing is grey.
 /// The model is drawn two times bigger, then each pixel takes the mean of four: the edges are smooth.
 pub fn render(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, width: usize, height: usize) -> Vec<u8> {
-    render_framed(model, textures, camera, bounds(model), width, height)
+    // From inside a place, the point of view comes from the sphere around the place.
+    let frame = if camera.inside { bounds(model) } else { frame_of(std::slice::from_ref(model)) };
+    render_framed(model, textures, camera, frame, width, height)
 }
 
-/// The same, with the sphere that the picture shows given (`bounds`): a model that moves keeps the same place and size.
+/// The same, with the frame that the picture shows given (`frame_of`): a model that moves keeps the same place and size.
 pub fn render_framed(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, frame: ([f32; 3], f32), width: usize, height: usize) -> Vec<u8> {
     render_framed_at(model, textures, camera, frame, width, height, 2)
 }
@@ -117,7 +141,8 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
     let (sin_yaw, cos_yaw) = camera.yaw.sin_cos();
     let (sin_pitch, cos_pitch) = camera.pitch.sin_cos();
     // The point of view turns around the model: the model turns the other way. First around the vertical axis,
-    // then around the horizontal one. The y axis of the screen goes down.
+    // then around the horizontal one. The z axis of the turned model points away from the point of view, so the x axis of the
+    // screen goes against the turned x axis, and the y axis of the screen goes down.
     let turn = |p: [f32; 3]| -> [f32; 3] {
         let (x, y, z) = (p[0] - centre[0], p[1] - centre[1], p[2] - centre[2]);
         let (x, z) = (x * cos_yaw + z * sin_yaw, -x * sin_yaw + z * cos_yaw);
@@ -177,20 +202,21 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                 let points = corners.map(|k| moved[k].0);
                 clip_near(points, near)
                     .into_iter()
-                    .map(|(piece, weights)| (piece.map(|q| [half_x + q[0] * focal / q[2], half_y - q[1] * focal / q[2], q[2]]), weights))
+                    .map(|(piece, weights)| (piece.map(|q| [half_x - q[0] * focal / q[2], half_y - q[1] * focal / q[2], q[2]]), weights))
                     .collect()
             } else {
-                vec![(corners.map(|k| [half_x + moved[k].0[0] * scale, half_y - moved[k].0[1] * scale, moved[k].0[2]]), [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])]
+                vec![(corners.map(|k| [half_x - moved[k].0[0] * scale, half_y - moved[k].0[1] * scale, moved[k].0[2]]), [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])]
             };
             for (screen, weights) in pieces {
             let area = (screen[1][0] - screen[0][0]) * (screen[2][1] - screen[0][1]) - (screen[2][0] - screen[0][0]) * (screen[1][1] - screen[0][1]);
             if area.abs() < 1e-6 {
                 continue;
             }
-            // The faces that the material does not draw (the screen turns the faces over: its y axis goes down).
+            // The faces that the material does not draw. A face that turns its front to the point of view has a negative area
+            // (the y axis of the screen goes down).
             match state.cull {
-                0 if area > 0.0 => continue,
-                1 if area < 0.0 => continue,
+                0 if area < 0.0 => continue,
+                1 if area > 0.0 => continue,
                 _ => {}
             }
             let min_x = screen.iter().map(|p| p[0]).fold(f32::MAX, f32::min).floor().max(0.0) as usize;
@@ -714,6 +740,55 @@ mod test {
         assert!(grey.chunks(4).any(|p| p[3] == 255 && p[0] == p[1] && p[1] == p[2]));
     }
 
+    /// The camera of the front view: the point of view is on the +z side, where the models look.
+    fn front() -> Camera {
+        Camera { yaw: std::f32::consts::PI, pitch: 0.0, zoom: 1.0, outline: false, inside: false }
+    }
+
+    /// The number of pixels that the picture covers in its left half and in its right half.
+    fn halves(image: &[u8], width: usize) -> (usize, usize) {
+        let covered = |right: bool| image.chunks(4).enumerate().filter(|(at, p)| (at % width >= width / 2) == right && p[3] > 0).count();
+        (covered(false), covered(true))
+    }
+
+    #[test]
+    fn the_picture_is_not_a_mirror() {
+        let (mut model, textures) = triangle();
+        // The triangle is on the +x side of the model: seen from the front, it is on the right of the picture.
+        for vertex in &mut model.meshes[0].vertices {
+            vertex.position[0] = vertex.position[0] * 0.25 + 0.6;
+        }
+        let image = render_framed(&model, &textures, &front(), ([0.0; 3], 1.5), 64, 64);
+        let (left, right) = halves(&image, 64);
+        assert!(left == 0 && right > 0, "{left} pixels on the left, {right} on the right");
+        // The same from inside a place, looking at +z: what is at +x is on the left.
+        for vertex in &mut model.meshes[0].vertices {
+            vertex.position[2] = 3.0;
+        }
+        let mut corner = model.meshes[0].clone();
+        corner.material = 5;
+        for vertex in &mut corner.vertices {
+            // A point at the other end, so that the point of view stands at x = 0.
+            vertex.position = [-0.85, -2.0, -3.0];
+        }
+        model.meshes.push(corner);
+        let inside = Camera { yaw: 0.0, inside: true, ..front() };
+        let image = render(&model, &textures, &inside, 64, 64);
+        let (left, right) = halves(&image, 64);
+        assert!(left > 0 && right == 0, "{left} pixels on the left, {right} on the right");
+    }
+
+    #[test]
+    fn the_faces_that_the_material_hides_are_the_right_ones() {
+        let (mut model, textures) = triangle();
+        let seen = |model: &Model, yaw: f32| render(model, &textures, &Camera { yaw, ..front() }, 64, 64).chunks(4).any(|p| p[3] > 0);
+        // The corners of the triangle turn against the clock when it is seen from +z: that side is its front.
+        model.materials[0].state.cull = 1;
+        assert!(seen(&model, std::f32::consts::PI) && !seen(&model, 0.0), "the back faces are hidden");
+        model.materials[0].state.cull = 0;
+        assert!(!seen(&model, std::f32::consts::PI) && seen(&model, 0.0), "the front faces are hidden");
+    }
+
     #[test]
     fn a_triangle_near_the_camera_hides_one_behind_it() {
         let (mut model, textures) = triangle();
@@ -751,6 +826,27 @@ mod test {
                 for (side, yaw) in [("front", 0.0f32), ("side", 1.57), ("back", 3.14), ("three_quarters", 0.6)] {
                     let image = render(&model, &textures, &Camera { yaw, pitch: 0.15, zoom: 1.0, outline: false, inside: false }, 400, 400);
                     image::save_buffer(format!("{out}/{name}_{side}.png"), &image, 400, 400, image::ColorType::Rgba8).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_model_fills_the_picture_and_stays_in_it_when_it_turns() {
+        // A long flat model and a tall thin one, far from the origin.
+        for (wide, tall) in [(20.0f32, 1.0f32), (1.0, 30.0)] {
+            let (mut model, textures) = triangle();
+            let corner = |x: f32, y: f32| Vertex { position: [100.0 + x * wide, 50.0 + y * tall, 7.0], normal: [0.0, 0.0, 1.0], ..Vertex::default() };
+            model.meshes[0].vertices = vec![corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)];
+            model.meshes[0].triangles = vec![[0, 1, 2], [0, 2, 3]];
+            for yaw in [std::f32::consts::PI, 2.6, 0.4, 5.5] {
+                let image = render(&model, &textures, &Camera { yaw, pitch: 0.15, zoom: 1.0, outline: false, inside: false }, 100, 100);
+                let drawn: Vec<(usize, usize)> = (0..100 * 100).filter(|at| image[at * 4 + 3] > 0).map(|at| (at % 100, at / 100)).collect();
+                assert!(drawn.iter().all(|&(x, y)| x > 0 && x < 99 && y > 0 && y < 99), "{wide} by {tall}, turned {yaw}: it leaves the picture");
+                if yaw == std::f32::consts::PI {
+                    let size = |values: Vec<usize>| values.iter().max().unwrap() - values.iter().min().unwrap();
+                    let largest = size(drawn.iter().map(|p| p.0).collect()).max(size(drawn.iter().map(|p| p.1).collect()));
+                    assert!(largest >= 80, "{wide} by {tall}: only {largest} pixels of 100");
                 }
             }
         }

@@ -314,7 +314,7 @@ impl PlayerPage {
         let mut turned = false;
         if response.dragged() {
             let delta = response.drag_delta();
-            shown.camera.yaw -= delta.x * 0.012;
+            shown.camera.yaw += delta.x * 0.012;
             shown.camera.pitch = (shown.camera.pitch + delta.y * 0.012).clamp(-1.4, 1.4);
             turned = true;
         }

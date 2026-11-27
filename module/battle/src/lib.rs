@@ -489,7 +489,7 @@ impl Module for BattlePage {
                         let response = ui.add(egui::Image::new((handle.id(), egui::vec2(width, width * VIEW.1 as f32 / VIEW.0 as f32))).sense(egui::Sense::drag()));
                         if response.dragged() {
                             let d = response.drag_delta();
-                            open.camera.yaw -= d.x * 0.01;
+                            open.camera.yaw += d.x * 0.01;
                             open.camera.pitch = (open.camera.pitch + d.y * 0.01).clamp(-1.3, 1.3);
                         }
                         response.on_hover_text("Drag to turn the model");

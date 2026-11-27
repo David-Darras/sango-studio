@@ -119,6 +119,7 @@ mod test {
         let index = (0..original.len()).find(|&i| original.has(i) && converted.has(i)).unwrap();
         let (a, b) = (original.motion(index).unwrap(), converted.motion(index).unwrap());
         let frames = a.frames.min(b.frames) as usize;
+        let mut worst_scale = 0.0f32;
         let mut worst_angle = 0.0f32;
         let mut worst_move = 0.0f32;
         let mut compared = 0;
@@ -126,6 +127,9 @@ mod test {
             let (pa, pb) = (a.pose(original.joints.len(), frame as f32), b.pose(converted.joints.len(), frame as f32));
             for (ja, joint) in original.joints.iter().enumerate().skip(1) {
                 let Some(jb) = converted.joints.iter().position(|j| j.name == joint.name) else { continue };
+                // A scale that the motion does not give is the scale 1.
+                let (sa, sb) = (pa.joints[ja].scale.unwrap_or([1.0; 3]), pb.joints[jb].scale.unwrap_or([1.0; 3]));
+                worst_scale = (0..3).fold(worst_scale, |worst, k| worst.max((sa[k] - sb[k]).abs()));
                 let (Some(ra), Some(rb)) = (pa.joints[ja].rotation, pb.joints[jb].rotation) else { continue };
                 // Two sets of angles can turn the same way: the matrices are compared.
                 let (ma, mb) = (rotation_matrix(ra), rotation_matrix(rb));
@@ -141,6 +145,8 @@ mod test {
             }
         }
         eprintln!("compared {compared} joint poses: worst angle {worst_angle}, worst move {worst_move}");
+        assert_eq!(a.frames, b.frames, "the motion keeps its number of frames");
+        assert!(worst_scale < 0.02, "a scale is off by {worst_scale}");
         assert!(compared > 100);
         assert!(worst_angle < 0.06, "a rotation is off by {worst_angle}");
         assert!(worst_move < 0.6, "a translation is off by {worst_move}");
@@ -174,6 +180,30 @@ mod test {
         for t in &textures {
             let image = image::RgbaImage::from_raw(t.width as u32, t.height as u32, t.rgba.clone()).unwrap();
             image.save(format!("{output}_tex_{}.png", t.name)).unwrap();
+        }
+    }
+
+    /// With the dump of the game (`SANGO_DUMP`): small models (Joltik, Diglett, Flabébé) that are exported and imported again
+    /// keep their size, as a big one does (Charizard).
+    #[test]
+    fn an_exported_model_keeps_its_size_after_the_import() {
+        let Ok(dump_root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = Dump::open(&dump_root).unwrap();
+        let archive = Garc::open(&dump.archive(8)).unwrap();
+        let (templates, packs) = templates(&archive).unwrap();
+        let height = |model: &sango_core::model::Model| {
+            let heights = || model.meshes.iter().flat_map(|m| &m.vertices).map(|v| v.position[1]);
+            heights().fold(f32::MIN, f32::max) - heights().fold(f32::MAX, f32::min)
+        };
+        for species in [595usize, 50, 669, 6] {
+            let glb = crate::model_tab::glb_of_game_model(&archive, species).unwrap();
+            let source = sango_modelport::gltf::read_bytes(&glb, None).unwrap();
+            let files = VecFiles(sango_modelport::files::model_files(&source, &templates, &packs, "pm0724_00", 1.0).unwrap());
+            let first = first_file(&archive, species as u32).unwrap();
+            let (original, _) = crate::model_tab::read_model_for_test(&archive, first, false).unwrap();
+            let (imported, _) = crate::model_tab::read_model_for_test(&files, 0, false).unwrap();
+            let ratio = height(&imported) / height(&original);
+            assert!((0.98..1.02).contains(&ratio), "species {species}: the imported model is {ratio} times the original");
         }
     }
 

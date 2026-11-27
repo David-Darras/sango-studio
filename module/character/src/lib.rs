@@ -123,7 +123,7 @@ impl Character {
         let (rect, response) = ui.allocate_exact_size(egui::vec2(SIZE as f32, SIZE as f32), egui::Sense::click_and_drag());
         if response.dragged() {
             let delta = response.drag_delta();
-            self.camera.yaw -= delta.x * 0.012;
+            self.camera.yaw += delta.x * 0.012;
             self.camera.pitch = (self.camera.pitch + delta.y * 0.012).clamp(-1.4, 1.4);
             self.dirty = true;
         }

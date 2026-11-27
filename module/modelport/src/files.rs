@@ -148,15 +148,23 @@ pub fn assemble(converted: &Converted, templates: &TemplatePacks, setting: &[u8]
 /// A model taller than this (in the units of the file) is in the units of the game, not in metres: the biggest Pokémon is some metres tall.
 const MAX_HEIGHT_IN_METRES: f32 = 30.0;
 
+/// The factor from the units of a glTF file to metres. A glTF file is in metres, and the unit of the game is a centimetre. A
+/// file that comes from the export of Studio is in the units of the game, and so is a file that is far too tall to be in metres.
+pub fn metres_per_unit(source: &Source) -> f64 {
+    if source.game_units || box_of(source).1 as f32 / 100.0 > MAX_HEIGHT_IN_METRES {
+        0.01
+    } else {
+        1.0
+    }
+}
+
 /// The 8 files of the model in a glTF file: the conversion and the packs around it.
 ///
 /// `model_name` is the name inside the files (for example `pm0724_00`: it must differ from the names of the other models of the game),
-/// `scale` makes the model bigger or smaller. A glTF file is in metres, and the game's unit is a centimetre; the files that Studio exports
-/// are in the units of the game, so a model that is far too tall to be in metres is taken as already in the units of the game.
+/// `scale` makes the model bigger or smaller. The units of the file are found by `metres_per_unit`.
 pub fn model_files(source: &Source, templates: &crate::convert::Templates, packs: &TemplatePacks, model_name: &str, scale: f64) -> Result<Vec<Vec<u8>>, String> {
     let (box_cm, height) = box_of(source);
-    let in_game_units = height as f32 / 100.0 > MAX_HEIGHT_IN_METRES;
-    let scale = if in_game_units { scale * 0.01 } else { scale };
+    let scale = scale * metres_per_unit(source);
     let converted = crate::convert::convert_with(source, templates, model_name, scale, true)?;
     let factor = scale as f32;
     let scaled = box_cm.map(|v| v * factor);

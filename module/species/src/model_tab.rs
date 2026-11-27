@@ -7,7 +7,7 @@
 use sango_core::model::{first_bone_name, parse_model, parse_textures, Model, Texture};
 use sango_core::motion::{Motion, MotionPack};
 use sango_core::posing::posed;
-use sango_core::render::{bounds_of, render, render_framed_at, Camera};
+use sango_core::render::{frame_of, render, render_framed_at, Camera};
 use sango_core::{lz, Bundle, Dump, Garc};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget};
@@ -223,7 +223,7 @@ pub struct ModelTab {
     running: bool,
     frame: f32,
     last_tick: Option<std::time::Instant>,
-    /// The sphere that the picture shows, from all the poses of the motion: the view does not move while the motion plays.
+    /// The frame of the picture, from all the poses of the motion: the view does not move while the motion plays.
     focus: Option<([f32; 3], f32)>,
     /// True when the last picture took too long: the pictures are then drawn without the smoothing of the edges.
     slow: bool,
@@ -300,7 +300,7 @@ fn glb_of(loaded: &Loaded) -> Result<Vec<u8>, String> {
         let Some(pack) = pack else { continue };
         for index in (0..pack.len()).filter(|&i| pack.has(i)) {
             let Ok(motion) = pack.motion(index) else { continue };
-            let frames = (0..motion.frames.max(1)).map(|f| sango_core::posing::bone_values(&loaded.model, pack, &motion.pose(pack.joints.len(), f as f32))).collect();
+            let frames = crate::model_export::motion_frames(&loaded.model, pack, &motion);
             clips.push(crate::model_export::Clip { name: motion_name(battle, index), frames });
         }
     }
@@ -431,20 +431,23 @@ impl ModelTab {
             Ok((model, textures)) => {
                 let by_name = textures.iter().map(|texture| (texture.name.clone(), texture.clone())).collect();
                 let (battle, amie) = (read_motions(archive, file + BATTLE_MOTION_OFFSET), read_motions(archive, file + AMIE_MOTION_OFFSET));
-                // When loading a new model or form, start in its idle motion.
+                let idle = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
+                    let pack = pack.as_ref()?;
+                    let index = (0..pack.len()).find(|&i| pack.has(i))?;
+                    pack.motion(index).ok().map(|motion| Playing { battle: is_battle, index, motion })
+                });
+                self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name, battle, amie });
+                // When loading a new model or form, start in its idle motion, with the whole model in the picture. The frame
+                // comes from the model, so it is chosen after the model is in place.
                 if !only_shiny {
                     self.slow = false;
-                    self.playing = [(true, &battle), (false, &amie)].into_iter().find_map(|(is_battle, pack)| {
-                        let pack = pack.as_ref()?;
-                        let index = (0..pack.len()).find(|&i| pack.has(i))?;
-                        pack.motion(index).ok().map(|motion| Playing { battle: is_battle, index, motion })
-                    });
+                    self.camera.zoom = 1.0;
+                    self.playing = idle;
                     self.running = self.playing.is_some();
                     self.frame = 0.0;
                     self.last_tick = None;
                     self.refocus();
                 }
-                self.loaded = Some(Loaded { species, form, shiny: self.shiny, model, textures, by_name, battle, amie });
             }
             Err(message) => {
                 self.loaded = None;
@@ -501,7 +504,7 @@ impl ModelTab {
         }
         if response.dragged() {
             let delta = response.drag_delta();
-            self.camera.yaw -= delta.x * 0.012;
+            self.camera.yaw += delta.x * 0.012;
             self.camera.pitch = (self.camera.pitch + delta.y * 0.012).clamp(-1.4, 1.4);
             self.dirty = true;
         }
@@ -538,7 +541,7 @@ impl ModelTab {
                     (Some(playing), Some(pack)) => {
                         let moved = posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), self.frame));
                         let start = std::time::Instant::now();
-                        let frame = self.focus.unwrap_or_else(|| sango_core::render::bounds(&moved));
+                        let frame = self.focus.unwrap_or_else(|| frame_of(std::slice::from_ref(&moved)));
                         let pixels = render_framed_at(&moved, &loaded.by_name, &self.camera, frame, VIEW_SIZE, VIEW_SIZE, if self.slow { 1 } else { 2 });
                         // A picture that takes more than 90 ms (the gas of Gastly and Koffing) is drawn without smoothing.
                         let took = start.elapsed();
@@ -777,13 +780,13 @@ impl ModelTab {
         }
     }
 
-    /// Chooses the sphere that the picture shows: the one that holds the model in 16 poses of the motion that plays.
+    /// Chooses the frame of the picture: the one that holds the model in 16 poses of the motion that plays.
     fn refocus(&mut self) {
         self.focus = None;
         let (Some(loaded), Some(playing)) = (&self.loaded, &self.playing) else { return };
         let Some(pack) = (if playing.battle { &loaded.battle } else { &loaded.amie }) else { return };
         let poses: Vec<Model> = (0..16).map(|k| posed(&loaded.model, pack, &playing.motion.pose(pack.joints.len(), playing.motion.frames as f32 * k as f32 / 16.0))).collect();
-        self.focus = Some(bounds_of(&poses));
+        self.focus = Some(frame_of(&poses));
     }
 
     /// The list of the pictures of the model, with a small view of each.
@@ -820,6 +823,25 @@ impl ModelTab {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    /// With the dump of the game: the frame of the view is the one of the model that is shown, not of the model before.
+    #[test]
+    fn the_view_is_framed_on_the_model_that_is_shown() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let mut tab = ModelTab::default();
+        tab.open(&Dump::open(&root).unwrap());
+        // Wailord is huge and Joltik is tiny: from one to the other and back, with a zoom in between.
+        for species in [321usize, 595, 321] {
+            tab.variants = tab.models_of(species);
+            tab.variants_of = Some(species);
+            tab.camera.zoom = 3.0;
+            tab.load(species, 0);
+            let (loaded, focus) = (tab.loaded.as_ref().unwrap(), tab.focus.expect("the model has an idle motion"));
+            let own = frame_of(std::slice::from_ref(&loaded.model)).1;
+            assert!(focus.1 > own * 0.5 && focus.1 < own * 2.0, "species {species}: the frame is {}, the model {own}", focus.1);
+            assert_eq!(tab.camera.zoom, 1.0, "a new model is shown whole");
+        }
+    }
 
     /// With the dump of the game: the models of a species come from the list of the game, and the first bone of each model
     /// is named after the model (the number of the model is not always the number in the Pokédex: the models of the

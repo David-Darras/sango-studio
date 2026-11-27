@@ -6,7 +6,9 @@
 
 use image::ImageEncoder;
 use sango_core::model::{Material, Model, Texture};
-use sango_core::posing::{rest_worlds, Affine, BoneValues};
+use sango_core::motion::{Motion, MotionPack};
+use sango_core::posing::{bone_values, rest_worlds, Affine, BoneValues};
+use sango_modelport::gltf::{GAME_UNITS_NODE, GENERATOR, SCALE_NODE_SUFFIX};
 use std::collections::HashMap;
 
 /// The bytes of a picture as a PNG file.
@@ -101,8 +103,43 @@ pub struct Clip {
     pub frames: Vec<Vec<Option<BoneValues>>>,
 }
 
-/// The animations of the file: for each clip and each bone that it moves, three channels (translation, rotation, scale).
-fn animations(model: &Model, clips: &[Clip], buffer: &mut Buffer) -> Vec<String> {
+/// The values of each bone at each frame of a motion, from the frame 0 to the last frame of the motion (both are in).
+pub fn motion_frames(model: &Model, pack: &MotionPack, motion: &Motion) -> Vec<Vec<Option<BoneValues>>> {
+    (0..=motion.frames).map(|frame| bone_values(model, pack, &motion.pose(pack.joints.len(), f32::from(frame)))).collect()
+}
+
+/// True when a scale changes a size.
+fn is_scaled(scale: [f32; 3]) -> bool {
+    scale.iter().any(|s| (s - 1.0).abs() > 1e-5)
+}
+
+/// The scale that takes a scale out.
+fn opposite(scale: [f32; 3]) -> [f32; 3] {
+    scale.map(|s| if s.abs() < 1e-6 { 1.0 } else { 1.0 / s })
+}
+
+/// For each bone, the number of the node that stands above it when its parent has a scale in the rest pose or in a clip (see
+/// `SCALE_NODE_SUFFIX`). The numbers start at `first`.
+fn scale_nodes(model: &Model, clips: &[Clip], first: usize) -> Vec<Option<usize>> {
+    let scaled: Vec<bool> = (0..model.bones.len())
+        .map(|bone| is_scaled(model.bones[bone].scale) || clips.iter().flat_map(|c| &c.frames).any(|frame| frame.get(bone).copied().flatten().is_some_and(|v| is_scaled(v.scale))))
+        .collect();
+    let mut next = first;
+    model
+        .bones
+        .iter()
+        .enumerate()
+        .map(|(i, bone)| {
+            bone.parent.filter(|&p| p != i && scaled.get(p) == Some(&true))?;
+            next += 1;
+            Some(next - 1)
+        })
+        .collect()
+}
+
+/// The animations of the file: for each clip and each bone that it moves, a channel for its translation, its rotation and its
+/// scale. A bone with a node above it (`above`) gives its translation to that node, which also takes the scale of the parent out.
+fn animations(model: &Model, clips: &[Clip], above: &[Option<usize>], buffer: &mut Buffer) -> Vec<String> {
     let mut out = Vec::new();
     for clip in clips.iter().filter(|c| c.frames.len() > 1) {
         let times = bytes_of_f32((0..clip.frames.len()).map(|f| f as f32 / 30.0));
@@ -127,11 +164,21 @@ fn animations(model: &Model, clips: &[Clip], buffer: &mut Buffer) -> Vec<String>
                 previous = Some(q);
                 q
             }));
-            for (path, data, kind) in [("translation", translations, "VEC3"), ("rotation", rotations, "VEC4"), ("scale", scales, "VEC3")] {
+            let holder = above[bone].unwrap_or(bone);
+            let mut outputs = vec![(holder, "translation", translations, "VEC3"), (bone, "rotation", rotations, "VEC4"), (bone, "scale", scales, "VEC3")];
+            if let (Some(node), Some(parent)) = (above[bone], model.bones[bone].parent) {
+                // The scale of the parent at each frame. A bone that the motion does not move keeps the scale of the rest pose.
+                let undone = bytes_of_f32(clip.frames.iter().flat_map(|f| {
+                    let moved = f.get(bone).copied().flatten().and(f.get(parent).copied().flatten());
+                    opposite(moved.map_or(model.bones[parent].scale, |v| v.scale))
+                }));
+                outputs.push((node, "scale", undone, "VEC3"));
+            }
+            for (node, path, data, kind) in outputs {
                 let view = buffer.view(&data, None);
                 let output = buffer.accessor(view, 5126, clip.frames.len(), kind, "");
                 samplers.push(format!("{{\"input\":{input},\"output\":{output},\"interpolation\":\"LINEAR\"}}"));
-                channels.push(format!("{{\"sampler\":{},\"target\":{{\"node\":{bone},\"path\":\"{path}\"}}}}", samplers.len() - 1));
+                channels.push(format!("{{\"sampler\":{},\"target\":{{\"node\":{node},\"path\":\"{path}\"}}}}", samplers.len() - 1));
             }
         }
         if !channels.is_empty() {
@@ -144,13 +191,15 @@ fn animations(model: &Model, clips: &[Clip], buffer: &mut Buffer) -> Vec<String>
 /// A model as a .glb file: `textures` are the pictures that the materials use (by name), `clips` the motions.
 pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -> Result<Vec<u8>, String> {
     let mut buffer = Buffer::default();
-    // The skeleton: one node for each bone, then one node for the meshes.
+    // The skeleton: one node for each bone, then one node for the meshes, then the nodes that stand above the bones whose
+    // parent has a scale.
     let rest = rest_worlds(&model.bones);
+    let above = scale_nodes(model, clips, model.bones.len() + 1);
     let mut children: Vec<Vec<usize>> = vec![Vec::new(); model.bones.len()];
     let mut roots = Vec::new();
     for (i, bone) in model.bones.iter().enumerate() {
         match bone.parent.filter(|&p| p < model.bones.len() && p != i) {
-            Some(parent) => children[parent].push(i),
+            Some(parent) => children[parent].push(above[i].unwrap_or(i)),
             None => roots.push(i),
         }
     }
@@ -159,16 +208,26 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
         let local = Affine::new(bone.translation, sango_core::posing::rotation_zyx(bone.rotation), [1.0; 3]);
         let q = quaternion(&local.0);
         let child_list = if children[i].is_empty() { String::new() } else { format!(",\"children\":[{}]", children[i].iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")) };
+        let translation = if above[i].is_some() { [0.0; 3] } else { bone.translation };
         nodes.push(format!(
             "{{\"name\":{},\"translation\":[{}],\"rotation\":[{}],\"scale\":[{}]{child_list}}}",
             json_text(&bone.name),
-            floats(&bone.translation),
+            floats(&translation),
             floats(&q),
             floats(&bone.scale)
         ));
     }
     let mesh_node = nodes.len();
-    nodes.push("{\"name\":\"model\",\"mesh\":0,\"skin\":0}".to_string());
+    nodes.push(format!("{{\"name\":\"{GAME_UNITS_NODE}\",\"mesh\":0,\"skin\":0}}"));
+    for (i, bone) in model.bones.iter().enumerate() {
+        let (Some(_), Some(parent)) = (above[i], bone.parent) else { continue };
+        nodes.push(format!(
+            "{{\"name\":{},\"translation\":[{}],\"scale\":[{}],\"children\":[{i}]}}",
+            json_text(&format!("{}{SCALE_NODE_SUFFIX}", bone.name)),
+            floats(&bone.translation),
+            floats(&opposite(model.bones[parent].scale))
+        ));
+    }
 
     // The skin: the inverse of the world matrix of each bone in the rest pose (column by column).
     let mut inverse = Vec::new();
@@ -231,7 +290,9 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
             let total: f32 = v.weights.iter().sum();
             for k in 0..4 {
                 let (bone, weight) = if total > 0.0 { (v.bones[k], v.weights[k] / total) } else { (0, if k == 0 { 1.0 } else { 0.0 }) };
-                joints.extend((bone.min(model.bones.len().saturating_sub(1) as u16)).to_le_bytes());
+                // A place with no weight names the joint 0, as the rules of glTF ask.
+                let bone = if weight > 0.0 { bone.min(model.bones.len().saturating_sub(1) as u16) } else { 0 };
+                joints.extend(bone.to_le_bytes());
                 weights.extend(weight.to_le_bytes());
             }
         }
@@ -258,14 +319,14 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
     if primitives.is_empty() {
         return Err("The model has no triangle.".into());
     }
-    let animation_list = animations(model, clips, &mut buffer);
+    let animation_list = animations(model, clips, &above, &mut buffer);
     buffer.align();
 
     let join = |list: &[String]| list.join(",");
     let skin_joints = (0..model.bones.len()).map(|i| i.to_string()).collect::<Vec<_>>().join(",");
     let scene_nodes = roots.iter().map(|r| r.to_string()).chain(std::iter::once(mesh_node.to_string())).collect::<Vec<_>>().join(",");
     let mut json = format!(
-        "{{\"asset\":{{\"version\":\"2.0\",\"generator\":\"Sango Studio\"}},\"scene\":0,\"scenes\":[{{\"nodes\":[{scene_nodes}]}}],\"nodes\":[{}],\"skins\":[{{\"inverseBindMatrices\":{inverse_accessor},\"joints\":[{skin_joints}]}}],\"meshes\":[{{\"primitives\":[{}]}}],\"materials\":[{}],\"accessors\":[{}],\"bufferViews\":[{}],\"buffers\":[{{\"byteLength\":{}}}]",
+        "{{\"asset\":{{\"version\":\"2.0\",\"generator\":\"{GENERATOR}\"}},\"scene\":0,\"scenes\":[{{\"nodes\":[{scene_nodes}]}}],\"nodes\":[{}],\"skins\":[{{\"inverseBindMatrices\":{inverse_accessor},\"joints\":[{skin_joints}]}}],\"meshes\":[{{\"primitives\":[{}]}}],\"materials\":[{}],\"accessors\":[{}],\"bufferViews\":[{}],\"buffers\":[{{\"byteLength\":{}}}]",
         join(&nodes),
         join(&primitives),
         join(&materials),
@@ -322,9 +383,179 @@ mod test {
         let json_length = u32::from_le_bytes(file[12..16].try_into().unwrap()) as usize;
         let json = std::str::from_utf8(&file[20..20 + json_length]).unwrap();
         assert!(json.contains("\"JOINTS_0\"") && json.contains("\"image/png\"") && json.contains("\"skins\"") && json.contains("\"animations\""), "{json}");
+        assert!(sango_modelport::gltf::read_bytes(&file, None).unwrap().game_units, "the file says its units");
         // The text is valid JSON: the quotes and the brackets are balanced.
         assert_eq!(json.matches('{').count(), json.matches('}').count());
         assert_eq!(json.matches('[').count(), json.matches(']').count());
+    }
+
+    #[test]
+    fn a_place_with_no_weight_names_the_first_joint() {
+        let (mut model, textures) = small_model();
+        let mut second = model.bones[0].clone();
+        (second.name, second.parent) = ("second".into(), Some(0));
+        model.bones.push(second);
+        for vertex in &mut model.meshes[0].vertices {
+            vertex.bones = [1; 4];
+        }
+        let file = glb(&model, &textures, &[]).unwrap();
+        let source = sango_modelport::gltf::read_bytes(&file, None).unwrap();
+        assert_eq!(source.primitives[0].joints[0], [1, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_bone_under_a_scaled_parent_gets_a_node_that_takes_the_scale_out() {
+        let (mut model, textures) = small_model();
+        let mut second = model.bones[0].clone();
+        (second.name, second.parent, second.translation) = ("second".into(), Some(0), [1.0, 0.0, 0.0]);
+        model.bones.push(second);
+        let values = |translation: [f32; 3], scale: [f32; 3]| Some(BoneValues { translation, rotation: sango_core::posing::rotation_zyx([0.0; 3]), scale });
+        let clip = Clip { name: "grow".into(), frames: vec![vec![values([0.0; 3], [2.0, 1.0, 1.0]), values([1.0, 0.0, 0.0], [1.0; 3])]; 2] };
+        let file = glb(&model, &textures, &[clip]).unwrap();
+        let length = u32::from_le_bytes(file[12..16].try_into().unwrap()) as usize;
+        let json = std::str::from_utf8(&file[20..20 + length]).unwrap();
+        assert!(json.contains("\"name\":\"second~scale\",\"translation\":[1,0,0],\"scale\":[1,1,1],\"children\":[1]"), "{json}");
+        // The reader of Studio gives the skeleton of the bones again, with the translation on the bone.
+        let source = sango_modelport::gltf::read_bytes(&file, None).unwrap();
+        assert_eq!((source.nodes[1].parent, source.nodes[1].translation), (Some(0), [1.0, 0.0, 0.0]));
+        assert!(source.animations[0].channels.iter().all(|c| c.node < 2));
+    }
+
+    /// With the dump: the GLB file of a model, played as glTF says, moves like the viewer of Studio.
+    #[test]
+    fn the_motions_of_the_file_move_like_the_viewer() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let archive = sango_core::Garc::open(&dump.archive(8)).unwrap();
+        // Bulbasaur, Pikachu, Muk and Chandelure: their motions scale bones that have children.
+        for species in [1usize, 25, 89, 609] {
+            let list = archive.first_file(0).unwrap();
+            let first = u16::from_le_bytes([list[(species - 1) * 4], list[(species - 1) * 4 + 1]]) as usize * 8 + 3;
+            let (model, _) = crate::model_tab::read_model_for_test(&archive, first, false).unwrap();
+            let pack = crate::model_tab::battle_motions_for_test(&archive, first).unwrap();
+            let motion = pack.motion(0).unwrap();
+            let file = crate::model_tab::glb_of_game_model(&archive, species).unwrap();
+            let player = Player::read(&file);
+            for frame in [0, motion.frames / 3, motion.frames / 2] {
+                let expected = sango_core::posing::posed(&model, &pack, &motion.pose(pack.joints.len(), f32::from(frame)));
+                let played = player.play(&sango_modelport::animate::motion_name(true, 0), usize::from(frame));
+                let mut worst = 0.0f32;
+                let drawn = expected.meshes.iter().filter(|m| !m.triangles.is_empty() && !m.vertices.is_empty());
+                for (mesh, positions) in drawn.zip(&played) {
+                    for (vertex, position) in mesh.vertices.iter().zip(positions) {
+                        worst = (0..3).fold(worst, |w, k| w.max((vertex.position[k] - position[k]).abs()));
+                    }
+                }
+                assert!(worst < 0.01, "species {species} frame {frame}: a vertex is {worst} away");
+            }
+        }
+    }
+
+    /// A viewer of the tests: it moves the vertices of a GLB file as the rules of glTF say.
+    struct Player {
+        json: serde_json::Value,
+        data: Vec<u8>,
+    }
+
+    impl Player {
+        fn read(file: &[u8]) -> Player {
+            let length = u32::from_le_bytes(file[12..16].try_into().unwrap()) as usize;
+            Player { json: serde_json::from_slice(&file[20..20 + length]).unwrap(), data: file[28 + length..].to_vec() }
+        }
+
+        /// The numbers of an accessor.
+        fn numbers(&self, accessor: &serde_json::Value) -> Vec<f32> {
+            let accessor = &self.json["accessors"][accessor.as_u64().unwrap() as usize];
+            let view = &self.json["bufferViews"][accessor["bufferView"].as_u64().unwrap() as usize];
+            let width = match accessor["type"].as_str().unwrap() {
+                "SCALAR" => 1,
+                "VEC3" => 3,
+                "VEC4" => 4,
+                _ => 16,
+            };
+            let count = accessor["count"].as_u64().unwrap() as usize * width;
+            let start = view["byteOffset"].as_u64().unwrap() as usize;
+            let kind = accessor["componentType"].as_u64().unwrap();
+            let size = if kind == 5123 { 2 } else { 4 };
+            self.data[start..start + count * size]
+                .chunks(size)
+                .map(|b| match kind {
+                    5123 => f32::from(u16::from_le_bytes([b[0], b[1]])),
+                    5125 => u32::from_le_bytes(b.try_into().unwrap()) as f32,
+                    _ => f32::from_le_bytes(b.try_into().unwrap()),
+                })
+                .collect()
+        }
+
+        /// The positions of the vertices of each part of the mesh at a frame of an animation.
+        fn play(&self, name: &str, frame: usize) -> Vec<Vec<[f32; 3]>> {
+            let nodes = self.json["nodes"].as_array().unwrap();
+            let read = |node: &serde_json::Value, key: &str, rest: [f32; 4]| -> [f32; 4] { std::array::from_fn(|k| node[key][k].as_f64().map_or(rest[k], |v| v as f32)) };
+            let mut values: Vec<[[f32; 4]; 3]> = nodes.iter().map(|n| [read(n, "translation", [0.0; 4]), read(n, "rotation", [0.0, 0.0, 0.0, 1.0]), read(n, "scale", [1.0; 4])]).collect();
+            let animation = self.json["animations"].as_array().unwrap().iter().find(|a| a["name"] == name).expect("the animation");
+            for channel in animation["channels"].as_array().unwrap() {
+                let output = self.numbers(&animation["samplers"][channel["sampler"].as_u64().unwrap() as usize]["output"]);
+                let (path, width) = match channel["target"]["path"].as_str().unwrap() {
+                    "translation" => (0, 3),
+                    "rotation" => (1, 4),
+                    _ => (2, 3),
+                };
+                let target = &mut values[channel["target"]["node"].as_u64().unwrap() as usize][path];
+                target[..width].copy_from_slice(&output[frame * width..(frame + 1) * width]);
+            }
+            let mut parents = vec![None; nodes.len()];
+            for (parent, node) in nodes.iter().enumerate() {
+                for child in node["children"].as_array().into_iter().flatten() {
+                    parents[child.as_u64().unwrap() as usize] = Some(parent);
+                }
+            }
+            let local = |i: usize| {
+                let [t, r, s] = values[i];
+                Affine::new([t[0], t[1], t[2]], sango_core::posing::rotation_quaternion(r), [s[0], s[1], s[2]])
+            };
+            let world = |i: usize| {
+                let (mut matrix, mut at) = (local(i), i);
+                while let Some(parent) = parents[at] {
+                    (matrix, at) = (local(parent).then(&matrix), parent);
+                }
+                matrix
+            };
+            let skin = &self.json["skins"][0];
+            let inverse = self.numbers(&skin["inverseBindMatrices"]);
+            let joints: Vec<Affine> = skin["joints"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .map(|(k, joint)| {
+                    let m = &inverse[k * 16..(k + 1) * 16];
+                    world(joint.as_u64().unwrap() as usize).then(&Affine(std::array::from_fn(|row| std::array::from_fn(|column| m[column * 4 + row]))))
+                })
+                .collect();
+            self.json["meshes"][0]["primitives"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|part| {
+                    let attributes = &part["attributes"];
+                    let (positions, bones, weights) = (self.numbers(&attributes["POSITION"]), self.numbers(&attributes["JOINTS_0"]), self.numbers(&attributes["WEIGHTS_0"]));
+                    positions
+                        .chunks(3)
+                        .enumerate()
+                        .map(|(v, p)| {
+                            let mut out = [0.0f32; 3];
+                            for k in 0..4 {
+                                let moved = joints[bones[v * 4 + k] as usize].point([p[0], p[1], p[2]]);
+                                for axis in 0..3 {
+                                    out[axis] += weights[v * 4 + k] * moved[axis];
+                                }
+                            }
+                            out
+                        })
+                        .collect()
+                })
+                .collect()
+        }
     }
 
     #[test]

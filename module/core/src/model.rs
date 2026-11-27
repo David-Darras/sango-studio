@@ -203,9 +203,17 @@ struct File<'a> {
     strings: usize,
     commands: usize,
     raw: usize,
+    /// The start of the second block of raw data (see `is_second_block`).
+    raw_second: usize,
     /// The kind of each word of the commands that the table of places marks (0x27 and 0x28 give the width of the
     /// indices), by the place of the word from the start of the commands.
     marked: HashMap<usize, u8>,
+}
+
+/// True for a kind of the table of places that marks an address in the second block of raw data (it starts at the word at
+/// 24 of the file), and not in the first one. Some pictures of the game are there (the flames, the gas).
+pub fn is_second_block(kind: u8) -> bool {
+    (0x29..=0x2d).contains(&kind)
 }
 
 impl<'a> File<'a> {
@@ -213,11 +221,12 @@ impl<'a> File<'a> {
         if data.get(..4) != Some(b"BCH\0") {
             return Err("This is not a model file.".into());
         }
-        let mut file = File { data, content: 0, strings: 0, commands: 0, raw: 0, marked: HashMap::new() };
+        let mut file = File { data, content: 0, strings: 0, commands: 0, raw: 0, raw_second: 0, marked: HashMap::new() };
         file.content = file.u32(8)? as usize;
         file.strings = file.u32(12)? as usize;
         file.commands = file.u32(16)? as usize;
         file.raw = file.u32(20)? as usize;
+        file.raw_second = file.u32(24)? as usize;
         let (table, length) = (file.u32(28)? as usize, file.u32(52)? as usize);
         for entry in 0..length / 4 {
             let value = file.u32(table + 4 * entry)?;
@@ -250,6 +259,15 @@ impl<'a> File<'a> {
         let tail = self.data.get(self.strings + offset as usize..).unwrap_or(&[]);
         let end = tail.iter().position(|&b| b == 0).unwrap_or(tail.len()).min(80);
         String::from_utf8_lossy(&tail[..end]).into_owned()
+    }
+
+    /// The start of the block of raw data that an address counts from: `word` is the place of the word that holds the
+    /// address, from the start of the commands.
+    fn raw_block(&self, word: usize) -> usize {
+        match self.marked.get(&word) {
+            Some(&kind) if is_second_block(kind) => self.raw_second,
+            _ => self.raw,
+        }
     }
 
     /// The words of a list of commands: the place is from the start of the commands.
@@ -959,12 +977,13 @@ pub fn parse_textures(data: &[u8]) -> Result<Vec<Texture>, String> {
     let mut out = Vec::with_capacity(count);
     for i in 0..count {
         let description = file.content + file.u32(table + 4 * i)? as usize;
-        let words = file.words(file.u32(description)? as usize, file.u32(description + 4)? as usize)?;
+        let list = file.u32(description)? as usize;
+        let words = file.words(list, file.u32(description + 4)? as usize)?;
         let registers = registers(&words);
-        let (Some(&(dimension, _)), Some(&(address, _)), Some(&(kind, _))) = (registers.get(&0x82), registers.get(&0x85), registers.get(&0x8e)) else { continue };
+        let (Some(&(dimension, _)), Some(&(address, word)), Some(&(kind, _))) = (registers.get(&0x82), registers.get(&0x85), registers.get(&0x8e)) else { continue };
         let (width, height) = ((dimension >> 16) as usize, (dimension & 0xffff) as usize);
         let format = kind & 0xf;
-        let start = file.raw + address as usize;
+        let start = file.raw_block(list + 4 * word) + address as usize;
         let Some(bytes) = file.data.get(start..start + texture_size(format, width, height)) else { continue };
         if let Some(rgba) = decode_texture(format, width, height, bytes) {
             out.push(Texture { name: file.name(file.u32(description + 28)?), width, height, rgba });
@@ -983,12 +1002,13 @@ fn find_texture(data: &[u8], name: &str) -> Result<(usize, u32, usize, usize), S
         if file.name(file.u32(description + 28)?) != name {
             continue;
         }
-        let words = file.words(file.u32(description)? as usize, file.u32(description + 4)? as usize)?;
+        let list = file.u32(description)? as usize;
+        let words = file.words(list, file.u32(description + 4)? as usize)?;
         let registers = registers(&words);
-        let (Some(&(dimension, _)), Some(&(address, _)), Some(&(kind, _))) = (registers.get(&0x82), registers.get(&0x85), registers.get(&0x8e)) else {
+        let (Some(&(dimension, _)), Some(&(address, word)), Some(&(kind, _))) = (registers.get(&0x82), registers.get(&0x85), registers.get(&0x8e)) else {
             return Err(format!("The picture {name} has no description."));
         };
-        return Ok((file.raw + address as usize, kind & 0xf, (dimension >> 16) as usize, (dimension & 0xffff) as usize));
+        return Ok((file.raw_block(list + 4 * word) + address as usize, kind & 0xf, (dimension >> 16) as usize, (dimension & 0xffff) as usize));
     }
     Err(format!("The model file has no picture named {name}."))
 }
@@ -1423,6 +1443,65 @@ mod test {
             assert_eq!(x.vertices.len(), y.vertices.len());
         }
         assert!(normalize_pack_for_engine(&fixed).unwrap().is_none(), "a second pass changes nothing");
+    }
+
+    /// A model file with one picture of 8 × 8 pixels of 4 bits, whose address is 0 and has the kind `kind` in the table of
+    /// places. The first block of raw data is black and the second one is white.
+    fn one_picture(kind: u32) -> Vec<u8> {
+        const CONTENT: usize = 0x40;
+        const STRINGS: usize = 0xc0;
+        const COMMANDS: usize = 0xd0;
+        const RAW: usize = 0x100;
+        const SECOND: usize = 0x120;
+        const TABLE: usize = 0x140;
+        let mut data = vec![0u8; TABLE + 4];
+        data[..4].copy_from_slice(b"BCH\0");
+        let mut set = |at: usize, value: u32| data[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        for (at, value) in [(8, CONTENT), (12, STRINGS), (16, COMMANDS), (20, RAW), (24, SECOND), (28, TABLE), (52, 4)] {
+            set(at, value as u32);
+        }
+        // The table of the pictures (one entry) and the description of the picture: its list of commands has 6 words.
+        set(CONTENT + 36, 0x30);
+        set(CONTENT + 40, 1);
+        set(CONTENT + 0x30, 0x40);
+        set(CONTENT + 0x40, 0);
+        set(CONTENT + 0x44, 6);
+        set(CONTENT + 0x40 + 28, 0);
+        // The size, the address and the format (10: 4 bits of light).
+        for (k, word) in [0x0008_0008u32, 0x000f_0082, 0, 0x000f_0085, 10, 0x000f_008e].into_iter().enumerate() {
+            set(COMMANDS + 4 * k, word);
+        }
+        set(TABLE, kind << 25 | 2);
+        data[STRINGS..STRINGS + 5].copy_from_slice(b"Fire\0");
+        data[SECOND..SECOND + 32].fill(0xff);
+        data
+    }
+
+    #[test]
+    fn a_picture_is_read_from_the_block_that_the_table_names() {
+        let light = |kind| parse_textures(&one_picture(kind)).unwrap()[0].rgba[0];
+        assert_eq!(light(0x25), 0, "the first block of raw data");
+        assert_eq!(light(0x2a), 255, "the second block of raw data");
+        // A new picture is written where the old one is read.
+        let changed = replace_texture(&one_picture(0x2a), "Fire", &[0; 8 * 8 * 4]).unwrap();
+        assert_eq!(parse_textures(&changed).unwrap()[0].rgba[0], 0);
+        assert_eq!(&changed[0x100..0x120], &one_picture(0x2a)[0x100..0x120], "the first block stays");
+    }
+
+    /// With the dump of the game: the flames of Charizard are shapes (black and white), not a plain white picture.
+    #[test]
+    fn the_flames_of_the_dump_are_read() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = crate::Dump::open(&root).unwrap();
+        let garc = crate::Garc::open(&dump.archive(8)).unwrap();
+        let list = garc.first_file(0).unwrap();
+        let first = u16::from_le_bytes([list[20], list[21]]) as usize * 8 + 3;
+        let bytes = crate::lz::decompress(garc.first_file(first + 2).unwrap()).unwrap();
+        let part = crate::Bundle::parse(bytes).unwrap().resource(0).unwrap().to_vec();
+        let textures = parse_textures(&part).unwrap();
+        let flame = textures.iter().find(|t| t.name.ends_with("FireCoreA1")).expect("the flame of Charizard");
+        let mean = flame.rgba.chunks(4).map(|p| u64::from(p[0])).sum::<u64>() / (flame.width * flame.height) as u64;
+        assert!((60..200).contains(&mean), "the mean light of the flame is {mean}");
     }
 
     #[test]

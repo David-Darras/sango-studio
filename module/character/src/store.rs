@@ -180,7 +180,7 @@ impl Loaded {
             .filter(|&i| pack.has(i))
             .filter_map(|index| {
                 let motion = pack.motion(index).ok()?;
-                let frames = (0..motion.frames.max(1)).map(|f| sango_core::posing::bone_values(&self.model, pack, &motion.pose(pack.joints.len(), f as f32))).collect();
+                let frames = sango_species::model_export::motion_frames(&self.model, pack, &motion);
                 Some(Clip { name: format!("motion {index}"), frames })
             })
             .collect()

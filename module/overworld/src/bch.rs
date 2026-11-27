@@ -267,14 +267,22 @@ impl<'a> Bch<'a> {
         for i in 0..count {
             let desc = self.content + self.u32(table + 4 * i)? as usize;
             let words = self.u32(desc + 4)? as usize;
-            let regs = registers(&self.command_words(self.u32(desc)? as usize, words)?);
+            let list = self.u32(desc)? as usize;
+            let commands = self.command_words(list, words)?;
+            let regs = registers(&commands);
             let (Some(&dim), Some(&address), Some(&kind)) = (regs.get(&0x82), regs.get(&0x85), regs.get(&0x8e)) else {
                 continue;
             };
             let (width, height) = ((dim >> 16) as usize, (dim & 0xffff) as usize);
             let format = kind & 0xf;
             let name = self.text_at(self.strings + self.u32(desc + 28)? as usize);
-            let start = self.raw_data + address as usize;
+            // The table of relocation says from which block of raw data the address counts.
+            let second = register_places(&commands)
+                .get(&0x85)
+                .and_then(|&word| self.command_word_kind(list + 4 * word))
+                .is_some_and(sango_core::model::is_second_block);
+            let block = if second { self.u32(24)? as usize } else { self.raw_data };
+            let start = block + address as usize;
             let size = sango_core::model::texture_size(format, width, height);
             let Some(bytes) = self.data.get(start..start + size) else { continue };
             if let Some(rgba) = sango_core::model::decode_texture(format, width, height, bytes) {
@@ -552,5 +560,38 @@ impl<'a> Bch<'a> {
     fn take(&self, at: usize) -> Result<[u8; 4], String> {
         let b = self.data.get(at..at + 4).ok_or("vertex outside the file")?;
         Ok([b[0], b[1], b[2], b[3]])
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// With the dump: the pictures of the areas are the ones that the shared reader of model files gives, also the pictures of the
+    /// second block of raw data.
+    #[test]
+    fn the_pictures_of_the_areas_are_the_ones_of_the_shared_reader() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let garc = sango_core::Garc::open(&dump.archive(14)).unwrap();
+        let mut compared = 0;
+        for id in [0usize, 1, 2, 3, 6, 7, 39, 40] {
+            let file = garc.first_file_decompressed(id).unwrap();
+            let mut pending = vec![file];
+            while let Some(data) = pending.pop() {
+                if data.get(..4) == Some(b"BCH ") {
+                    let ours = Bch::parse(&data).unwrap().textures().unwrap();
+                    let shared = sango_core::model::parse_textures(&data).unwrap();
+                    assert_eq!(ours.len(), shared.len(), "file {id}");
+                    for (a, b) in ours.iter().zip(&shared) {
+                        assert!(a.name == b.name && a.rgba == b.rgba, "file {id}, picture {}", a.name);
+                        compared += 1;
+                    }
+                } else if let Ok((_, parts)) = sango_core::bundle::split(&data) {
+                    pending.extend(parts.into_iter().filter(|part| part.len() < data.len()).map(|part| part.to_vec()));
+                }
+            }
+        }
+        assert!(compared > 20, "{compared} pictures");
     }
 }
