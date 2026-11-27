@@ -38,13 +38,15 @@ pub struct EffectPage {
     retired: sango_ui::retired::Retired,
     /// The preview of the open effect.
     view: PreviewState,
+    /// The places in front of the camera that the choreographies give to the effects.
+    places: std::collections::HashMap<i32, Vec<sango_choreography::ScreenPlacement>>,
     /// Undo and redo of the open effect.
     history: sango_ui::history::History<Option<Effect>>,
 }
 
 impl Default for EffectPage {
     fn default() -> Self {
-        EffectPage { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), pending_file: None, history: Default::default() }
+        EffectPage { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 723, effect: None, baseline: Vec::new(), layer: 0, status: None, textures: Vec::new(), retired: Default::default(), view: PreviewState::default(), places: Default::default(), pending_file: None, history: Default::default() }
     }
 }
 
@@ -56,20 +58,43 @@ struct PreviewState {
     camera: preview::Camera,
     last_tick: Option<std::time::Instant>,
     texture: Option<egui::TextureHandle>,
-    /// What the picture shows: the file, the frame, the point of view and the bytes of the effect (a change of one of them draws it again).
-    shown: Option<(usize, f32, preview::Camera, Vec<u8>)>,
+    /// What the picture shows: the file, the frame, the point of view, the place on the top screen and the bytes of the
+    /// effect (a change of one of them draws it again).
+    shown: Option<Shown>,
     pictures: Vec<preview::Look>,
     extent: f32,
+    /// The view that the user chose: `SCREEN` or `FREE`.
+    mode: usize,
+    /// The place on the top screen that the user chose, among the ones of the effect.
+    place: usize,
+    /// The file whose view was chosen: a new file starts with the view that suits it.
+    viewed: Option<usize>,
+}
+
+/// What a picture of the preview shows.
+#[derive(Clone, PartialEq)]
+struct Shown {
+    file: usize,
+    frame: f32,
+    camera: preview::Camera,
+    place: Option<preview::Place>,
+    bytes: Vec<u8>,
 }
 
 impl Default for PreviewState {
     fn default() -> Self {
-        PreviewState { frame: 0.0, playing: true, repeat: true, camera: preview::Camera::default(), last_tick: None, texture: None, shown: None, pictures: Vec::new(), extent: 10.0 }
+        PreviewState { frame: 0.0, playing: true, repeat: true, camera: preview::Camera::default(), last_tick: None, texture: None, shown: None, pictures: Vec::new(), extent: 10.0, mode: FREE, place: 0, viewed: None }
     }
 }
 
-/// The side of the picture of the preview, in pixels.
+/// The side of the picture of the free view, in pixels.
 const PREVIEW_SIDE: usize = 380;
+/// The top screen of the console, in pixels, and the size of its picture on the page.
+const SCREEN_SIZE: (usize, usize) = (400, 240);
+const SCREEN_SHOWN: (f32, f32) = (600.0, 360.0);
+/// The two views, in the order of their tabs.
+const SCREEN: usize = 0;
+const FREE: usize = 1;
 /// The frames each second.
 const FRAMES_PER_SECOND: f32 = 30.0;
 
@@ -155,6 +180,8 @@ impl EffectPage {
             }
             Err(message) => self.error = Some(message),
         }
+        self.places = sango_choreography::screen_placements(dump);
+        self.view.viewed = None;
         self.effect = None;
         self.history.clear();
     }
@@ -219,6 +246,15 @@ impl EffectPage {
         let Some(effect) = &self.effect else { return };
         let (file, view) = (self.file, &mut self.view);
         let length = preview::length(effect);
+        let places = self.places.get(&(file as i32)).map_or(&[][..], Vec::as_slice);
+        // A screen effect starts with the view of the top screen, the others with the free view.
+        if view.viewed != Some(file) {
+            view.viewed = Some(file);
+            view.mode = if places.is_empty() { FREE } else { SCREEN };
+            view.place = 0;
+            view.camera = preview::Camera::default();
+        }
+        view.place = view.place.min(places.len().saturating_sub(1));
         widget::card(ui, |ui| {
             ui.label(widget::title("Preview"));
             ui.label(widget::hint("The particles appear where and when the layers say, with their size, colour, transparency and picture. They do not move yet: the speeds and the forces are not read."));
@@ -246,8 +282,22 @@ impl EffectPage {
                 ui.ctx().request_repaint();
             }
             view.last_tick = Some(now);
-            let (rect, response) = ui.allocate_exact_size(egui::vec2(PREVIEW_SIDE as f32, PREVIEW_SIDE as f32), egui::Sense::click_and_drag());
-            if response.dragged() {
+            widget::tabs(ui, "effect_view", &["Top screen", "Free view"], &mut view.mode);
+            let on_screen = view.mode == SCREEN;
+            if on_screen && places.len() > 1 {
+                let label = |at: usize| places.get(at).map_or_else(String::new, |p| format!("{} (choreography {}, distance {})", p.name, p.choreography, p.distance));
+                ui.horizontal(|ui| {
+                    ui.label("Place");
+                    let mut chosen = view.place as u16;
+                    let entries = || vec![sango_ui::picker::Group { title: String::new(), entries: (0..places.len()).map(|at| (at as u16, label(at))).collect() }];
+                    if sango_ui::picker::picker(ui, "effect_place", &label(view.place), 420.0, &mut chosen, None, entries) {
+                        view.place = usize::from(chosen);
+                    }
+                });
+            }
+            let size = if on_screen { egui::vec2(SCREEN_SHOWN.0, SCREEN_SHOWN.1) } else { egui::vec2(PREVIEW_SIDE as f32, PREVIEW_SIDE as f32) };
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click_and_drag());
+            if response.dragged() && !on_screen {
                 let delta = response.drag_delta();
                 view.camera.yaw -= delta.x * 0.01;
                 view.camera.pitch = (view.camera.pitch + delta.y * 0.01).clamp(-1.4, 1.4);
@@ -264,21 +314,32 @@ impl EffectPage {
             }
             // Draw again when the file, the frame, the point of view or the effect changed.
             let bytes = effect.bytes();
-            let same = matches!(&view.shown, Some((f, frame, camera, saved)) if *f == file && *frame == view.frame && *camera == view.camera && saved.as_slice() == bytes);
+            let new_effect = !view.shown.as_ref().is_some_and(|s| s.file == file && s.bytes.as_slice() == bytes);
+            if new_effect {
+                view.pictures = preview::looks(effect);
+                view.extent = preview::extent(effect);
+            }
+            // The place on the top screen: the one of a choreography, else one that holds the whole effect.
+            let place = on_screen.then(|| places.get(view.place).map_or_else(|| preview::Place::holding(view.extent), |p| preview::Place { distance: p.distance, scale: p.scale, shift: p.shift, turn: p.turn }));
+            let same = view.shown.as_ref().is_some_and(|s| !new_effect && s.frame == view.frame && s.camera == view.camera && s.place == place);
             if !same || view.texture.is_none() {
-                if !matches!(&view.shown, Some((f, _, _, saved)) if *f == file && saved.as_slice() == bytes) {
-                    view.pictures = preview::looks(effect);
-                    view.extent = preview::extent(effect);
-                }
-                let pixels = preview::render(effect, &view.pictures, view.frame, view.camera, view.extent, PREVIEW_SIDE);
-                view.texture = Some(sango_ui::textures::load(ui.ctx(), "effect_preview", egui::ColorImage::from_rgba_unmultiplied([PREVIEW_SIDE, PREVIEW_SIDE], &pixels), egui::TextureOptions::LINEAR));
-                view.shown = Some((file, view.frame, view.camera, bytes.to_vec()));
+                let (pixels, width, height) = match &place {
+                    Some(place) => preview::render_screen(effect, &view.pictures, view.frame, place, view.camera.zoom, SCREEN_SIZE.0, SCREEN_SIZE.1),
+                    None => (preview::render(effect, &view.pictures, view.frame, view.camera, view.extent, PREVIEW_SIDE), PREVIEW_SIDE, PREVIEW_SIDE),
+                };
+                view.texture = Some(sango_ui::textures::load(ui.ctx(), "effect_preview", egui::ColorImage::from_rgba_unmultiplied([width, height], &pixels), egui::TextureOptions::LINEAR));
+                view.shown = Some(Shown { file, frame: view.frame, camera: view.camera, place, bytes: bytes.to_vec() });
             }
             if let Some(texture) = &view.texture {
                 let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
                 ui.painter().image(texture.id(), rect, full, egui::Color32::WHITE);
             }
-            ui.label(widget::hint("Drag to turn the view, scroll to zoom."));
+            let hint = match (on_screen, places.is_empty()) {
+                (false, _) => "Drag to turn the view, scroll to zoom.",
+                (true, false) => "The top screen in a battle, with the place that a choreography gives to the effect. Scroll to zoom.",
+                (true, true) => "No choreography keeps this effect in front of the camera: it is shown there, far enough to be whole. Scroll to zoom.",
+            };
+            ui.label(widget::hint(hint));
         });
     }
 
@@ -863,6 +924,49 @@ mod test {
         assert!(!page.dirty());
         assert_ne!(page.effect.as_ref().unwrap().emission(0), emission);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// With the dump of the game: a screen effect opens on the view of the top screen, the keys change the view, and the
+    /// file does not change.
+    #[test]
+    fn a_screen_effect_opens_on_the_top_screen() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), focus_page: true, ..Session::default() };
+        let mut page = EffectPage::default();
+        let ctx = egui::Context::default();
+        let mut frame = |page: &mut EffectPage, keys: &[egui::Key]| {
+            let events = keys.iter().map(|&key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() }).collect();
+            let _ = ctx.run(egui::RawInput { events, ..Default::default() }, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    page.ui(ui, &mut session);
+                    // The app moves the keys between the widgets after the page.
+                    widget::update_navigation(ui);
+                });
+            });
+        };
+        frame(&mut page, &[]);
+        for (file, mode) in [(464, SCREEN), (0, FREE)] {
+            page.file = file;
+            page.effect = None;
+            page.load(None);
+            frame(&mut page, &[]);
+            frame(&mut page, &[]);
+            assert_eq!(page.view.mode, mode, "the effect {file}");
+            assert!(page.view.texture.is_some() && !page.dirty());
+        }
+        // The arrows go down to the tabs of the view, and left to the view of the top screen.
+        let mut changed = false;
+        for _ in 0..30 {
+            frame(&mut page, &[egui::Key::ArrowLeft]);
+            frame(&mut page, &[]);
+            if page.view.mode == SCREEN {
+                changed = true;
+                break;
+            }
+            frame(&mut page, &[egui::Key::ArrowDown]);
+            frame(&mut page, &[]);
+        }
+        assert!(changed && !page.dirty(), "the view is chosen with the keys");
     }
 
     /// With the dump of the game: the page shows an effect with child particles and material colours, and does not change

@@ -6,7 +6,10 @@
 //! reads it instead of the file of the game. See `move_choreography.rs` for the format and `schema.rs` for the meaning of the bytes.
 
 mod move_choreography;
+mod placement;
 mod schema;
+
+pub use placement::{screen_placements, ScreenPlacement};
 
 /// The names of the effects (the particle files): the number of the file and its name.
 pub use schema::EFFECT_NAMES;
