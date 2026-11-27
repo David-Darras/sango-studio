@@ -56,7 +56,7 @@ reads. See [Where the files are](docs/storage.md).
 | **Item** | Prices, effects, pockets, icons, texts. Add new items. |
 | **Type** | The type chart and the type icons. Add new types. |
 | **Trainer** | The 949 trainers and their teams, the 280 classes, their models. |
-| **Choreography** | The steps of a move animation on a timeline: camera, effects, sounds, poses. |
+| **Choreography** | The steps of a move animation on a timeline: camera, effects, sounds, poses. A preview plays the move as a battle, with the two Pokémon of your choice, the camera and the effects. |
 | **Effect** | The particle effects of the battles, with a live preview. |
 
 <table><tr>
@@ -125,6 +125,7 @@ The code is one crate per page in `module/`, plus a few shared crates:
 | `core` | The file formats of the game (archives, textures, models, texts) and the SD card. No interface. |
 | `ui` | The theme, the widgets and the keyboard navigation that all the pages share. |
 | `species_base` | The names, the data and the icons of the species, and the menus of types, for the other pages. |
+| `stage` | The preview of the Choreography page: the steps played as a battle, drawn on the processor. |
 | `pack` | The format of the packs and the library of installed packs. |
 
 To add a page: copy a small crate (for example `module/nature`), implement `sango_ui::Module`, and add it to the list in

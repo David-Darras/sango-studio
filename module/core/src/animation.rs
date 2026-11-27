@@ -235,6 +235,26 @@ impl Look {
         Ok(())
     }
 
+    /// Gives a colour of a material of a model a value (red, green, blue, opacity, from 0 to 1). The name "ALL" changes
+    /// every material.
+    pub fn set_colour(model: &mut Model, material: &str, colour: usize, value: [f32; 4]) {
+        let all = material.eq_ignore_ascii_case("ALL");
+        for changed in model.materials.iter_mut().filter(|m| all || m.name == material) {
+            let slots = changed.colour_slots;
+            for (stage, _) in changed.stages.iter_mut().zip(slots).filter(|(_, slot)| usize::from(*slot) == colour) {
+                stage.constant = value.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+            }
+        }
+    }
+
+    /// The value of a colour of a material of a model (red, green, blue, opacity, from 0 to 1).
+    pub fn colour(model: &Model, material: &str, colour: usize) -> Option<[f32; 4]> {
+        let all = material.eq_ignore_ascii_case("ALL");
+        model.materials.iter().filter(|m| all || m.name == material).find_map(|m| {
+            m.stages.iter().zip(m.colour_slots).find(|(_, slot)| usize::from(*slot) == colour).map(|(stage, _)| stage.constant.map(|c| f32::from(c) / 255.0))
+        })
+    }
+
     /// Gives a model the look of a frame: the hidden meshes, then the places of the pictures and the colours of the
     /// materials. The model must be the one of the file, not one that has the look of another frame.
     pub fn apply(&self, model: &mut Model, frame: f32) {

@@ -174,15 +174,25 @@ pub fn bone_values(model: &Model, pack: &MotionPack, pose: &Pose) -> Vec<Option<
         .collect()
 }
 
-/// The model in a pose of a motion pack. The bones are matched by their names, and the first bone with the first joint.
-pub fn posed(model: &Model, pack: &MotionPack, pose: &Pose) -> Model {
-    let bones = &model.bones;
+/// The place in the bones of a model of each joint of a motion pack: the bone that the joint moves.
+pub fn bone_of_joints(bones: &[Bone], pack: &MotionPack) -> Vec<Option<usize>> {
+    // The first joint is the parent of the first named joint (the bone "Origin"), and has no name.
+    let origin = pack.joints.get(1).and_then(|j| bones.iter().find(|b| b.name == j.name)).and_then(|b| b.parent);
+    pack.joints.iter().enumerate().map(|(i, joint)| if i == 0 { origin } else { bones.iter().position(|b| b.name == joint.name) }).collect()
+}
+
+/// The matrix of each bone in the space of the model, in a pose of a motion pack. A game places its effects with them.
+pub fn posed_worlds(model: &Model, pack: &MotionPack, pose: &Pose) -> Vec<Affine> {
+    worlds(&model.bones, &posed_locals(&model.bones, pack, pose, &rest_locals(&model.bones)))
+}
+
+/// The matrix of each bone in the space of its parent bone, in a pose of a motion pack.
+fn posed_locals(bones: &[Bone], pack: &MotionPack, pose: &Pose, rest: &[Affine]) -> Vec<Affine> {
     let by_name: HashMap<&str, usize> = pack.joints.iter().enumerate().filter(|(_, j)| !j.name.is_empty()).map(|(i, j)| (j.name.as_str(), i)).collect();
     // The first joint is the parent of the first named joint (the bone "Origin"), and has no name.
     let origin = pack.joints.get(1).and_then(|j| bones.iter().find(|b| b.name == j.name)).and_then(|b| b.parent);
     let joint_of: Vec<Option<usize>> = bones.iter().enumerate().map(|(i, b)| if Some(i) == origin { Some(0) } else { by_name.get(b.name.as_str()).copied() }).collect();
-    let rest = rest_locals(bones);
-    let locals: Vec<Affine> = bones
+    bones
         .iter()
         .enumerate()
         .map(|(i, bone)| {
@@ -207,7 +217,14 @@ pub fn posed(model: &Model, pack: &MotionPack, pose: &Pose) -> Model {
             let parent_scale = bone.parent.map_or([1.0; 3], |p| bone.parent.and_then(|_| joint_of[p]).and_then(|j| pose.joints.get(j)).and_then(|s| s.scale).unwrap_or(bones[p].scale));
             Affine::with_parent_scale(translation, rotation, state.scale.unwrap_or(bone.scale), parent_scale)
         })
-        .collect();
+        .collect()
+}
+
+/// The model in a pose of a motion pack. The bones are matched by their names, and the first bone with the first joint.
+pub fn posed(model: &Model, pack: &MotionPack, pose: &Pose) -> Model {
+    let bones = &model.bones;
+    let rest = rest_locals(bones);
+    let locals = posed_locals(bones, pack, pose, &rest);
     let (rest_worlds, now) = (worlds(bones, &rest), worlds(bones, &locals));
     // A bone that is flat in the rest pose (a scale of 0) cannot move vertices: they stay where they are.
     let skin: Vec<Affine> = now.iter().zip(&rest_worlds).map(|(now, rest)| rest.inverse().map_or(Affine::IDENTITY, |inverse| now.then(&inverse))).collect();

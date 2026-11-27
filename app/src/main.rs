@@ -60,7 +60,7 @@ impl App {
             Box::new(sango_formula::Formula::default()),
             Box::new(sango_battle::BattlePage::default()),
             Box::new(sango_trainer::Trainer::default()),
-            Box::new(sango_choreography::Choreography::default()),
+            Box::new(sango_choreography::Choreography::with_viewer(Box::new(sango_stage::StageViewer::default()))),
             Box::new(sango_effect::EffectPage::default()),
             // World.
             Box::new(sango_overworld::Overworld::default()),

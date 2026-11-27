@@ -45,6 +45,7 @@ sango-feature = { path = "module/feature" }
 sango-save = { path = "module/save" }
 sango-layout = { path = "module/layout" }
 sango-battle = { path = "module/battle" }
+sango-stage = { path = "module/stage" }
 
 # The code of the studio compiles fast with few optimizations. The libraries (egui, wgpu, image, the decoders) change
 # rarely: they are optimized fully once, so the 3D views and the decoding stay fast. The debug information keeps only
@@ -59,6 +60,13 @@ debug = false
 
 # The compression of the files of the game is slow without it.
 [profile.dev.package.sango-core]
+opt-level = 3
+
+# The viewer of the choreographies draws a battle on the processor: it is slow without it.
+[profile.dev.package.sango-effect]
+opt-level = 3
+
+[profile.dev.package.sango-stage]
 opt-level = 3
 
 [profile.release]

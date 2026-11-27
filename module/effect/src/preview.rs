@@ -814,6 +814,11 @@ fn births(effect: &Effect, layer: usize, last_frame: u32) -> Vec<(u32, u32)> {
 
 /// All the particles at a frame.
 pub fn particles_at(effect: &Effect, frame: f32) -> Vec<Particle> {
+    particles_until(effect, frame, None)
+}
+
+/// All the particles at a frame, when the emitters make no new particle from the frame `stop` on.
+pub fn particles_until(effect: &Effect, frame: f32, stop: Option<f32>) -> Vec<Particle> {
     let now = frame.max(0.0).floor() as u32;
     let mut run = Run { effect, groups: Group::all(effect), now, out: Vec::new() };
     for layer in 0..effect.layer_count() {
@@ -823,7 +828,7 @@ pub fn particles_at(effect: &Effect, frame: f32) -> Vec<Particle> {
         let (scale, turn) = effect.emitter_scale_and_turn(layer);
         // The place and the speed of a particle in the space of the emitter, then in the one of the effect.
         let direction = |v: [f32; 3]| turned([v[0] * scale[0], v[1] * scale[1], v[2] * scale[2]], turn);
-        for (born, count) in births(effect, layer, now) {
+        for (born, count) in births(effect, layer, now).into_iter().filter(|(born, _)| stop.is_none_or(|stop| (*born as f32) < stop)) {
             let start = shape.start_angle(&mut Rng::new([layer as u64, born as u64, 0x57A7, 0]));
             for n in 0..count {
                 let mut rng = Rng::new([layer as u64, born as u64, n as u64, 0x9A5]);
@@ -1007,8 +1012,41 @@ impl Place {
 /// The most pixels that one picture of the top screen mixes before it is made smaller.
 const SCREEN_BUDGET: f32 = 6_000_000.0;
 
-/// A rectangle of a particle as the top screen sees it.
-struct Seen<'a> {
+/// A point of view in a world, with perspective.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct View {
+    /// The place of the eye.
+    pub eye: [f32; 3],
+    /// The directions of the screen: to the right, up, and away from the eye. Each one has a length of 1.
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub forward: [f32; 3],
+    /// The distance of the picture from the eye, in heights of the picture.
+    pub focal: f32,
+    /// What is nearer than this is not drawn.
+    pub near: f32,
+}
+
+/// An effect placed in a world: its place, its three axes and its size along them.
+pub struct Placed<'a> {
+    pub effect: &'a Effect,
+    pub looks: &'a [Look],
+    pub frame: f32,
+    /// The frame of the effect from which the emitters make no new particle.
+    pub stop: Option<f32>,
+    pub origin: [f32; 3],
+    /// The directions of the axes x, y and z of the effect in the world.
+    pub axes: [[f32; 3]; 3],
+    pub scale: [f32; 3],
+}
+
+/// The three axes of an object that is turned by these angles (radians): around x, then y, then z.
+pub fn turned_axes(angles: [f32; 3]) -> [[f32; 3]; 3] {
+    [turned([1.0, 0.0, 0.0], angles), turned([0.0, 1.0, 0.0], angles), turned([0.0, 0.0, 1.0], angles)]
+}
+
+/// A rectangle of a particle as a point of view sees it.
+pub struct Seen<'a> {
     look: &'a Look,
     /// The depth of the meeting of a ray with the plane is `reach` over the dot product of the ray and `normal`.
     normal: [f32; 3],
@@ -1025,35 +1063,37 @@ struct Seen<'a> {
     primary: [f32; 4],
 }
 
-/// A picture of the effect at a frame as the top screen shows it in a battle, on a dark background: the camera looks at
-/// the effect from the front, with perspective. Gives the pixels (RGBA), the width and the height: the ones that are
-/// asked, or less when the particles cover so much that the drawing would be slow.
-pub fn render_screen(effect: &Effect, looks: &[Look], frame: f32, place: &Place, zoom: f32, width: usize, height: usize) -> (Vec<u8>, usize, usize) {
-    // The distance of the picture from the eye, in heights of the picture.
-    let focal = 0.5 / (SCREEN_VIEW_ANGLE.to_radians() / 2.0).tan() * zoom.max(0.05);
-    // The width of the picture, in heights.
-    let aspect = width as f32 / height as f32;
+/// The rectangles of the particles of some effects that a point of view sees, in the order of the drawing, and the part of
+/// the picture that they cover (in pictures: 2 when they cover it twice). `aspect` is the width of the picture, in
+/// heights.
+pub fn seen<'a>(items: &[Placed<'a>], view: &View, aspect: f32) -> (Vec<Seen<'a>>, f32) {
     let cross = |a: [f32; 3], b: [f32; 3]| [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
     let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-    // The camera looks toward +z: the right of the screen is toward -x.
-    let (right, up, viewer) = ([-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, -1.0]);
-    // The axes of the effect in the world: turned, then made longer by its scale.
-    let turn = place.turn.map(f32::to_radians);
-    let axes: [[f32; 3]; 3] = [turned([1.0, 0.0, 0.0], turn), turned([0.0, 1.0, 0.0], turn), turned([0.0, 0.0, 1.0], turn)];
-    let scale = place.scale.map(|s| if s.abs() < 1e-4 { 1e-4 } else { s });
-    let to_world = |v: [f32; 3]| -> [f32; 3] { std::array::from_fn(|k| (0..3).map(|axis| axes[axis][k] * scale[axis] * v[axis]).sum()) };
-    // A direction of the camera in the space of the effect, as the game finds it.
-    let to_effect = |v: [f32; 3]| normalize(std::array::from_fn(|axis| dot(axes[axis], v) / scale[axis]));
-    let origin = [place.shift[0], place.shift[1], place.distance + place.shift[2]];
-    let items = [Item { effect, looks, frame, origin: [0.0; 3] }];
+    let viewer = view.forward.map(|v| -v);
+    // The game draws one set after the other, and the particles of a set in the order of their birth.
+    let mut list: Vec<(usize, Particle, &'a Look)> = Vec::new();
+    for (number, item) in items.iter().enumerate() {
+        for p in particles_until(item.effect, item.frame, item.stop) {
+            if let Some(look) = item.looks.get(p.group) {
+                list.push((number, p, look));
+            }
+        }
+    }
+    list.sort_by_key(|(number, p, look)| (look.order, *number, p.group, if look.oldest_first { i64::from(p.born) } else { -i64::from(p.born) }));
     let mut seen = Vec::new();
-    // The part of the picture that the rectangles cover, in pictures.
     let mut covered = 0.0;
-    for (_, p, look) in drawing_order(&items) {
-        let (x, y) = quad(&p, look, to_effect(right), to_effect(up), to_effect(viewer));
+    for (number, p, look) in list {
+        let item = &items[number];
+        let scale = item.scale.map(|s| if s.abs() < 1e-4 { 1e-4 } else { s });
+        let axes = item.axes;
+        let to_world = |v: [f32; 3]| -> [f32; 3] { std::array::from_fn(|k| (0..3).map(|axis| axes[axis][k] * scale[axis] * v[axis]).sum()) };
+        // A direction of the point of view in the space of the effect, as the game finds it.
+        let to_effect = |v: [f32; 3]| normalize(std::array::from_fn(|axis| dot(axes[axis], v) / scale[axis]));
+        let (x, y) = quad(&p, look, to_effect(view.right), to_effect(view.up), to_effect(viewer));
         let at: [f32; 3] = std::array::from_fn(|k| p.position[k] - x[k] * look.offset[0] - y[k] * look.offset[1]);
         let centre = to_world(at);
-        let centre: [f32; 3] = std::array::from_fn(|k| centre[k] + origin[k]);
+        // From the eye.
+        let centre: [f32; 3] = std::array::from_fn(|k| centre[k] + item.origin[k] - view.eye[k]);
         // The two whole sides of the rectangle in the world, and the direction at right angles to it.
         let (side_x, side_y) = (to_world(x.map(|v| v * 2.0)), to_world(y.map(|v| v * 2.0)));
         let normal = cross(side_x, side_y);
@@ -1061,14 +1101,17 @@ pub fn render_screen(effect: &Effect, looks: &[Look], frame: f32, place: &Place,
         if square < 1e-12 || p.alpha <= 0.0 {
             continue;
         }
-        // The part of the picture that the rectangle can cover: around its corners (all of it when it goes behind the camera).
+        // The part of the picture that the rectangle can cover: around its corners (all of it when it goes behind the eye).
         let corners = [(-0.5, -0.5), (0.5, -0.5), (-0.5, 0.5), (0.5, 0.5)].map(|(a, b): (f32, f32)| -> [f32; 3] { std::array::from_fn(|k| centre[k] + a * side_x[k] + b * side_y[k]) });
-        if corners.iter().all(|c| c[2] < SCREEN_NEAR) {
+        if corners.iter().all(|&c| dot(c, view.forward) < view.near) {
             continue;
         }
         let (mut from, mut to) = ([0.0f32; 2], [1.0f32; 2]);
-        if corners.iter().all(|c| c[2] >= SCREEN_NEAR) {
-            let places = corners.map(|c| [0.5 + focal / aspect * dot(c, right) / c[2], 0.5 - focal * dot(c, up) / c[2]]);
+        if corners.iter().all(|&c| dot(c, view.forward) >= view.near) {
+            let places = corners.map(|c| {
+                let depth = dot(c, view.forward);
+                [0.5 + view.focal / aspect * dot(c, view.right) / depth, 0.5 - view.focal * dot(c, view.up) / depth]
+            });
             for k in 0..2 {
                 from[k] = places.iter().map(|s| s[k]).fold(f32::MAX, f32::min).max(0.0);
                 to[k] = places.iter().map(|s| s[k]).fold(f32::MIN, f32::max).min(1.0);
@@ -1092,27 +1135,40 @@ pub fn render_screen(effect: &Effect, looks: &[Look], frame: f32, place: &Place,
             primary: [p.color[0], p.color[1], p.color[2], p.alpha].map(|c| c.clamp(0.0, 1.0)),
         });
     }
-    let smaller = (SCREEN_BUDGET / (covered * (width * height) as f32).max(1.0)).sqrt().clamp(0.25, 1.0);
-    let (width, height) = (((width as f32 * smaller) as usize).max(1), ((height as f32 * smaller) as usize).max(1));
+    (seen, covered)
+}
+
+/// Mixes the rectangles over a picture (colours from 0 to 255). `depth`, when given, has for each pixel the distance of
+/// what is already drawn: a particle behind it is not seen, unless its material does not test the depth. The rows are
+/// shared between the cores: each one mixes all the rectangles over its own rows, in their order.
+pub fn mix(seen: &[Seen], view: &View, canvas: &mut [[f32; 3]], depth: Option<&[f32]>, width: usize, height: usize) {
+    if seen.is_empty() || width == 0 || height == 0 {
+        return;
+    }
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     // The distance of the picture from the eye, in pixels.
-    let focal = focal * height as f32;
+    let focal = view.focal * height as f32;
     let (half_x, half_y) = (width as f32 / 2.0, height as f32 / 2.0);
     // Mixes the rectangles over some rows of the picture, from the row `first`.
     let draw = |first: usize, rows: &mut [[f32; 3]]| {
         let last = first + rows.len() / width;
-        for s in &seen {
+        for s in seen {
             let (left, right_end) = ((s.from[0] * width as f32) as usize, ((s.to[0] * width as f32).ceil() as usize).min(width));
             let (top, bottom) = (((s.from[1] * height as f32) as usize).max(first), ((s.to[1] * height as f32).ceil() as usize).min(last));
+            let tested = s.look.state.depth_test != 1;
             for py in top..bottom {
                 for px in left..right_end {
                     // The ray of the pixel, one step deep, and where it meets the plane of the rectangle.
                     let (sx, sy) = ((px as f32 + 0.5 - half_x) / focal, (half_y - py as f32 - 0.5) / focal);
-                    let ray: [f32; 3] = std::array::from_fn(|k| sx * right[k] + sy * up[k] - viewer[k]);
-                    let depth = s.reach / dot(ray, s.normal);
-                    if !(depth >= SCREEN_NEAR && depth.is_finite()) {
+                    let ray: [f32; 3] = std::array::from_fn(|k| sx * view.right[k] + sy * view.up[k] + view.forward[k]);
+                    let distance = s.reach / dot(ray, s.normal);
+                    if !(distance >= view.near && distance.is_finite()) {
                         continue;
                     }
-                    let (a, b) = (depth * dot(ray, s.across_x) - s.start[0], depth * dot(ray, s.across_y) - s.start[1]);
+                    if tested && depth.is_some_and(|depth| distance > depth[py * width + px]) {
+                        continue;
+                    }
+                    let (a, b) = (distance * dot(ray, s.across_x) - s.start[0], distance * dot(ray, s.across_y) - s.start[1]);
                     if (-0.5..0.5).contains(&a) && (-0.5..0.5).contains(&b) {
                         paint(&mut rows[(py - first) * width + px], s.look, [a, b], s.coordinates, s.primary);
                     }
@@ -1120,8 +1176,6 @@ pub fn render_screen(effect: &Effect, looks: &[Look], frame: f32, place: &Place,
             }
         }
     };
-    let mut canvas = vec![[24.0f32, 26.0, 34.0]; width * height];
-    // The rows are shared between the cores: each one mixes all the rectangles over its own rows, in their order.
     let cores = std::thread::available_parallelism().map_or(1, |n| n.get()).min(8);
     let rows = height.div_ceil(cores * 2).max(1);
     let bands = std::sync::Mutex::new(canvas.chunks_mut(rows * width).enumerate());
@@ -1134,6 +1188,21 @@ pub fn render_screen(effect: &Effect, looks: &[Look], frame: f32, place: &Place,
             });
         }
     });
+}
+
+/// A picture of the effect at a frame as the top screen shows it in a battle, on a dark background: the camera looks at
+/// the effect from the front, with perspective. Gives the pixels (RGBA), the width and the height: the ones that are
+/// asked, or less when the particles cover so much that the drawing would be slow.
+pub fn render_screen(effect: &Effect, looks: &[Look], frame: f32, place: &Place, zoom: f32, width: usize, height: usize) -> (Vec<u8>, usize, usize) {
+    // The camera looks toward +z: the right of the screen is toward -x.
+    let view = View { eye: [0.0; 3], right: [-1.0, 0.0, 0.0], up: [0.0, 1.0, 0.0], forward: [0.0, 0.0, 1.0], focal: 0.5 / (SCREEN_VIEW_ANGLE.to_radians() / 2.0).tan() * zoom.max(0.05), near: SCREEN_NEAR };
+    let origin = [place.shift[0], place.shift[1], place.distance + place.shift[2]];
+    let items = [Placed { effect, looks, frame, stop: None, origin, axes: turned_axes(place.turn.map(f32::to_radians)), scale: place.scale }];
+    let (seen, covered) = seen(&items, &view, width as f32 / height as f32);
+    let smaller = (SCREEN_BUDGET / (covered * (width * height) as f32).max(1.0)).sqrt().clamp(0.25, 1.0);
+    let (width, height) = (((width as f32 * smaller) as usize).max(1), ((height as f32 * smaller) as usize).max(1));
+    let mut canvas = vec![[24.0f32, 26.0, 34.0]; width * height];
+    mix(&seen, &view, &mut canvas, None, width, height);
     (canvas.into_iter().flat_map(|c| [c[0] as u8, c[1] as u8, c[2] as u8, 255]).collect(), width, height)
 }
 

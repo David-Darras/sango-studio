@@ -22,6 +22,7 @@ sango-overworld.workspace = true
 sango-trainer.workspace = true
 sango-choreography.workspace = true
 sango-effect.workspace = true
+sango-stage.workspace = true
 sango-script.workspace = true
 sango-encounter.workspace = true
 sango-formula.workspace = true

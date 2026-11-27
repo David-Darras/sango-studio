@@ -3058,6 +3058,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sango-stage"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "sango-choreography",
+ "sango-core",
+ "sango-effect",
+ "sango-species-base",
+ "sango-ui",
+]
+
+[[package]]
 name = "sango-studio"
 version = "0.1.0"
 dependencies = [
@@ -3087,6 +3099,7 @@ dependencies = [
  "sango-save",
  "sango-script",
  "sango-species",
+ "sango-stage",
  "sango-title",
  "sango-trainer",
  "sango-type",

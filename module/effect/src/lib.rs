@@ -7,7 +7,11 @@
 mod effect_file;
 mod preview;
 
-use effect_file::{ColorCurve, Effect, FieldKind, NumberCurve};
+/// What the viewer of the choreographies needs to draw the effects of the game in a battle.
+pub use effect_file::Effect;
+pub use preview::{length, looks, mix, seen, turned_axes, Look, Placed, Seen, View};
+
+use effect_file::{ColorCurve, FieldKind, NumberCurve};
 use sango_core::{Dump, Garc, SdCard};
 use sango_ui::theme::color;
 use sango_ui::{egui, widget, Module, Session};

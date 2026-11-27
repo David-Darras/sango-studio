@@ -14,12 +14,36 @@ pub use placement::{screen_placements, ScreenPlacement};
 /// The names of the effects (the particle files): the number of the file and its name.
 pub use schema::EFFECT_NAMES;
 
-use move_choreography::{MoveChoreography, Value};
+/// The format of a choreography and the meaning of its steps.
+pub use move_choreography::{kind_of, MoveChoreography, Step, Value, FILE_HEADER, STEP_HEADER};
+pub use schema::{Param, ParamKind, StepKind, ENUMS, FILE_LABELS, KINDS};
+
 use sango_core::{Dump, Garc, SdCard};
 use sango_ui::picker::{picker, Group};
 use sango_ui::theme::color;
-use sango_ui::{egui, widget, Module, Session};
-use schema::{ParamKind, ENUMS};
+use sango_ui::{egui, focus, widget, Module, Session};
+
+/// The file of the choreography of the move 1 is the file after this one.
+pub const FILE_OF_NO_MOVE: usize = 119;
+
+/// The choreography that a viewer shows, as the page has it (with the changes that are not saved).
+pub struct Shown<'a> {
+    /// The number of its file.
+    pub file: usize,
+    pub choreography: &'a MoveChoreography,
+    /// The step that the user chose on the timeline.
+    pub selected: Option<usize>,
+}
+
+/// What shows a choreography as the game plays it. The application gives one to the page.
+pub trait Viewer {
+    /// Draws the viewer and its controls.
+    fn ui(&mut self, ui: &mut egui::Ui, session: &Session, shown: Shown<'_>);
+    /// The frame that is shown: the page marks it on the timeline.
+    fn frame(&self) -> i32;
+    /// Shows a frame, and stops the movement.
+    fn go_to(&mut self, frame: i32);
+}
 
 /// The archive of the choreographies of the moves.
 const ARCHIVE: usize = 34;
@@ -53,11 +77,15 @@ pub struct Choreography {
     new_kind: u16,
     /// Undo and redo of the open choreography.
     history: sango_ui::history::History<Option<MoveChoreography>>,
+    /// What plays the choreography, above the timeline.
+    viewer: Option<Box<dyn Viewer>>,
+    /// The step that was chosen when the timeline was last drawn: the list scrolls to a new one.
+    shown_step: Option<usize>,
 }
 
 impl Default for Choreography {
     fn default() -> Self {
-        Choreography { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: 119 + 1, choreography: None, baseline: Vec::new(), selected: None, zoom: 6.0, status: None, new_kind: 1, pending_file: None, history: Default::default() }
+        Choreography { reset_open: false, garc: None, root: None, error: None, names: Vec::new(), file: FILE_OF_NO_MOVE + 1, choreography: None, baseline: Vec::new(), selected: None, zoom: 6.0, status: None, new_kind: 1, pending_file: None, history: Default::default(), viewer: None, shown_step: None }
     }
 }
 
@@ -105,6 +133,11 @@ fn named_menu(ui: &mut egui::Ui, id: &str, value: &mut i32, entries: &[(i32, Str
 }
 
 impl Choreography {
+    /// The page with a viewer that plays the choreography.
+    pub fn with_viewer(viewer: Box<dyn Viewer>) -> Self {
+        Choreography { viewer: Some(viewer), ..Default::default() }
+    }
+
     fn open(&mut self, dump: &Dump) {
         self.error = None;
         match Garc::open(&dump.archive(ARCHIVE)) {
@@ -257,22 +290,48 @@ impl Choreography {
         }
     }
 
-    /// The timeline: a row for each step, with a bar from its first to its last frame.
+    /// The timeline: a row for each step, with a bar from its first to its last frame. With the keys, Up and Down choose
+    /// a step, and Left and Right move the frame of the viewer.
     fn timeline(&mut self, ui: &mut egui::Ui) {
         let Some(choreography) = self.choreography.as_ref() else { return };
         let length = choreography.length().max(choreography.last_frame()).max(30);
         let width = length as f32 * self.zoom + 40.0;
+        let frame = self.viewer.as_ref().map(|viewer| viewer.frame());
+        let mut go_to = None;
         widget::card(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(widget::title("Timeline"));
                 ui.label(widget::hint(&format!("{} steps, {} frames ({:.1} s). Click a step to edit it.", choreography.steps.len(), length, length as f32 / 30.0)));
-                ui.add(egui::Slider::new(&mut self.zoom, 2.0..=16.0).text("Zoom"));
+                widget::decimal(ui, &mut self.zoom, 0.5, 2.0..=16.0).on_hover_text("The width of a frame on the timeline.");
+                ui.label(widget::hint("Zoom"));
             });
             ui.add_space(4.0);
             let steps = choreography.steps.clone();
             let height = (steps.len() as f32 * ROW + 24.0).min(420.0);
-            egui::ScrollArea::both().id_salt("choreography_timeline").max_height(height + 8.0).auto_shrink([false, true]).show(ui, |ui| {
+            let keys = egui::Id::new("choreography_timeline_keys");
+            let mut moved = false;
+            let area = egui::ScrollArea::both().id_salt("choreography_timeline").max_height(height + 8.0).auto_shrink([false, true]).show(ui, |ui| {
                 let (rect, _) = ui.allocate_exact_size(egui::vec2(LABEL_WIDTH + width, steps.len() as f32 * ROW + 20.0), egui::Sense::hover());
+                // The frames at the top: a click or a drag shows one.
+                let ruler = egui::Rect::from_min_size(rect.min + egui::vec2(LABEL_WIDTH, 0.0), egui::vec2(width, 18.0));
+                let scrub = ui.interact(ruler, ui.id().with("choreography_ruler"), egui::Sense::click_and_drag());
+                if let Some(at) = scrub.interact_pointer_pos().filter(|_| scrub.clicked() || scrub.dragged()) {
+                    go_to = Some((((at.x - ruler.left()) / self.zoom).round() as i32).clamp(0, length));
+                    widget::set_active_id(ui, keys);
+                }
+                if focus::focus(ui, keys, ui.clip_rect(), false, true, None) {
+                    ui.ctx().data_mut(|d| d.insert_temp(keys.with("handles_left"), true));
+                    if let Some(place) = focus::stepped(self.selected.unwrap_or(0), focus::steps(ui, false), steps.len()) {
+                        self.selected = Some(place);
+                    } else if self.selected.is_none() && !steps.is_empty() {
+                        self.selected = Some(0);
+                    }
+                    let step = focus::steps(ui, true);
+                    if let Some(frame) = frame.filter(|_| step != 0) {
+                        go_to = Some((frame + step as i32).clamp(0, length));
+                    }
+                }
+                moved = self.selected != self.shown_step;
                 let painter = ui.painter_at(rect);
                 let origin = rect.min + egui::vec2(LABEL_WIDTH, 0.0);
                 // The ruler: a mark each ten frames, a number each thirty (one second).
@@ -301,10 +360,22 @@ impl Choreography {
                     painter.rect_filled(bar, 3.0, family_color(&name).gamma_multiply(if step.condition != 0 { 0.55 } else { 1.0 }));
                     if response.clicked() {
                         self.selected = Some(place);
+                        widget::set_active_id(ui, keys);
                     }
+                    widget::scroll_to_chosen(ui, &response, moved && self.selected == Some(place));
+                }
+                // The frame that the viewer shows.
+                if let Some(frame) = frame {
+                    let x = origin.x + frame.max(0) as f32 * self.zoom;
+                    painter.line_segment([egui::pos2(x, rect.top()), egui::pos2(x, rect.bottom())], egui::Stroke::new(2.0_f32, color::ROSE));
                 }
             });
+            let _ = area;
+            self.shown_step = self.selected;
         });
+        if let (Some(frame), Some(viewer)) = (go_to, self.viewer.as_mut()) {
+            viewer.go_to(frame);
+        }
     }
 
     /// The parameters of the selected step, and the buttons to add, copy and remove steps.
@@ -314,6 +385,8 @@ impl Choreography {
         let mut duplicate = None;
         let mut up = None;
         let mut down = None;
+        let mut show = None;
+        let viewer = self.viewer.is_some();
         widget::card(ui, |ui| {
             let Some(place) = self.selected.filter(|&p| p < choreography.steps.len()) else {
                 ui.label(widget::hint("Choose a step on the timeline to edit it, or add a new one."));
@@ -334,6 +407,9 @@ impl Choreography {
                 }
                 if widget::confirm_button(ui, "Remove", "Click again to remove") {
                     remove = Some(place);
+                }
+                if viewer && widget::button(ui, "Show its first frame") {
+                    show = Some(step.start);
                 }
             });
             ui.add_space(4.0);
@@ -386,6 +462,9 @@ impl Choreography {
         if let Some(place) = down.filter(|&p| p + 1 < choreography.steps.len()) {
             choreography.steps.swap(place, place + 1);
             self.selected = Some(place + 1);
+        }
+        if let (Some(frame), Some(viewer)) = (show, self.viewer.as_mut()) {
+            viewer.go_to(frame);
         }
     }
 
@@ -501,6 +580,10 @@ impl Module for Choreography {
         self.tool_bar(ui, session);
         ui.add_space(8.0);
         egui::ScrollArea::vertical().id_salt("choreography_page").auto_shrink([false, false]).show(ui, |ui| {
+            if let (Some(viewer), Some(choreography)) = (self.viewer.as_mut(), self.choreography.as_ref()) {
+                viewer.ui(ui, session, Shown { file: self.file, choreography, selected: self.selected });
+                ui.add_space(8.0);
+            }
             self.timeline(ui);
             ui.add_space(8.0);
             self.details(ui);
@@ -562,6 +645,75 @@ mod test {
         assert!(!page.dirty());
         assert_ne!(page.choreography.as_ref().unwrap().steps[place].value(&kind.params[0]), Value::Vec3([9.0, 9.0, 9.0]));
         let _ = std::fs::remove_dir_all(&folder);
+    }
+}
+
+#[cfg(test)]
+mod viewer_test {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    /// A viewer that only keeps the frame that the page asks for.
+    struct Marked(Rc<Cell<i32>>);
+
+    impl Viewer for Marked {
+        fn ui(&mut self, _ui: &mut egui::Ui, _session: &Session, _shown: Shown<'_>) {}
+
+        fn frame(&self) -> i32 {
+            self.0.get()
+        }
+
+        fn go_to(&mut self, frame: i32) {
+            self.0.set(frame);
+        }
+    }
+
+    /// With the dump: the keys reach the timeline from the top of the page, choose a step and move the frame of the viewer.
+    #[test]
+    fn the_keys_choose_a_step_and_a_frame_on_the_timeline() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), focus_page: true, ..Session::default() };
+        let frame = Rc::new(Cell::new(0));
+        let mut page = Choreography::with_viewer(Box::new(Marked(frame.clone())));
+        let ctx = egui::Context::default();
+        let mut draw = |page: &mut Choreography, key: Option<(egui::Key, egui::Modifiers)>| {
+            let events = key.map(|(key, modifiers)| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+            let modifiers = key.map_or_else(Default::default, |(_, modifiers)| modifiers);
+            let input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 900.0))), events: events.into_iter().collect(), modifiers, ..Default::default() };
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::set_page_focus(ui.ctx(), true);
+                    widget::update_navigation(ui);
+                    page.ui(ui, &mut session);
+                });
+            });
+        };
+        for _ in 0..3 {
+            draw(&mut page, None);
+        }
+        let keys = egui::Id::new("choreography_timeline_keys");
+        let active = || ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sango_active_widget")));
+        for _ in 0..8 {
+            if active() == Some(keys) {
+                break;
+            }
+            draw(&mut page, Some((egui::Key::ArrowDown, egui::Modifiers::CTRL)));
+            draw(&mut page, None);
+        }
+        assert_eq!(active(), Some(keys), "Ctrl+Down reaches the timeline");
+        draw(&mut page, Some((egui::Key::ArrowDown, egui::Modifiers::NONE)));
+        let first = page.selected.expect("a step is chosen");
+        draw(&mut page, Some((egui::Key::ArrowDown, egui::Modifiers::NONE)));
+        assert_eq!(page.selected, Some(first + 1));
+        draw(&mut page, Some((egui::Key::ArrowUp, egui::Modifiers::NONE)));
+        assert_eq!(page.selected, Some(first));
+        draw(&mut page, Some((egui::Key::ArrowRight, egui::Modifiers::NONE)));
+        draw(&mut page, Some((egui::Key::ArrowRight, egui::Modifiers::NONE)));
+        assert_eq!(frame.get(), 2);
+        draw(&mut page, Some((egui::Key::ArrowLeft, egui::Modifiers::NONE)));
+        assert_eq!(frame.get(), 1);
+        assert!(!page.dirty(), "looking at a choreography does not change it");
     }
 }
 

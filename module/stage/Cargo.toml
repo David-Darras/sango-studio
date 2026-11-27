@@ -1,0 +1,15 @@
+[package]
+name = "sango-stage"
+version.workspace = true
+edition.workspace = true
+description = "The viewer of the choreographies of Sango Studio: a battle with its two Pokémon, its camera and its effects."
+
+[dependencies]
+sango-core.workspace = true
+sango-choreography.workspace = true
+sango-effect.workspace = true
+sango-species-base.workspace = true
+sango-ui.workspace = true
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

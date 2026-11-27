@@ -454,6 +454,45 @@ impl<'a> Surface<'a> {
         is_mixed(self.material) || (self.material.unlit && !self.material.stages.is_empty())
     }
 
+    /// True when the mesh is mixed with what is behind it: it is drawn after the others.
+    pub fn is_blended(&self) -> bool {
+        is_mixed(self.material)
+    }
+
+    /// How the game draws the material.
+    pub fn state(&self) -> &'a crate::model::RenderState {
+        &self.material.state
+    }
+
+    /// The colour and the opacity (0 to 1) of a pixel of the mesh as the viewer draws it, with the light of its surface
+    /// (0 to 1), or `None` when nothing is drawn there. With `combine_all`, the steps of the material are used for every
+    /// mesh that has them: the places of the battles keep their light in the colours of their vertices.
+    pub fn lit(&self, uv: [f32; 2], primary: [f32; 4], light: f32, combine_all: bool) -> Option<[f32; 4]> {
+        let hidden = || self.eye.as_ref().is_some_and(|eye| outside_eye(eye, uv));
+        if self.is_combined() || (combine_all && !self.material.stages.is_empty()) {
+            let color = combine(self.material, &self.pictures, uv, light, primary);
+            if hidden() {
+                return None;
+            }
+            let drawn = match self.material.state.alpha_test {
+                Some((function, reference)) => depth_passes(function, (color[3] * 255.0).round(), f32::from(reference)),
+                None => color[3] >= 0.02,
+            };
+            return drawn.then_some(color);
+        }
+        let color = match self.texture {
+            Some(texture) => {
+                let (u, v) = texture_place(self.material, uv);
+                sample_wrapped(texture, u, v, self.material.texture_wrap)
+            }
+            None => [170, 170, 170, 255],
+        };
+        if hidden() || is_cut(Some(self.material), color) {
+            return None;
+        }
+        Some([f32::from(color[0]) / 255.0 * light, f32::from(color[1]) / 255.0 * light, f32::from(color[2]) / 255.0 * light, 1.0])
+    }
+
     /// The name of the picture of the eye that cuts this mesh (an iris), when it has one.
     pub fn eye_picture(&self) -> Option<&'a str> {
         self.eye.as_ref().map(|(_, texture, _)| texture.name.as_str())
@@ -501,7 +540,7 @@ impl<'a> Surface<'a> {
 
 /// The result of a comparison of the graphics chip (0 never, 1 always, 2 equal, 3 not equal, 4 less, 5 less or equal,
 /// 6 greater, 7 greater or equal) between a new value and the value that is there.
-fn depth_passes(function: u8, new: f32, old: f32) -> bool {
+pub fn depth_passes(function: u8, new: f32, old: f32) -> bool {
     match function {
         0 => false,
         1 => true,

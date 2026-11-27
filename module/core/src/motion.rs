@@ -90,8 +90,66 @@ pub struct MotionPack {
     pub joints: Vec<Joint>,
     /// The kind of each picture channel.
     pub channel_kinds: Vec<u8>,
+    /// The points that the game puts effects on (the mouth, the head, the hands).
+    pub nodes: Vec<Node>,
     places: Vec<usize>,
     data: Vec<u8>,
+}
+
+/// A point of a model that has a name: it moves with a joint.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Node {
+    /// The number made from the name (see [`node_key`]).
+    pub key: u32,
+    /// The joint that moves the point.
+    pub joint: usize,
+    /// The place of the point from the joint, along the axes of the joint.
+    pub offset: [f32; 3],
+}
+
+/// The number that a motion file keeps for the name of a point.
+pub fn node_key(name: &str) -> u32 {
+    name.bytes().fold(0u32, |key, byte| key.wrapping_mul(0x83) ^ u32::from(byte))
+}
+
+/// The names that every list of points has at least one of: they tell where the list is.
+const COMMON_NODES: [&str; 8] = ["Center01", "Front01", "OverHead01", "HeadCenter01", "Mouth01", "Eye01", "Attack01_01", "Shoot01_01"];
+
+/// Reads the list of the points, which is somewhere between the rest pose and the first motion: the number of points, the
+/// joint of each point, then, from the next multiple of 4, the number of the name and the place of each point. The data
+/// before the list changes from model to model, so the list is found by the names that it holds.
+fn find_nodes(data: &[u8], from: usize, to: usize, joint_count: usize) -> Vec<Node> {
+    let to = to.min(data.len());
+    let common = COMMON_NODES.map(node_key);
+    let (mut best, mut best_score) = (Vec::new(), 0usize);
+    for head in from..to {
+        let count = usize::from(data[head]);
+        if count == 0 || head + 1 + count > to {
+            continue;
+        }
+        let start = (head + 1 + count + 3) & !3;
+        if start + 16 * count > to {
+            continue;
+        }
+        let key_at = |k: usize| u32_at(data, start + 16 * k).unwrap_or(0);
+        let score = (0..count).filter(|&k| common.contains(&key_at(k))).count();
+        // A longer list that holds the same names wins: the shorter one is a part of it.
+        if score == 0 || score < best_score || (score == best_score && count <= best.len()) {
+            continue;
+        }
+        let nodes: Option<Vec<Node>> = (0..count)
+            .map(|k| {
+                let joint = usize::from(data[head + 1 + k]);
+                let place = start + 16 * k;
+                let offset = [f32_at(data, place + 4).ok()?, f32_at(data, place + 8).ok()?, f32_at(data, place + 12).ok()?];
+                (joint < joint_count && offset.iter().all(|v| v.is_finite() && v.abs() < 1e5)).then(|| Node { key: key_at(k), joint, offset })
+            })
+            .collect();
+        if let Some(nodes) = nodes {
+            (best, best_score) = (nodes, score);
+        }
+    }
+    best
 }
 
 use crate::bytes::{u16_at, u32_at};
@@ -140,7 +198,15 @@ impl MotionPack {
                 rotation: [f32_at(data, place + 12)?, f32_at(data, place + 16)?, f32_at(data, place + 20)?, f32_at(data, place + 24)?],
             });
         }
-        Ok(MotionPack { joints, channel_kinds, places, data: data.to_vec() })
+        let end = places.iter().copied().filter(|&place| place > at).min().unwrap_or(data.len());
+        let nodes = find_nodes(data, at + 28 * joint_count, end, joint_count);
+        Ok(MotionPack { joints, channel_kinds, nodes, places, data: data.to_vec() })
+    }
+
+    /// The point of this name, when the model has it.
+    pub fn node(&self, name: &str) -> Option<Node> {
+        let key = node_key(name);
+        self.nodes.iter().find(|node| node.key == key).copied()
     }
 
     /// The number of motions that the part can hold (some are empty).
@@ -168,7 +234,7 @@ impl MotionPack {
 impl MotionPack {
     /// A pack with only a rest pose, for the tests of other modules.
     pub(crate) fn parse_for_test(joints: Vec<Joint>) -> MotionPack {
-        MotionPack { joints, channel_kinds: Vec::new(), places: Vec::new(), data: Vec::new() }
+        MotionPack { joints, channel_kinds: Vec::new(), nodes: Vec::new(), places: Vec::new(), data: Vec::new() }
     }
 }
 
@@ -429,8 +495,15 @@ mod test {
                     }
                     read += 1;
                 }
-                eprintln!("file {}: {} joints, {} motions read, {} channels", first + offset, pack.joints.len(), read, pack.channel_kinds.len());
+                eprintln!("file {}: {} joints, {} motions read, {} channels, {} points", first + offset, pack.joints.len(), read, pack.channel_kinds.len(), pack.nodes.len());
                 assert!(read > 0);
+                if offset == 5 {
+                    // The battle motions: the points of the effects are there.
+                    for name in ["Center01", "OverHead01"] {
+                        let node = pack.node(name).unwrap_or_else(|| panic!("file {}: no point {name}", first + offset));
+                        assert!(node.joint < pack.joints.len());
+                    }
+                }
             }
         }
     }
