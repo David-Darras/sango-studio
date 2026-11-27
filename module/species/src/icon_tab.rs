@@ -46,6 +46,15 @@ pub fn sd_path(file: usize) -> String {
     format!("species/icon/{file}.bin")
 }
 
+/// The species of a pack with this number (a species that the game does not have): its name and the file of its icon.
+fn new_species(species: usize) -> Option<(String, usize)> {
+    if species < ICON_FILES.len() {
+        return None;
+    }
+    let record = crate::extras::pack_species(species)?;
+    Some((record.name, usize::from(sango_pack::library::FIRST_PACK_ICON) + species - usize::from(sango_pack::table::FIRST_SPECIES)))
+}
+
 /// The state of the icon card.
 #[derive(Default)]
 pub struct IconTab {
@@ -54,6 +63,11 @@ pub struct IconTab {
     pending: HashMap<usize, Vec<u8>>,
     /// The files that were read from the SD card, or written on it.
     from_card: HashSet<usize>,
+    /// For a changed file that is the icon of a species of a pack: the name of the species and the picture (PNG), which go in the pack
+    /// of the user.
+    pending_species: HashMap<usize, (String, Vec<u8>)>,
+    /// Asks the user for a picture: None is the file window of the system (the tests give a file without it).
+    pick: Option<fn() -> Option<std::path::PathBuf>>,
     /// True for the icon of the females, when the species has one.
     female: bool,
     /// What the picture shows: the file, and the compressed bytes that it was made from.
@@ -70,6 +84,7 @@ impl IconTab {
     pub fn open(&mut self, dump: &Dump) {
         self.garc = Garc::open(&dump.archive(ICON_ARCHIVE)).ok();
         self.pending.clear();
+        self.pending_species.clear();
         self.from_card.clear();
         self.shown = None;
         if let Some(old) = self.texture.take() {
@@ -111,7 +126,15 @@ impl IconTab {
         let mut written = Vec::new();
         for file in files {
             let path = sd_path(file);
-            sd.write(&path, &self.pending[&file]).and_then(|_| sd.mark_changed(&path))?;
+            if let Some((name, png)) = self.pending_species.get(&file) {
+                let mut library = sango_pack::Library::open(sd)?;
+                library.set_species_icon(sd, name, Some(png.clone()))?;
+                library.save(sd)?;
+                library.write_species_icon(sd, name)?;
+                self.pending_species.remove(&file);
+            } else {
+                sd.write(&path, &self.pending[&file]).and_then(|_| sd.mark_changed(&path))?;
+            }
             self.pending.remove(&file);
             self.from_card.insert(file);
             written.push(path);
@@ -122,6 +145,7 @@ impl IconTab {
     /// Forgets the changes that were not saved and what was read from the SD card: the next display reads the files again.
     pub fn reload(&mut self) {
         self.pending.clear();
+        self.pending_species.clear();
         self.from_card.clear();
         self.shown = None;
         if let Some(old) = self.texture.take() {
@@ -135,14 +159,19 @@ impl IconTab {
         Ok(lz::compress_lz11(&image.to_bytes()))
     }
 
-    /// Reads a PNG file and makes it the icon of a file of the archive.
-    fn import(&mut self, path: &std::path::Path, file: usize) -> Result<(), String> {
+    /// Reads a PNG file and makes it the icon of a file of the archive. `own` is the name of the species when the file is the icon of
+    /// a species of a pack.
+    fn import(&mut self, path: &std::path::Path, file: usize, own: Option<&str>) -> Result<(), String> {
+        let png = std::fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
         let image = image::open(path).map_err(|error| format!("{}: {error}", path.display()))?.to_rgba8();
         if image.width() as usize != WIDTH || image.height() as usize != HEIGHT {
             return Err(format!("The icon must have {WIDTH} × {HEIGHT} pixels. This image has {} × {}.", image.width(), image.height()));
         }
         let bytes = Self::make_file(image.as_raw())?;
         self.pending.insert(file, bytes);
+        if let Some(name) = own {
+            self.pending_species.insert(file, (name.to_string(), png));
+        }
         Ok(())
     }
 
@@ -153,10 +182,12 @@ impl IconTab {
         if !has_female_icon(species) {
             self.female = false;
         }
-        let Some(file) = icon_file(species, form, self.female) else {
+        let own = new_species(species);
+        let Some(file) = own.as_ref().map(|(_, file)| *file).or_else(|| icon_file(species, form, self.female)) else {
             ui.label(widget::hint("This species has no icon in the table."));
             return;
         };
+        let own = own.map(|(name, _)| name);
         let bytes = self.current(sd, file);
         // The picture is made again when the file or its bytes change.
         let same = matches!((&self.shown, &bytes), (Some((shown_file, shown_bytes)), Some(now)) if *shown_file == file && shown_bytes == now);
@@ -195,8 +226,12 @@ impl IconTab {
                             self.status = Some(self.export(file, bytes.as_deref()));
                         }
                         if widget::button(ui, "Import") {
-                            if let Some(path) = rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file() {
-                                self.status = Some(match self.import(&path, file) {
+                            let path = match self.pick {
+                                Some(pick) => pick(),
+                                None => rfd::FileDialog::new().add_filter("PNG image", &["png"]).pick_file(),
+                            };
+                            if let Some(path) = path {
+                                self.status = Some(match self.import(&path, file, own.as_deref()) {
                                     Ok(()) => (true, "The icon is changed. Save to write it on the SD card.".to_string()),
                                     Err(message) => (false, message),
                                 });
@@ -205,7 +240,10 @@ impl IconTab {
                         let has_change = self.pending.contains_key(&file) || self.from_card.contains(&file);
                         ui.add_enabled_ui(has_change, |ui| {
                             if widget::button(ui, "Reset") {
-                                self.status = Some(self.reset(file, sd));
+                                self.status = Some(match &own {
+                                    Some(name) => self.reset_species(file, name, sd),
+                                    None => self.reset(file, sd),
+                                });
                             }
                         });
                     });
@@ -219,6 +257,13 @@ impl IconTab {
                     ui.painter().image(texture.id(), image, full, egui::Color32::WHITE);
                 }
             });
+            if own.is_some() {
+                ui.add_space(6.0);
+                if self.texture.is_none() {
+                    ui.label(widget::hint("No icon yet: the game shows the icon of an unknown Pokémon."));
+                }
+                ui.label(widget::hint(&format!("A PNG image of {WIDTH} × {HEIGHT} pixels. One icon for the species and its forms.")));
+            }
             if let Some((ok, message)) = &self.status {
                 ui.add_space(6.0);
                 ui.label(egui::RichText::new(message).color(if *ok { color::GREEN } else { color::ROSE }).size(13.5));
@@ -244,6 +289,25 @@ impl IconTab {
             }
         }
         (true, "The icon of the game is back.".to_string())
+    }
+
+    /// Takes the icon of the user away from a species of a pack: it shows the icon of a pack again, when a pack has one.
+    fn reset_species(&mut self, file: usize, name: &str, sd: Option<&SdCard>) -> (bool, String) {
+        self.pending.remove(&file);
+        self.pending_species.remove(&file);
+        self.from_card.remove(&file);
+        self.shown = None;
+        let Some(sd) = sd else { return (true, "The change is dropped.".to_string()) };
+        let result = sango_pack::Library::open(sd).and_then(|mut library| {
+            library.set_species_icon(sd, name, None)?;
+            library.save(sd)?;
+            library.write_species_icon(sd, name)
+        });
+        match result {
+            Ok(()) if sd.read(&sd_path(file)).is_some() => (true, "The icon of the pack is back.".to_string()),
+            Ok(()) => (true, "The icon of this species is gone.".to_string()),
+            Err(message) => (false, message),
+        }
     }
 
     /// Writes the icon as a PNG file that the user chooses.
@@ -300,6 +364,72 @@ mod test {
         assert!(decode(&[1, 2, 3]).is_err());
     }
 
+    /// Draws a card in a new window (the focus is on its first button), then presses the keys one after the other.
+    fn press(keys: &[egui::Key], mut card: impl FnMut(&mut egui::Ui)) {
+        let ctx = egui::Context::default();
+        for key in [None, None].into_iter().chain(keys.iter().flat_map(|&key| [Some(key), None])) {
+            let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+            input.events.extend(key.map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }));
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::set_page_focus(ctx, true);
+                    widget::update_navigation(ui);
+                    card(ui);
+                });
+            });
+        }
+    }
+
+    fn test_folder() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("sango_new_icon_{}", std::process::id()))
+    }
+
+    /// The file that the keys-only test imports, in place of the file window.
+    fn pick_picture() -> Option<std::path::PathBuf> {
+        Some(test_folder().join("icon.png"))
+    }
+
+    /// A species made from nothing gets an icon and loses it, with the keys only. The files are the ones that the plugin reads.
+    #[test]
+    fn a_new_species_gets_an_icon_with_the_keys() {
+        std::fs::create_dir_all(test_folder().join("sd")).unwrap();
+        let sd = SdCard::open(test_folder().join("sd").to_str().unwrap()).unwrap();
+        let session = Session { sd: Some(SdCard::open(test_folder().join("sd").to_str().unwrap()).unwrap()), ..Session::default() };
+        let mut library = sango_pack::Library::default();
+        library.add_species(&sd, "Gecqua", &[1u8; sango_pack::pack::DATA_SIZE], 52).unwrap();
+        library.save(&sd).unwrap();
+        let _table = crate::extras::set_for_test(library.table().unwrap());
+        let mut picture = image::RgbaImage::new(WIDTH as u32, HEIGHT as u32);
+        for pixel in picture.pixels_mut().take(200) {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        picture.save(pick_picture().unwrap()).unwrap();
+
+        use egui::Key::{ArrowDown, Enter};
+        let mut tab = IconTab { pick: Some(pick_picture), ..IconTab::default() };
+        // Import: the button under Export.
+        press(&[ArrowDown, Enter], |ui| tab.ui(ui, &session, 724, 0));
+        assert!(tab.changed(), "{:?}", tab.status);
+        assert_eq!(tab.save(&sd).unwrap(), [sd_path(5000)]);
+        let written = sd.read(&sd_path(5000)).unwrap();
+        assert!(lz::is_compressed(&written), "compressed, as the files of the game");
+        assert_eq!(decode(&written).unwrap()[..4], [255, 0, 0, 255]);
+        // The table of the icons gives the species 724 its file, and the list of the files has it.
+        let map = sd.read(sango_pack::library::ICON_MAP_PATH).unwrap();
+        assert_eq!(map, [b"SICM".as_slice(), &1u32.to_le_bytes(), &724u16.to_le_bytes(), &0u16.to_le_bytes(), &5000u16.to_le_bytes()].concat());
+        let list = sd.read("species/icon/index.bin").unwrap();
+        assert_eq!(u32::from_le_bytes(list[4..8].try_into().unwrap()), 5000);
+        // The icon is in the pack of the user: writing the icons of the packs keeps it.
+        sango_pack::Library::open(&sd).unwrap().write_icons(&sd).unwrap();
+        assert_eq!(sd.read(&sd_path(5000)), Some(written));
+
+        // Reset: the button under Import.
+        press(&[ArrowDown, ArrowDown, Enter], |ui| tab.ui(ui, &session, 724, 0));
+        assert!(sd.read(&sd_path(5000)).is_none(), "{:?}", tab.status);
+        assert_eq!(sd.read(sango_pack::library::ICON_MAP_PATH).unwrap().len(), 8, "no icon in the table");
+        let _ = std::fs::remove_dir_all(test_folder());
+    }
+
     /// With the dump of the game: the icons of the forms and of the females of the tables are files of the
     /// archive that decode to 40 × 30 pixels, an icon is imported from a PNG, saved on the SD card and read again.
     #[test]
@@ -330,11 +460,11 @@ mod test {
         }
         picture.save(&png).unwrap();
         let file = icon_file(1, 0, false).unwrap();
-        tab.import(&png, file).unwrap();
+        tab.import(&png, file, None).unwrap();
         assert!(tab.changed());
         let wrong = folder.join("wrong.png");
         image::RgbaImage::new(10, 10).save(&wrong).unwrap();
-        assert!(tab.import(&wrong, file).unwrap_err().contains("40 × 30"));
+        assert!(tab.import(&wrong, file, None).unwrap_err().contains("40 × 30"));
 
         // The tab draws, for a species with a female icon too.
         let ctx = egui::Context::default();

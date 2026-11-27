@@ -16,6 +16,16 @@ pub mod table;
 /// The number of the archive of the cries.
 pub const ARCHIVE: usize = 100;
 
+/// The biggest wave archive that the game loads, in bytes: it keeps a cry in a memory of this size, and a bigger file stays silent.
+pub const MAX_ARCHIVE_BYTES: usize = 40_000;
+
+/// The longest cry whose wave archive fits in [`MAX_ARCHIVE_BYTES`] at the rate of the game (32728 Hz), in seconds.
+pub const MAX_SECONDS: f32 = 2.1;
+
+/// The file of the wave archive of the first species of the packs. The archive of the cries of the game has fewer files: the plugin
+/// reads the file of a new species from the SD card when it is there.
+pub const FIRST_NEW_SPECIES_FILE: u32 = 5000;
+
 /// A sound: mono samples of 16 bits at a rate.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Sound {

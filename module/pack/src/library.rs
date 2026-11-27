@@ -109,6 +109,44 @@ pub const ICON_MAP_PATH: &str = "species/icon_map.bin";
 /// The number of the first species of a pack.
 const FIRST_PACK_SPECIES: u16 = FIRST_SPECIES;
 
+/// The list of the icon files that the packs wrote, on the computer.
+const ICON_STATE_PATH: &str = "species/icon_state.json";
+
+/// Writes an icon file on the SD card when it is not there yet.
+fn write_icon(sd: &SdCard, file: u16, bytes: &[u8]) -> Result<(), String> {
+    let path = format!("species/icon/{file}.bin");
+    if sd.read(&path).as_deref() != Some(bytes) {
+        sd.write(&path, bytes)?;
+        sd.mark_changed(&path)?;
+    }
+    Ok(())
+}
+
+/// Removes an icon file of the SD card: the game shows its own picture again.
+fn remove_icon(sd: &SdCard, file: u16) -> Result<(), String> {
+    let path = format!("species/icon/{file}.bin");
+    if sd.remove(&path)? {
+        sd.mark_changed(&path)?;
+    }
+    Ok(())
+}
+
+/// Writes the table of the icons (see [`ICON_MAP_PATH`]) when it changed.
+fn write_icon_map(sd: &SdCard, map: &[(u16, u16, u16)]) -> Result<(), String> {
+    let mut table = b"SICM".to_vec();
+    table.extend_from_slice(&(map.len() as u32).to_le_bytes());
+    for (species, form, file) in map {
+        for value in [species, form, file] {
+            table.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    if sd.read(ICON_MAP_PATH).as_deref() != Some(table.as_slice()) {
+        sd.write(ICON_MAP_PATH, &table)?;
+        sd.mark_changed(ICON_MAP_PATH)?;
+    }
+    Ok(())
+}
+
 /// An icon file of a Pokémon: a picture of 40 × 30 pixels as a CLIM compressed with LZ11. A partial transparency stays (see
 /// [`sango_core::Clim::from_rgba_icon`]).
 pub fn icon_file_bytes(png: &[u8]) -> Result<Vec<u8>, String> {
@@ -333,6 +371,9 @@ impl Library {
     /// Replaces the model of a species of a pack (`form` 0) or of a form of a pack by an imported model, or puts the model that the pack
     /// shipped back (`imported` is None). The pack file on the SD card is written again, with the original model kept in it.
     ///
+    /// A species or a form that shows a model of the game (a new species, for example) gets a model of its own the same way, and
+    /// shows the model of the game again when the imported model is taken away.
+    ///
     /// The 8 files of the imported model are the ones that the importer makes. Nothing changes when this returns an error.
     pub fn set_model(&mut self, sd: &SdCard, species: &Ref, form: u16, imported: Option<Vec<Vec<u8>>>) -> Result<(), String> {
         if let Some(files) = &imported {
@@ -357,7 +398,30 @@ impl Library {
             (Ref::Key(name), 0) => pack.species.iter_mut().find(|s| s.name == *name).map(|s| &mut s.model),
             _ => pack.forms.iter_mut().find(|f| f.species == *species && f.form == form).and_then(|f| f.model.as_mut()),
         };
-        let Some(ModelRef::File { file }) = current else { return Err("This model is not a model of the pack: only the models of the species and the forms of the packs can be replaced.".into()) };
+        let Some(model) = current else { return Err("This form has no model of its own.".into()) };
+        if let ModelRef::Native { native } = *model {
+            // The first model of its own: the model of the game is noted, so that it can come back.
+            let Some(files) = imported else { return Err("There is no imported model here: this is already a model of the game.".into()) };
+            let number = match species {
+                Ref::Game(number) => *number,
+                Ref::Key(name) => self.number_of(name).ok_or_else(|| format!("The species '{name}' has no number."))?,
+            };
+            let file = format!("pm{number:04}_{form:02}{USER_SUFFIX}");
+            *model = ModelRef::File { file: file.clone() };
+            pack.borrowed_models.insert(file.clone(), native);
+            return self.store_user_pack(sd, Some(&old), pack, Some((file, files)));
+        }
+        let ModelRef::File { file } = model else { return Err("This model cannot be replaced.".into()) };
+        if let Some(&native) = pack.borrowed_models.get(file.as_str()) {
+            let new_files = match imported {
+                Some(files) => Some((file.clone(), files)),
+                None => {
+                    *model = ModelRef::Native { native };
+                    None
+                }
+            };
+            return self.store_user_pack(sd, Some(&old), pack, new_files);
+        }
         let base = file.strip_suffix(IMPORTED_SUFFIX).unwrap_or(file).to_string();
         let replaced = format!("{base}{IMPORTED_SUFFIX}");
         let mut new_files: Option<(String, Vec<Vec<u8>>)> = None;
@@ -415,8 +479,9 @@ impl Library {
                 entry.model = Some(ModelRef::File { file: file.clone() });
                 Some((file, files))
             }
-            (None, Some(_)) => {
-                entry.model = None;
+            (None, Some(file)) => {
+                // The form shows what it showed before: a model of the game that it named, or the model that the game has for it.
+                entry.model = pack.borrowed_models.get(&file).map(|&native| ModelRef::Native { native });
                 None
             }
             (None, None) => return Err("This form has no model of its own.".into()),
@@ -502,7 +567,38 @@ impl Library {
         let mut pack = old.clone();
         pack.species.retain(|s| s.name != name);
         pack.forms.retain(|f| f.species != Ref::key(name));
+        pack.icons.retain(|i| i.species != Ref::key(name));
+        pack.icon_files.retain(|file, _| pack.icons.iter().any(|i| i.file == *file));
         self.store_user_pack(sd, Some(&old), pack, None)
+    }
+
+    /// Gives a species of a pack the icon of the user (a PNG file of 40 × 30 pixels), or takes it away (`png` is None): the species
+    /// then shows the icon of a pack again, when a pack has one. The icon is kept in the pack of the user, `studio-models`, that this
+    /// creates. Call [`Library::write_species_icon`] to write the change on the SD card.
+    pub fn set_species_icon(&mut self, sd: &SdCard, name: &str, png: Option<Vec<u8>>) -> Result<(), String> {
+        let number = self.number_of(name).ok_or_else(|| format!("The species '{name}' has no number."))?;
+        if let Some(png) = &png {
+            icon_file_bytes(png)?;
+        }
+        let old = self.packs.iter().find(|p| p.id == REPLACEMENT_PACK).cloned();
+        let mut pack = old.clone().unwrap_or_else(|| Pack { id: REPLACEMENT_PACK.into(), name: "My models".into(), version: "1".into(), ..Pack::default() });
+        let key = Ref::key(name);
+        let had = pack.icons.iter().any(|i| i.species == key && i.form == 0);
+        if png.is_none() && !had {
+            return Ok(());
+        }
+        pack.icons.retain(|i| !(i.species == key && i.form == 0));
+        let file = format!("species-{number:04}");
+        pack.icon_files.remove(&file);
+        let icon = crate::pack::PackIcon { species: key, form: 0, file: file.clone(), game_file: None, label: name.to_string() };
+        let enabled = icon.key();
+        if let Some(png) = png {
+            pack.icon_files.insert(file, png);
+            pack.icons.push(icon);
+        }
+        self.store_user_pack(sd, old.as_ref(), pack, None)?;
+        self.set_enabled(REPLACEMENT_PACK, &enabled, true);
+        Ok(())
     }
 
     /// Sets what lets a Pokémon of the species change into its form `form` of a pack in a battle. The pack that owns the form is written
@@ -543,6 +639,12 @@ impl Library {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         let temporary = target.with_extension("sangopack.new");
+        // A note about a model that nothing uses any more (the model was taken away, or its species was deleted) goes away.
+        let used: Vec<String> = pack.model_refs().into_iter().filter_map(|model| match model {
+            ModelRef::File { file } => Some(file.clone()),
+            ModelRef::Native { .. } => None,
+        }).collect();
+        pack.borrowed_models.retain(|name, _| used.contains(name));
         pack.save_with_models(&temporary, &mut |model| match &new_model {
             Some((name, files)) if model == name => Ok(files.clone()),
             _ => old.ok_or_else(|| format!("The model '{model}' has no files.").to_string())?.read_model(model),
@@ -824,20 +926,60 @@ impl Library {
     /// Writes the icons of the active packs on the SD card: `species/icon/<file>.bin` and the table `species/icon_map.bin`.
     ///
     /// An icon with a `game_file` replaces that file of the game. The icon of a species of a pack gets the file
-    /// `FIRST_PACK_ICON` plus the place of the species in the registry. A later pack wins over an earlier one. The files that an
-    /// earlier call wrote and that no pack asks for now are removed (the list is in `species/icon_state.json`, on the computer).
-    /// Returns the number of files that the packs ask for.
+    /// `FIRST_PACK_ICON` plus the place of the species in the registry. A later pack wins over an earlier one, and the pack of the
+    /// user wins over every other one. The files that an earlier call wrote and that no pack asks for now are removed (the list is in
+    /// `species/icon_state.json`, on the computer). Returns the number of files that the packs ask for.
     pub fn write_icons(&self, sd: &SdCard) -> Result<usize, String> {
-        use std::collections::BTreeMap;
-        let mut files: BTreeMap<u16, Vec<u8>> = BTreeMap::new();
-        let mut map: Vec<(u16, u16, u16)> = Vec::new();
-        for pack in &self.packs {
-            if !self.is_active(&pack.id) {
-                continue;
+        let (files, map) = self.icon_choices();
+        let files: std::collections::BTreeMap<u16, Vec<u8>> = files.into_iter().map(|(file, png)| Ok((file, icon_file_bytes(png)?))).collect::<Result<_, String>>()?;
+        let previous: Vec<u16> = sd.read(ICON_STATE_PATH).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        for old in previous {
+            if !files.contains_key(&old) {
+                remove_icon(sd, old)?;
             }
-            let disabled = self.registry.packs.iter().find(|p| p.id == pack.id).map(|p| p.disabled.clone()).unwrap_or_default();
+        }
+        for (file, bytes) in &files {
+            write_icon(sd, *file, bytes)?;
+        }
+        write_icon_map(sd, &map)?;
+        let list: Vec<u16> = files.keys().copied().collect();
+        sd.write(ICON_STATE_PATH, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
+        self.write_item_icons(sd)?;
+        self.write_files(sd)?;
+        Ok(files.len())
+    }
+
+    /// Writes the icon of one species of a pack on the SD card, and the table of the icons: the other files stay as they are.
+    pub fn write_species_icon(&self, sd: &SdCard, name: &str) -> Result<(), String> {
+        let number = self.number_of(name).ok_or_else(|| format!("The species '{name}' has no number."))?;
+        let file = FIRST_PACK_ICON + (number - FIRST_PACK_SPECIES);
+        let (files, map) = self.icon_choices();
+        let mut state: Vec<u16> = sd.read(ICON_STATE_PATH).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        state.retain(|&other| other != file);
+        match files.get(&file) {
+            Some(png) => {
+                write_icon(sd, file, &icon_file_bytes(png)?)?;
+                state.push(file);
+                state.sort_unstable();
+            }
+            None => remove_icon(sd, file)?,
+        }
+        write_icon_map(sd, &map)?;
+        sd.write(ICON_STATE_PATH, &serde_json::to_vec(&state).map_err(|e| e.to_string())?)?;
+        Ok(())
+    }
+
+    /// The picture that wins for each icon file that the active packs give, and the entries of the table of the icons (species, form,
+    /// file).
+    fn icon_choices(&self) -> (std::collections::BTreeMap<u16, &[u8]>, Vec<(u16, u16, u16)>) {
+        let mut files: std::collections::BTreeMap<u16, &[u8]> = Default::default();
+        let mut map: Vec<(u16, u16, u16)> = Vec::new();
+        let mut packs: Vec<&Pack> = self.packs.iter().filter(|pack| self.is_active(&pack.id)).collect();
+        // The pack of the user comes last: it wins.
+        packs.sort_by_key(|pack| pack.id == REPLACEMENT_PACK);
+        for pack in packs {
             for icon in &pack.icons {
-                if disabled.contains(&icon.key()) {
+                if !self.is_enabled(&pack.id, &icon.key()) {
                     continue;
                 }
                 let Some(png) = pack.icon_files.get(&icon.file) else { continue };
@@ -849,48 +991,15 @@ impl Library {
                     }
                     _ => continue,
                 };
-                let bytes = icon_file_bytes(png)?;
-                files.insert(file, bytes);
+                files.insert(file, png);
                 if let Some((species, form)) = entry {
                     map.retain(|&(s, f, _)| (s, f) != (species, form));
                     map.push((species, form, file));
                 }
             }
         }
-        let state_path = "species/icon_state.json";
-        let previous: Vec<u16> = sd.read(state_path).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        for old in previous {
-            if !files.contains_key(&old) {
-                let path = format!("species/icon/{old}.bin");
-                if sd.remove(&path)? {
-                    sd.mark_changed(&path)?;
-                }
-            }
-        }
-        for (file, bytes) in &files {
-            let path = format!("species/icon/{file}.bin");
-            if sd.read(&path).as_deref() != Some(bytes.as_slice()) {
-                sd.write(&path, bytes)?;
-                sd.mark_changed(&path)?;
-            }
-        }
         map.sort_unstable();
-        let mut table = b"SICM".to_vec();
-        table.extend_from_slice(&(map.len() as u32).to_le_bytes());
-        for (species, form, file) in &map {
-            for value in [species, form, file] {
-                table.extend_from_slice(&value.to_le_bytes());
-            }
-        }
-        if sd.read(ICON_MAP_PATH).as_deref() != Some(table.as_slice()) {
-            sd.write(ICON_MAP_PATH, &table)?;
-            sd.mark_changed(ICON_MAP_PATH)?;
-        }
-        let list: Vec<u16> = files.keys().copied().collect();
-        sd.write(state_path, &serde_json::to_vec(&list).map_err(|e| e.to_string())?)?;
-        self.write_item_icons(sd)?;
-        self.write_files(sd)?;
-        Ok(files.len())
+        (files, map)
     }
 
     /// Writes the files of the game that the active packs replace (musics, characters, see [`crate::pack::PackFile`]) where the

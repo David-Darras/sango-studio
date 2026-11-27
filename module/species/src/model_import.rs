@@ -65,7 +65,7 @@ pub fn run(sd_root: &str, dump_root: &str, request: &Request) -> Result<String, 
         }
         Request::Reset { species, form } => {
             library.set_form_model(&sd, species, *form, None, "")?;
-            "The model of the pack is back. Restart the game to see it.".to_string()
+            "The first model is back. Restart the game to see it.".to_string()
         }
         Request::ResetGame { species, slot } => {
             // When the pack has no replacement any more, the files on the SD card may still be from an earlier write: they are written again.

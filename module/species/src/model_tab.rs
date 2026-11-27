@@ -252,11 +252,18 @@ pub struct ModelTab {
     dump_root: Option<String>,
     /// The size factor of an imported model.
     import_scale: f32,
+    /// Asks the user for the file to import: the file window of the system (the tests give a file without it).
+    pick_model_file: fn() -> Option<PathBuf>,
+}
+
+/// The file window of the system for a model to import.
+fn pick_model_file() -> Option<PathBuf> {
+    rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file()
 }
 
 impl Default for ModelTab {
     fn default() -> Self {
-        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, clock: 0.0, last_tick: None, focus: None, slow: false, female: false, shows_own_model: true, top_form: 0, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0 }
+        ModelTab { archive: None, sd_folder: None, sd_models: None, form: 0, shiny: false, camera: Camera::default(), loaded: None, error: None, picture: None, dirty: true, thumbnails: HashMap::new(), retired: Default::default(), status: None, playing: None, running: false, frame: 0.0, clock: 0.0, last_tick: None, focus: None, slow: false, female: false, shows_own_model: true, top_form: 0, variants: Vec::new(), variants_of: None, job: None, sd_root: None, dump_root: None, import_scale: 1.0, pick_model_file }
     }
 }
 
@@ -627,13 +634,13 @@ impl ModelTab {
             ui.label(widget::title("Model"));
             // The form is the one of the menu at the top of the page. Only the female model of the normal form has a choice of its own.
             if self.form <= 1 && available.iter().any(|v| v.slot == 1 && v.label == "Female") {
-                ui.checkbox(&mut self.female, "Female model").on_hover_text("Shows the female model of the normal form.");
+                widget::checkbox(ui, &mut self.female, "Female model").on_hover_text("Shows the female model of the normal form.");
             }
             ui.horizontal(|ui| {
-                if ui.checkbox(&mut self.shiny, "Shiny").changed() {
+                if widget::checkbox(ui, &mut self.shiny, "Shiny").changed() {
                     self.dirty = true;
                 }
-                if ui.checkbox(&mut self.camera.outline, "Outline").changed() {
+                if widget::checkbox(ui, &mut self.camera.outline, "Outline").changed() {
                     self.dirty = true;
                 }
             });
@@ -667,8 +674,9 @@ impl ModelTab {
         if species <= crate::SPECIES.len() {
             return Some((Target::Game(species as u16, self.form), format!("pm{species:04}_{:02}", 80 + u16::from(self.form))));
         }
+        // A species of a pack: the form of the menu at the top, also when it has no model of its own and the first model is shown.
         let name = crate::extras::pack_species(species)?.name;
-        Some((Target::Pack(sango_pack::Ref::key(&name), u16::from(self.form)), format!("pm{species:04}_{:02}", self.form)))
+        Some((Target::Pack(sango_pack::Ref::key(&name), self.top_form as u16), format!("pm{species:04}_{:02}", self.top_form)))
     }
 
     /// Takes the result of the import when the thread is done.
@@ -681,7 +689,9 @@ impl ModelTab {
                     Ok(message) => (true, message),
                     Err(message) => (false, message),
                 });
-                // The files of the SD card changed.
+                // The files of the SD card changed, and the table of the species with them.
+                crate::extras::invalidate();
+                ctx.request_repaint();
                 let folder = self.sd_folder.clone();
                 self.set_sd_folder(folder, true);
             }
@@ -715,7 +725,7 @@ impl ModelTab {
             }
             if let Some((target, model_name)) = &target {
                 if widget::button(ui, "Import") {
-                    if let Some(file) = rfd::FileDialog::new().set_title("3D model (glTF or GLB)").add_filter("3D model", &["glb", "gltf"]).pick_file() {
+                    if let Some(file) = (self.pick_model_file)() {
                         let scale = f64::from(self.import_scale);
                         request = Some(match target {
                             Target::Pack(species, form) => crate::model_import::Request::Import { file, species: species.clone(), form: *form, model_name: model_name.clone(), scale },
@@ -730,7 +740,7 @@ impl ModelTab {
                     });
                 }
                 ui.label(widget::hint("Scale"));
-                ui.add(egui::DragValue::new(&mut self.import_scale).speed(0.01).range(0.05..=20.0));
+                widget::decimal(ui, &mut self.import_scale, 0.01, 0.05..=20.0);
             }
         });
         if let Some(request) = request {
@@ -1049,6 +1059,145 @@ mod test {
         assert!(tab.loaded.as_ref().is_some_and(|loaded| !loaded.model.meshes.is_empty()), "the model is drawn from the files of the SD card");
         // A species of the game keeps its models of the archive.
         assert_eq!(tab.models_of(25).iter().map(|v| v.sd).collect::<Vec<_>>(), vec![false; variants(&archive, 25).len()]);
+        let _ = std::fs::remove_dir_all(&outer);
+    }
+
+    /// A form of a new species that has no model shows the first model: an import goes to the form, not to the species.
+    #[test]
+    fn an_import_on_a_form_of_a_new_species_goes_to_that_form() {
+        use sango_pack::table::{FormRecord, MegaCondition, SpeciesRecord};
+        let species = SpeciesRecord { id: 724, model_form: 0x8000 | 52, name: "Gecqua".into(), data: vec![1; 0x50], moves: Vec::new(), evolutions: Vec::new() };
+        let form = FormRecord { species: 724, form: 1, model_form: 0, data: vec![2; 0x50], mega: MegaCondition::Never };
+        let _table = crate::extras::set_for_test(sango_pack::Table { species: vec![species], forms: vec![form] });
+        let mut tab = ModelTab { variants: vec![Variant { slot: 0, file: 3, label: "Normal".into(), sd: false }], ..ModelTab::default() };
+        for top_form in [0, 1] {
+            tab.top_form = top_form;
+            tab.shows_own_model = top_form == 0;
+            let Some((Target::Pack(reference, form), name)) = tab.import_target(724) else { panic!("a new species takes a model") };
+            assert_eq!((reference, usize::from(form), name), (sango_pack::Ref::key("Gecqua"), top_form, format!("pm0724_{top_form:02}")));
+        }
+    }
+
+    /// The file that the keys-only test imports, in place of the file window.
+    fn pick_test_model() -> Option<PathBuf> {
+        Some(Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("modelport").join("tests").join("golden").join("model").join("body.gltf"))
+    }
+
+    /// With the dump: a species made from nothing gets a model of its own and gives it back, with the keys only. The files are the ones
+    /// that the plugin reads.
+    #[test]
+    fn a_new_species_gets_a_model_with_the_keys() {
+        use sango_pack::pack::{ModelRef, DATA_SIZE};
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = Dump::open(&root).unwrap();
+        let outer = std::env::temp_dir().join(format!("sango_new_species_model_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outer);
+        std::fs::create_dir_all(outer.join("sdmc").join("sango-studio")).unwrap();
+        let sd = sango_core::SdCard::open(outer.join("sdmc").to_str().unwrap()).unwrap();
+        // As the button "+ New species" does: the species shows the model of Meowth.
+        let mut library = sango_pack::Library::default();
+        library.add_species(&sd, "Gecqua", &[1u8; DATA_SIZE], 52).unwrap();
+        library.save(&sd).unwrap();
+        let table = || sango_pack::Table::from_bytes(&sd.read(sango_pack::library::TABLE_PATH).unwrap()).unwrap();
+        let guard = crate::extras::set_for_test(table());
+
+        let mut tab = ModelTab { pick_model_file: pick_test_model, ..ModelTab::default() };
+        tab.set_sd_folder(Some(sd.models_folder()), false);
+        tab.set_sd_root(Some(sd.root().to_string_lossy().to_string()));
+        tab.open(&dump);
+
+        let frame = |ctx: &egui::Context, tab: &mut ModelTab, key: Option<egui::Key>| {
+            let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+            input.events.extend(key.map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }));
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::set_page_focus(ctx, true);
+                    widget::update_navigation(ui);
+                    tab.ui(ui, 724, 0);
+                });
+            });
+        };
+        // A new window: the focus is on the first widget of the card, the check box "Shiny".
+        let press = |tab: &mut ModelTab, keys: &[egui::Key]| {
+            let ctx = egui::Context::default();
+            for key in [None, None].into_iter().chain(keys.iter().flat_map(|&key| [Some(key), None])) {
+                frame(&ctx, tab, key);
+            }
+        };
+        let wait = |tab: &mut ModelTab| {
+            let ctx = egui::Context::default();
+            let start = std::time::Instant::now();
+            while tab.job.is_some() {
+                assert!(start.elapsed().as_secs() < 300, "the import does not end");
+                std::thread::sleep(std::time::Duration::from_millis(50));
+                frame(&ctx, tab, None);
+            }
+        };
+
+        use egui::Key::{ArrowDown, ArrowRight, ArrowUp, Space};
+        press(&mut tab, &[Space]);
+        assert!(tab.shiny, "the keys change the check box");
+        press(&mut tab, &[Space]);
+        assert!(!tab.shiny && tab.job.is_none());
+        assert!(!tab.variants[0].sd, "the model of the game at first");
+        // The scale: down to the row of the buttons, then right to the number.
+        press(&mut tab, &[ArrowDown, ArrowRight, ArrowRight, ArrowRight, ArrowUp]);
+        assert!((tab.import_scale - 1.01).abs() < 0.001, "the keys change the scale: {}", tab.import_scale);
+        tab.import_scale = 1.0;
+
+        // Import: Export, then Import at its right.
+        press(&mut tab, &[ArrowDown, ArrowRight, egui::Key::Enter]);
+        assert!(tab.job.is_some(), "the keys start the import: {:?}", tab.status);
+        wait(&mut tab);
+        assert!(tab.status.as_ref().is_some_and(|(ok, message)| *ok && message.starts_with("Imported")), "{:?}", tab.status);
+        drop(guard);
+        let guard = crate::extras::set_for_test(table());
+        let folder = sd.models_folder();
+        tab.set_sd_folder(Some(folder.clone()), true);
+
+        let library = sango_pack::Library::open(&sd).unwrap();
+        assert_eq!(library.packs[0].species[0].model, ModelRef::File { file: format!("pm0724_00{}", sango_pack::library::USER_SUFFIX) });
+        // What the plugin reads: the table gives the first model of the carrier 494...
+        assert_eq!(table().species[0].model_form, 1);
+        // ...the list gives the carrier two slots...
+        let raw = std::fs::read(folder.join("0.raw")).unwrap();
+        assert_eq!(u32::from_le_bytes(raw[..4].try_into().unwrap()) as usize, raw.len() - 4);
+        let at = 4 + (494 - 1) * 4;
+        let (first, count) = (u16::from_le_bytes([raw[at], raw[at + 1]]) as usize, raw[at + 2]);
+        assert_eq!(count, 2);
+        // ...and the 8 files of the second slot are listed with their size, not compressed: packs with as many files as the ones of the
+        // game (the importer gives them all the signature "PC", as in the models of the packs).
+        let index = std::fs::read(folder.join("index.bin")).unwrap();
+        let entries: HashMap<u32, u32> = index[4..].chunks_exact(8).map(|e| (u32::from_le_bytes(e[..4].try_into().unwrap()), u32::from_le_bytes(e[4..].try_into().unwrap()))).collect();
+        let archive = Garc::open(&dump.archive(8)).unwrap();
+        let template = variants(&archive, 25)[0].file;
+        for part in 0..8 {
+            let id = (first + 1) * 8 + 3 + part;
+            let file = std::fs::read(folder.join(format!("{id}.pc"))).unwrap();
+            let size = u32::from_le_bytes(file[..4].try_into().unwrap());
+            assert_eq!(size as usize, file.len() - 4, "file {part}");
+            assert_eq!(entries.get(&(id as u32)), Some(&size), "file {part}");
+            let data = &file[4..];
+            assert!(!lz::is_compressed(data), "file {part} is compressed");
+            let game = archive.first_file_decompressed(template + part).unwrap();
+            assert_eq!(data.get(..2), Some(&b"PC"[..]), "the signature of the file {part}");
+            let count = |bytes: &[u8]| sango_modelport::pc::entries(bytes).map(|files| files.len());
+            assert_eq!(count(data), count(&game), "the number of files in the pack {part}");
+        }
+        // The tab reads the new model from the SD card.
+        press(&mut tab, &[]);
+        assert!(tab.variants[0].sd);
+        assert!(tab.error.is_none(), "{:?}", tab.error);
+        assert_eq!(tab.loaded.as_ref().map(|loaded| loaded.model.bones.len()), Some(4), "the skeleton of the file and the root of the game");
+
+        // Reset: the third button of the row.
+        press(&mut tab, &[ArrowDown, ArrowRight, ArrowRight, egui::Key::Enter]);
+        assert!(tab.job.is_some(), "the keys start the reset: {:?}", tab.status);
+        wait(&mut tab);
+        assert!(tab.status.as_ref().is_some_and(|(ok, _)| *ok), "{:?}", tab.status);
+        drop(guard);
+        let _guard = crate::extras::set_for_test(table());
+        assert_eq!(table().species[0].model_form, 0x8000 | 52, "the model of the game is back");
         let _ = std::fs::remove_dir_all(&outer);
     }
 }

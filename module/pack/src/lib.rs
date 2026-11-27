@@ -454,6 +454,111 @@ mod test {
         let _ = std::fs::remove_dir_all(&folder);
     }
 
+    /// A species made from nothing shows a model of the game: it can get a model of its own, and give it back.
+    #[test]
+    fn a_species_of_its_own_gets_a_model_of_its_own_and_gives_it_back() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_species_model_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let files = |name: &str| -> Vec<Vec<u8>> { (0..8u8).map(|n| vec![name.as_bytes()[0], n, 9, 9]).collect() };
+        let key = Ref::key("Gecqua");
+        let mut library = Library::open(&sd).unwrap();
+        library.add_species(&sd, "Gecqua", &[5u8; pack::DATA_SIZE], 52).unwrap();
+        assert_eq!(library.table().unwrap().species[0].model_form, 0x8000 | 52);
+        assert!(library.set_form_model(&sd, &key, 0, None, "").is_err(), "nothing to reset");
+
+        library.set_form_model(&sd, &key, 0, Some(files("First")), "pm0724_00").unwrap();
+        let name = format!("pm0724_00{}", library::USER_SUFFIX);
+        assert_eq!(library.packs[0].species[0].model, ModelRef::File { file: name.clone() });
+        assert_eq!(library.table().unwrap().species[0].model_form, library::carrier_form(0), "the plugin reads a model of a carrier");
+        // A second import replaces the files and keeps the name and the slot.
+        library.set_form_model(&sd, &key, 0, Some(files("Second")), "pm0724_00").unwrap();
+        assert_eq!(library.packs[0].read_model(&name).unwrap(), files("Second"));
+        assert_eq!(library.registry.models.len(), 1);
+        // The note of the model of the game is in the file of the pack.
+        library.save(&sd).unwrap();
+        let mut library = Library::open(&sd).unwrap();
+        assert_eq!(library.packs[0].borrowed_models.get(&name), Some(&52));
+
+        // A form of the species without a model, and one with it: each has its own slot.
+        library.add_form(&sd, key.clone(), 1, "Deep", &[6u8; pack::DATA_SIZE], MegaCondition::Never).unwrap();
+        library.set_form_model(&sd, &key, 1, Some(files("Deep")), "pm0724_01").unwrap();
+        let table = library.table().unwrap();
+        assert_eq!((table.species[0].model_form, table.forms[0].model_form), (library::carrier_form(0), library::carrier_form(1)));
+
+        library.set_form_model(&sd, &key, 0, None, "").unwrap();
+        assert_eq!(library.packs[0].species[0].model, ModelRef::Native { native: 52 }, "the model of the game is back");
+        assert_eq!(library.table().unwrap().species[0].model_form, 0x8000 | 52);
+        assert!(!library.packs[0].borrowed_models.contains_key(&name));
+        assert!(library.packs[0].read_model(&name).is_err(), "the imported model leaves the file");
+        // The next import takes the same slot.
+        library.set_form_model(&sd, &key, 0, Some(files("Third")), "pm0724_00").unwrap();
+        assert_eq!(library.table().unwrap().species[0].model_form, library::carrier_form(0));
+        assert_eq!(library.registry.models.len(), 2);
+        library.remove_species(&sd, "Gecqua").unwrap();
+        assert!(library.packs[0].borrowed_models.is_empty() && library.packs[0].model_names().is_empty());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// The icon of the user for a species wins over the icon of a pack, which comes back when the user takes it away.
+    #[test]
+    fn the_icon_of_the_user_wins_and_goes_with_its_species() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_user_icon_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let png = |red: u8| {
+            let picture = image::RgbaImage::from_pixel(40, 30, image::Rgba([red, 0, 0, 255]));
+            let mut bytes = std::io::Cursor::new(Vec::new());
+            picture.write_to(&mut bytes, image::ImageFormat::Png).unwrap();
+            bytes.into_inner()
+        };
+        let mut library = Library::default();
+        library.add_species(&sd, "Gecqua", &[5u8; pack::DATA_SIZE], 52).unwrap();
+        assert!(library.set_species_icon(&sd, "Gecqua", Some(vec![1, 2, 3])).is_err(), "not a picture");
+        library.set_species_icon(&sd, "Gecqua", Some(png(255))).unwrap();
+        // A pack of icons that is installed after the pack of the user.
+        let mut other = Pack { id: "icons".into(), name: "icons".into(), version: "1".into(), ..Pack::default() };
+        other.icons = vec![pack::PackIcon { species: Ref::key("Gecqua"), form: 0, file: "other".into(), game_file: None, label: String::new() }];
+        other.icon_files.insert("other".into(), png(0));
+        library.install(other).unwrap();
+        let file = || sd.read("species/icon/5000.bin");
+        library.write_species_icon(&sd, "Gecqua").unwrap();
+        assert_eq!(file(), Some(library::icon_file_bytes(&png(255)).unwrap()), "the icon of the user wins");
+        library.set_species_icon(&sd, "Gecqua", None).unwrap();
+        library.write_species_icon(&sd, "Gecqua").unwrap();
+        assert_eq!(file(), Some(library::icon_file_bytes(&png(0)).unwrap()), "the icon of the pack is back");
+        // A deleted species takes its icon of the user with it.
+        library.set_species_icon(&sd, "Gecqua", Some(png(255))).unwrap();
+        library.remove_species(&sd, "Gecqua").unwrap();
+        assert!(library.packs.iter().find(|p| p.id == library::REPLACEMENT_PACK).unwrap().icons.is_empty());
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// A form that names a model of the game gets it back after an import.
+    #[test]
+    fn a_form_with_a_model_of_the_game_gets_it_back() {
+        let folder = std::env::temp_dir().join(format!("sango_pack_borrowed_form_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let sd = SdCard::open(folder.to_str().unwrap()).unwrap();
+        let files: Vec<Vec<u8>> = (0..8u8).map(|n| vec![b'F', n, 9, 9]).collect();
+        let mut pack = pack("borrowed", &["Alpha"]);
+        pack.forms.push(PackForm { species: Ref::key("Alpha"), form: 1, name: String::new(), model: Some(ModelRef::Native { native: 25 }), female_model: None, data: pack::to_hex(&[5u8; pack::DATA_SIZE]), mega: None });
+        let file = folder.join("borrowed.sangopack");
+        pack.save(&file).unwrap();
+        let mut library = Library::default();
+        library.install(Pack::open(&file).unwrap()).unwrap();
+        library.save(&sd).unwrap();
+        library.set_form_model(&sd, &Ref::key("Alpha"), 1, Some(files.clone()), "pm0724_01").unwrap();
+        assert_eq!(library.table().unwrap().forms[0].model_form, library::carrier_form(0));
+        library.set_form_model(&sd, &Ref::key("Alpha"), 1, None, "").unwrap();
+        assert_eq!(library.packs[0].forms[0].model, Some(ModelRef::Native { native: 25 }));
+        assert_eq!(library.table().unwrap().forms[0].model_form, 0x8000 | 25);
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
     #[test]
     fn a_new_form_is_kept_in_the_pack_of_the_user_and_written_in_the_table() {
         let folder = std::env::temp_dir().join(format!("sango_pack_new_form_{}", std::process::id()));

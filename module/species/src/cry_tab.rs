@@ -21,9 +21,18 @@ pub fn cry_path(file: u32) -> String {
 
 /// The rate of the sounds of the game: an imported sound is brought to it.
 const RATE: u32 = 32728;
-/// The longest sound that the studio accepts, in seconds: the files of the game are 2 seconds long at most, and the game keeps them in a
-/// small memory.
-const MAX_SECONDS: f32 = 3.0;
+
+/// The species of a pack with this number (a species that the game does not have): its name, and the species of the game whose cry it
+/// has until it gets its own (the one whose model it shows, else Bulbasaur).
+fn new_species(species: usize) -> Option<(String, usize)> {
+    if species <= table::SPECIES {
+        return None;
+    }
+    let record = crate::extras::pack_species(species)?;
+    let borrowed = usize::from(record.model_form & 0x7FFF);
+    let fallback = if record.model_form & 0x8000 != 0 && (1..=table::SPECIES).contains(&borrowed) { borrowed } else { 1 };
+    Some((record.name, fallback))
+}
 
 /// The state of the cry card.
 #[derive(Default)]
@@ -43,6 +52,8 @@ pub struct CryTab {
     playing: Option<Arc<AtomicBool>>,
     /// The format of the export: false for an MP3 file (the default), true for a WAV file.
     wav: bool,
+    /// Asks the user for a sound file: None is the file window of the system (the tests give a file without it).
+    pick: Option<fn() -> Option<std::path::PathBuf>>,
 }
 
 /// Plays a sound in a thread of its own (the audio stream cannot move between threads). The flag stops it.
@@ -103,8 +114,13 @@ impl CryTab {
         Ok(())
     }
 
-    /// The kinds of cries that the game has for a species and a form: the first of each different file.
+    /// The kinds of cries that the game has for a species and a form: the first of each different file. A species of a pack has one
+    /// cry, for all its forms.
     fn kinds(species: usize, form: usize) -> Vec<(usize, Voice)> {
+        if new_species(species).is_some() {
+            let wave = sango_cry::FIRST_NEW_SPECIES_FILE + (species - usize::from(sango_pack::table::FIRST_SPECIES)) as u32;
+            return vec![(0, Voice { sequence: 0, wave })];
+        }
         let mut found: Vec<(usize, Voice)> = Vec::new();
         for kind in 0..KINDS.len() {
             if let Some(voice) = table::voice(species, form, kind) {
@@ -155,8 +171,15 @@ impl CryTab {
                     }
                 });
             }
+            let own = new_species(species);
             if self.shown.is_none() {
-                ui.label(widget::hint("No sound."));
+                match &own {
+                    Some((_, fallback)) => ui.label(widget::hint(&format!("No cry of its own yet: in the game it has the cry of {}.", sango_species_base::species_name(*fallback)))),
+                    None => ui.label(widget::hint("No sound.")),
+                };
+            }
+            if own.is_some() {
+                ui.label(widget::hint(&format!("One cry for the species and its forms, {} seconds at most.", sango_cry::MAX_SECONDS)));
             }
             ui.add_space(6.0);
             let busy = self.playing.as_ref().is_some_and(|flag| !flag.load(Ordering::Relaxed));
@@ -186,7 +209,11 @@ impl CryTab {
                     sango_ui::focus::combo_arrows(ui, &combo.response, &mut self.wav, &[true, false]);
                 });
                 if widget::button(ui, "Import") {
-                    if let Some(path) = rfd::FileDialog::new().set_title("Sound for the cry").add_filter("Sound", &["wav", "mp3"]).pick_file() {
+                    let path = match self.pick {
+                        Some(pick) => pick(),
+                        None => rfd::FileDialog::new().set_title("Sound for the cry").add_filter("Sound", &["wav", "mp3"]).pick_file(),
+                    };
+                    if let Some(path) = path {
                         self.status = Some(match self.import(&path, file) {
                             Ok(message) => (true, message),
                             Err(message) => (false, message),
@@ -197,6 +224,9 @@ impl CryTab {
                 ui.add_enabled_ui(changed, |ui| {
                     if widget::button(ui, "Reset") {
                         self.status = Some(self.reset(sd, file));
+                        if own.is_some() && self.status.as_ref().is_some_and(|(ok, _)| *ok) {
+                            self.status = Some((true, "The cry of this species is gone.".to_string()));
+                        }
                     }
                 });
             });
@@ -232,13 +262,14 @@ impl CryTab {
         let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
         let read = sound::read(&bytes)?;
         let made = sound::resample(&read, RATE);
-        if made.seconds() > MAX_SECONDS {
-            return Err(format!("This sound lasts {:.1} seconds: a cry must last {MAX_SECONDS} seconds at most.", made.seconds()));
-        }
         if made.samples.len() < 100 {
             return Err("This sound is too short.".into());
         }
-        self.pending.insert(file, archive::build_archive(&made));
+        let built = archive::build_archive(&made);
+        if built.len() > sango_cry::MAX_ARCHIVE_BYTES {
+            return Err(format!("This sound lasts {:.1} seconds: a cry must last {} seconds at most.", made.seconds(), sango_cry::MAX_SECONDS));
+        }
+        self.pending.insert(file, built);
         self.shown = None;
         Ok(format!("{} is the cry now ({:.2} seconds). Save to keep it.", path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(), made.seconds()))
     }
@@ -268,7 +299,7 @@ mod test {
         assert_eq!(kinds.len(), 1);
         assert_eq!(kinds[0].0, 0);
         assert!(CryTab::kinds(0, 0).is_empty());
-        // A species of a pack has no cry of its own yet.
+        // A number that no species of a pack has: no cry.
         assert!(CryTab::kinds(900, 0).is_empty());
     }
 
@@ -299,5 +330,69 @@ mod test {
         assert!(tab.reset(Some(&sd), 3776).0);
         assert!(sd.read(&cry_path(3776)).is_none());
         let _ = std::fs::remove_dir_all(&outer);
+    }
+
+    /// Draws a card in a new window (the focus is on its first button), then presses the keys one after the other.
+    fn press(keys: &[egui::Key], mut card: impl FnMut(&mut egui::Ui)) {
+        let ctx = egui::Context::default();
+        for key in [None, None].into_iter().chain(keys.iter().flat_map(|&key| [Some(key), None])) {
+            let mut input = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+            input.events.extend(key.map(|key| egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE }));
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    widget::set_page_focus(ctx, true);
+                    widget::update_navigation(ui);
+                    card(ui);
+                });
+            });
+        }
+    }
+
+    fn test_folder() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("sango_new_cry_{}", std::process::id()))
+    }
+
+    /// The file that the keys-only test imports, in place of the file window.
+    fn pick_tone() -> Option<std::path::PathBuf> {
+        Some(test_folder().join("tone.wav"))
+    }
+
+    /// A species made from nothing gets a cry and loses it, with the keys only. The file is the one that the plugin reads.
+    #[test]
+    fn a_new_species_gets_a_cry_with_the_keys() {
+        use sango_pack::table::SpeciesRecord;
+        let record = SpeciesRecord { id: 724, model_form: 0x8000 | 52, name: "Gecqua".into(), data: vec![1; 0x50], moves: Vec::new(), evolutions: Vec::new() };
+        let _table = crate::extras::set_for_test(sango_pack::Table { species: vec![record], forms: Vec::new() });
+        assert_eq!(new_species(724), Some(("Gecqua".to_string(), 52)), "without a cry, it has the cry of the model that it shows");
+        assert_eq!(CryTab::kinds(724, 1), vec![(0, Voice { sequence: 0, wave: 5000 })], "one cry for the species and its forms");
+        std::fs::create_dir_all(test_folder().join("sd")).unwrap();
+        let sd = SdCard::open(test_folder().join("sd").to_str().unwrap()).unwrap();
+        let session = Session { sd: Some(SdCard::open(test_folder().join("sd").to_str().unwrap()).unwrap()), ..Session::default() };
+        let tone = |seconds: f32| sound::write_wav(&Sound { rate: RATE, samples: (0..(seconds * RATE as f32) as usize).map(|i| ((i as f64 / RATE as f64 * 500.0 * std::f64::consts::TAU).sin() * 8000.0) as i16).collect() });
+
+        use egui::Key::{ArrowDown, Enter};
+        let mut tab = CryTab { pick: Some(pick_tone), ..CryTab::default() };
+        // A sound that the game cannot hold is refused.
+        std::fs::write(pick_tone().unwrap(), tone(2.5)).unwrap();
+        press(&[ArrowDown, ArrowDown, Enter], |ui| tab.ui(ui, &session, 724, 0));
+        assert!(!tab.changed() && tab.status.as_ref().is_some_and(|(ok, message)| !ok && message.contains("seconds")), "{:?}", tab.status);
+        // The longest sound that the card accepts fits in the memory of the game.
+        std::fs::write(pick_tone().unwrap(), tone(sango_cry::MAX_SECONDS)).unwrap();
+        press(&[ArrowDown, ArrowDown, Enter], |ui| tab.ui(ui, &session, 724, 0));
+        assert!(tab.changed(), "{:?}", tab.status);
+        tab.save(&sd).unwrap();
+        let written = sd.read(&cry_path(5000)).unwrap();
+        assert_eq!(&written[..4], b"CWAR", "not compressed, as the files of the game");
+        assert!(written.len() <= sango_cry::MAX_ARCHIVE_BYTES, "{} bytes", written.len());
+        archive::read_archive(&written).unwrap();
+        // The list that the plugin reads gives the file and its size.
+        let list = sd.read("species/cry/index.bin").unwrap();
+        let words: Vec<u32> = list.chunks_exact(4).map(|word| u32::from_le_bytes(word.try_into().unwrap())).collect();
+        assert_eq!(words, [1, 5000, written.len() as u32]);
+
+        // Reset: the button under Import.
+        press(&[ArrowDown, ArrowDown, ArrowDown, Enter], |ui| tab.ui(ui, &session, 724, 0));
+        assert!(sd.read(&cry_path(5000)).is_none(), "{:?}", tab.status);
+        let _ = std::fs::remove_dir_all(test_folder());
     }
 }

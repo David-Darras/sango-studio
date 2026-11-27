@@ -2,7 +2,7 @@
 //!
 //! The choreographies are the files of the archive 34 of the romfs. The page reads one, shows its steps as bars on a timeline (one row for each
 //! step, the frames from left to right), and edits the parameters of a step with the right widget for each one: a number, a switch, a
-//! menu of names. A file that the user changes goes on the SD card (`choreography/<number>.bin`, compressed as in the archive) and the plugin
+//! menu of names. A file that the user changes goes on the SD card (`choreography/<number>.bin`, not compressed, as in the archive: the game freezes on a compressed one) and the plugin
 //! reads it instead of the file of the game. See `move_choreography.rs` for the format and `schema.rs` for the meaning of the bytes.
 
 mod move_choreography;
@@ -149,7 +149,8 @@ impl Choreography {
         let Some(choreography) = self.choreography.as_mut() else { return };
         choreography.fit_header();
         let bytes = choreography.to_bytes();
-        let result = sd.write(&path(self.file), &sango_core::lz::compress_lz11(&bytes));
+        // The files of the game are not compressed, and the plugin gives the file of the card to the game as it is.
+        let result = sd.write(&path(self.file), &bytes);
         match result {
             Ok(_) => {
                 self.baseline = bytes;
@@ -549,6 +550,10 @@ mod test {
         page.save(session.sd.as_ref().unwrap());
         assert!(!page.dirty());
         assert!(session.sd.as_ref().unwrap().read("choreography/index.bin").is_some(), "the list of the files is written");
+        // The file of the card is stored as the one of the game: a compressed file freezes the game.
+        let saved = session.sd.as_ref().unwrap().read(&path(page.file)).expect("the file is on the SD card");
+        let game = page.garc.as_ref().unwrap().first_file(page.file).unwrap();
+        assert_eq!((&saved[..4], saved == page.baseline), (&game[..4], true));
         page.choreography = None;
         page.status = None;
         page.load(session.sd.as_ref());

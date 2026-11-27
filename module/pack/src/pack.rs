@@ -290,6 +290,10 @@ pub struct Pack {
     /// imported one, so that the original can come back.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kept_models: Vec<String>,
+    /// For each model that the user made for a species or a form that showed a model of the game (a new species, for example): the
+    /// name of the model, and the species of the game that gave the first model, so that it can come back.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub borrowed_models: std::collections::BTreeMap<String, u16>,
     /// The models of the species of the game that this pack replaces.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub replacements: Vec<ModelReplacement>,
@@ -470,6 +474,9 @@ impl Pack {
                 }
                 _ => {}
             }
+        }
+        if let Some(native) = self.borrowed_models.values().find(|native| !(1..=721).contains(*native)) {
+            return Err(format!("The model of the species {native} is not a model of the game."));
         }
         // A name may belong to a species of another pack: the installation looks for it. A number must be a species of the game.
         let known = |reference: &Ref| match reference {

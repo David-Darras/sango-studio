@@ -393,6 +393,12 @@ fn set_field(key: &str, d: &mut SpeciesData, value: u32) {
     }
 }
 
+/// The species of the game whose model a new species shows until it has its own: the open species, or Bulbasaur when the open one is
+/// not a species of the game.
+fn borrowed_model(open: usize) -> usize {
+    if open <= SPECIES_COUNT { open } else { 1 }
+}
+
 /// The name of a species and a form in the list ("Rotom-Heat").
 fn entry_name(species: usize, form: usize) -> String {
     sango_species_base::species_form_name(species, form)
@@ -1080,7 +1086,7 @@ impl Species {
             ui.add_space(6.0);
             if state.own {
                 let shown = if state.name.trim().is_empty() { "(name)".to_string() } else { state.name.trim().to_string() };
-                ui.label(widget::hint(&format!("In the lists: {shown}, with the next free number (724 and more). It has no evolution and no move at first. It shows the model of {} until you import its own (Model tab); give it its icon in the General tab.", species_name(self.species))));
+                ui.label(widget::hint(&format!("In the lists: {shown}, with the next free number (724 and more). It has no evolution and no move at first. It shows the model of {} until you import its own (Model tab). Give it its icon and its cry in the General tab.", species_name(borrowed_model(self.species)))));
             } else {
                 let shown_name = if state.name.trim().is_empty() { "Form".to_string() } else { state.name.trim().replace(' ', "-") };
                 ui.label(widget::hint(&format!("In the lists: {}-{shown_name}. Then give it its icon (General tab) and its model (Model tab).", species_name(state.species))));
@@ -1110,7 +1116,7 @@ impl Species {
             data.total_form_count = 1;
             data.alternate_form_file = 0;
             data.alternate_form_model = 0;
-            let native_model = if self.species <= SPECIES_COUNT { self.species as u16 } else { 1 };
+            let native_model = borrowed_model(self.species) as u16;
             let result = sango_pack::Library::open(sd).and_then(|mut library| {
                 let number = library.add_species(sd, &state.name, &data.to_bytes(), native_model)?;
                 library.save(sd)?;
@@ -1158,12 +1164,16 @@ impl Species {
         let name = species_name(self.species);
         let result = sango_pack::Library::open(sd).and_then(|mut library| {
             library.remove_species(sd, &name)?;
-            library.save(sd)
+            library.save(sd)?;
+            library.write_species_icon(sd, &name)
         });
         match result {
             Ok(()) => {
                 for form in 0..self.total_form_count() {
                     let _ = sd.remove(&sd_path(self.species, form));
+                }
+                if let Some(first) = self.species.checked_sub(usize::from(sango_pack::table::FIRST_SPECIES)) {
+                    let _ = sd.remove(&cry_tab::cry_path(sango_cry::FIRST_NEW_SPECIES_FILE + first as u32));
                 }
                 extras::invalidate();
                 extras::refresh(Some(sd));
@@ -2332,7 +2342,10 @@ impl Module for Species {
         let packs_changed = extras::refresh(session.sd.as_ref());
         if packs_changed {
             self.list_rows = None;
-            self.loaded = None;
+            // The open species is read again, unless its changes would be lost (an import of a model changes the table too).
+            if !self.loses_changes() {
+                self.loaded = None;
+            }
         }
         let models_folder = session.sd.as_ref().map(|sd| sd.models_folder());
         self.model_tab.set_sd_folder(models_folder, packs_changed);
@@ -2750,6 +2763,18 @@ mod test {
             frame(&mut page, &mut session);
             frame(&mut page, &mut session);
         }
+        // The table changes (an import of a model, for example): the changes that are not saved stay.
+        page.tab = 0;
+        page.loaded = None;
+        frame(&mut page, &mut session);
+        page.data.as_mut().unwrap().base_hp = 77;
+        let changed = sango_pack::Table { species: vec![SpeciesRecord { id: 724, model_form: 3, name: "Rowlet".into(), data: vec![2; 0x50], moves: Vec::new(), evolutions: Vec::new() }], forms: Vec::new() };
+        session.sd.as_ref().unwrap().write("species/table.bin", &changed.to_bytes().unwrap()).unwrap();
+        extras::invalidate();
+        frame(&mut page, &mut session);
+        frame(&mut page, &mut session);
+        assert_eq!(extras::model_form(724, 0), Some(3), "the new table is read");
+        assert_eq!(page.data.as_ref().map(|d| d.base_hp), Some(77), "the change is not lost");
         let _ = std::fs::remove_dir_all(&folder);
     }
 

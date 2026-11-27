@@ -78,6 +78,21 @@ fn path(kind: usize, index: usize) -> String {
     format!("script/{}/{index}.bin", KINDS[kind].1)
 }
 
+/// True for the bytes of a script.
+fn is_script(bytes: &[u8]) -> bool {
+    bytes.len() > 8 && u16::from_le_bytes([bytes[4], bytes[5]]) == amx::MAGIC
+}
+
+/// The script of a file. The files of the game are not compressed; the older versions of the studio wrote compressed files on
+/// the SD card. A script can start with the byte of a compressed file, so the script is looked for first.
+fn plain(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if is_script(&bytes) || !sango_core::lz::is_compressed(&bytes) {
+        Some(bytes)
+    } else {
+        sango_core::lz::decompress(&bytes).ok()
+    }
+}
+
 /// The name that a group of native functions has in the page.
 fn group_name(group: &str) -> &str {
     match group {
@@ -160,8 +175,7 @@ impl ScriptPage {
         for (kind, (_, _, group)) in KINDS.iter().enumerate().skip(1) {
             let Some(garc) = self.garcs[kind].as_ref() else { continue };
             for index in 0..garc.file_count() {
-                let is_script = garc.first_file_decompressed(index).is_some_and(|b| b.len() > 8 && u16::from_le_bytes([b[4], b[5]]) == amx::MAGIC);
-                if is_script {
+                if garc.first_file(index).and_then(|b| plain(b.to_vec())).is_some_and(|b| is_script(&b)) {
                     self.items.push(Item { kind, index, label: format!("{group} {}", index + 1), group });
                 }
             }
@@ -176,7 +190,7 @@ impl ScriptPage {
     fn load(&mut self, sd: Option<&SdCard>) {
         let Some(item) = self.items.get(self.chosen) else { return };
         let (kind, index) = (item.kind, item.index);
-        let bytes = sd.and_then(|sd| sd.read(&path(kind, index))).map(|b| if sango_core::lz::is_compressed(&b) { sango_core::lz::decompress(&b).unwrap_or_default() } else { b }).or_else(|| self.garcs[kind].as_ref().and_then(|g| g.first_file_decompressed(index)));
+        let bytes = sd.and_then(|sd| sd.read(&path(kind, index))).or_else(|| self.garcs[kind].as_ref().and_then(|g| g.first_file(index)).map(<[u8]>::to_vec)).and_then(plain);
         let names = &self.names;
         match bytes.map(|b| Amx::parse(&b)) {
             // The assembly has the names of the Pawn-like text: the functions and the variables.
@@ -225,7 +239,8 @@ impl ScriptPage {
         let (kind, index) = (item.kind, item.index);
         let Some(amx) = self.check() else { return };
         let bytes = amx.to_bytes();
-        match sd.write(&path(kind, index), &sango_core::lz::compress_lz11(&bytes)) {
+        // The files of the game are not compressed, and the plugin gives the file of the card to the game as it is.
+        match sd.write(&path(kind, index), &bytes) {
             Ok(_) => {
                 self.baseline = self.text.clone();
                 self.status = Some((true, format!("Saved ({} bytes). Restart the game to run the script.", bytes.len())));
@@ -455,7 +470,7 @@ impl ScriptPage {
                 for row in rows {
                     let (line, at) = &self.pawn[row];
                     let chosen = range.is_some_and(|(first, _)| *at == Some(first));
-                    let response = ui.add(egui::Label::new(highlight::job(line, Mode::Pawn, dark, plain, &font)).sense(egui::Sense::click()));
+                    let response = ui.add(egui::Label::new(pawn_line(ui, line, dark, plain, &font)).sense(egui::Sense::click()));
                     if chosen {
                         let rect = egui::Rect::from_min_max(egui::pos2(ui.min_rect().left(), response.rect.top()), egui::pos2(ui.max_rect().right(), response.rect.bottom()));
                         ui.painter().rect_filled(rect, 2.0, mark);
@@ -610,11 +625,46 @@ impl Module for ScriptPage {
     }
 }
 
+/// One line of the Pawn-like text, laid out here: a label of a column that fills its width would remove the spaces at the start of the line.
+fn pawn_line(ui: &egui::Ui, line: &str, dark: bool, plain: egui::Color32, font: &egui::FontId) -> std::sync::Arc<egui::Galley> {
+    let mut job = highlight::job(line, Mode::Pawn, dark, plain, font);
+    job.wrap.max_width = f32::INFINITY;
+    ui.fonts(|f| f.layout_job(job))
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     /// With the dump: a script file opens, a line is added to its text, the file is built and saved, read back, and reset.
+    #[test]
+    fn the_lines_of_the_pawn_text_keep_their_indentation() {
+        let ctx = egui::Context::default();
+        let output = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.columns(2, |columns| {
+                    let ui = &mut columns[1];
+                    let font = egui::TextStyle::Monospace.resolve(ui.style());
+                    for line in ["a;", "        b;"] {
+                        let galley = pawn_line(ui, line, true, egui::Color32::WHITE, &font);
+                        ui.add(egui::Label::new(galley).sense(egui::Sense::click()));
+                    }
+                });
+            });
+        });
+        // Where the first letter of each line is on the screen.
+        let places: Vec<f32> = output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shape) => shape.galley.rows[0].glyphs.iter().find(|g| !g.chr.is_whitespace()).map(|g| shape.pos.x + g.pos.x),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(places.len(), 2);
+        assert!(places[1] - places[0] > 20.0, "{places:?}");
+    }
+
     #[test]
     fn a_script_is_changed_built_saved_and_reset() {
         let Ok(root) = std::env::var("SANGO_DUMP") else { return };
@@ -663,7 +713,8 @@ mod test {
         assert!(!page.dirty(), "{:?}", page.status);
         let index = page.items[page.chosen].index;
         let saved = session.sd.as_ref().unwrap().read(&path(0, index)).expect("the file is on the SD card");
-        assert!(sango_core::lz::decompress(&saved).unwrap().len() > original);
+        // The file of the card is a script that is not compressed, as the one of the game.
+        assert!(is_script(&saved) && saved.len() > original);
         assert!(session.sd.as_ref().unwrap().read("script/field/index.bin").is_some(), "the list of the files is written");
         page.reset(session.sd.as_ref().unwrap());
         assert!(!page.dirty());
