@@ -11,12 +11,26 @@ const EMITTER_SIGNATURE: &[u8; 4] = b"PEMT";
 const SET_SIGNATURE: &[u8; 4] = b"CNOD";
 /// The signature of a material, at the byte 4 of the object.
 const MATERIAL_SIGNATURE: &[u8; 4] = b"MTOB";
-// The places in a material (the blend function, the first texture coordinates and the first texture mapper).
+// The places in a material (its colours, the blend function, the first texture coordinates, the first texture mapper and
+// the steps that mix the colours).
+const MATERIAL_COLOR_NUMBERS: usize = 0x74;
+const MATERIAL_CONSTANTS: usize = 0xE8;
 const MATERIAL_BLEND: usize = 0x148;
 const MATERIAL_COORDINATES: usize = 0x16C;
 const MATERIAL_MAPPERS: usize = 0x274;
-/// The place of the shape builder in a set.
+const MATERIAL_MIX: usize = 0x288;
+/// In the steps of a material: the six steps (the number of their colour, then 6 words of commands each), the test of the
+/// opacity and the commands of the saved colour.
+const MIX_STEPS: usize = 0x2C;
+const MIX_ALPHA_TEST: usize = 0xD4;
+const MIX_BUFFER: usize = 0xDC;
+/// A texture that only names another one of the file: the place of the name.
+const REFERENCE_NAME: usize = 0x18;
+// The places in a set of the shape builder, of the order of drawing and of the inheritance of the speed.
 const SET_BUILDER: usize = 0x44;
+const SET_SHAPE_INDEX: usize = 0x48;
+const SET_PRIORITY: usize = 0x4C;
+const SET_INHERIT_SPEED: usize = 0x52;
 /// The least bytes of an emitter and of a set.
 const EMITTER_SIZE: usize = 0xE0;
 const SET_SIZE: usize = 0x60;
@@ -54,7 +68,11 @@ const TARGET_SIZE_EXTRA: u32 = 8;
 const TARGET_LIFE: u32 = 11;
 
 const COLOR_INITIALIZER: u32 = 0x0400_0000;
-/// The place of the position of an emitter, in the object of the emitter.
+const OPACITY_INITIALIZER: u32 = 0x0200_0000;
+const SIZE_INITIALIZER: u32 = 0x0020_0000;
+// The places of the scale, the turn and the position of an emitter, in the object of the emitter.
+const EMITTER_SCALE: usize = 0x30;
+const EMITTER_ROTATION: usize = 0x3C;
 const EMITTER_POSITION: usize = 0x48;
 const LIFE_INITIALIZER: u32 = 0x0100_0000;
 const FIXED_VECTOR: u32 = 0x0080_0001;
@@ -258,6 +276,11 @@ pub enum Updater {
     SetVector2 { value: [f32; 2], animation: Option<Animation> },
     /// The picture is cut in a grid and the particle shows one cell, the number of which can follow a curve (the pictures of a flame or a bolt).
     TexturePattern { divisions: [u32; 2], index: i32, animation: Option<Animation> },
+    /// The particle makes particles of another set: the set (a place in the sets), the shape where they appear (the place
+    /// of its values in the file), when, and how many each time.
+    Child { group: Option<usize>, shape: Option<usize>, timing: ChildTiming, count: i32 },
+    /// The particle turns its up side along its speed, or along its last move.
+    TurnToMove { along_speed: bool },
     /// A rule that the preview does not know, with its type.
     Other(u32),
 }
@@ -266,6 +289,19 @@ pub enum Updater {
 pub struct UpdRule {
     pub target: i32,
     pub rule: Updater,
+}
+
+/// When a particle makes its child particles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ChildTiming {
+    /// At its birth.
+    Birth,
+    /// At its death.
+    Death,
+    /// Every `interval` frames, between two parts of its life (0 to 1).
+    LifeParts { start: f32, end: f32, interval: i32 },
+    /// Every `interval` frames, between two frames of its life.
+    Frames { start: i32, end: i32, interval: i32 },
 }
 
 /// How the frame of an animation comes from the life of a particle.
@@ -308,16 +344,19 @@ pub enum Builder {
     Plane,
 }
 
-/// The material of a layer: how its particles are mixed with the picture behind them, the picture, and the coordinates of the picture.
+/// The material of a set of particles: the steps that mix the picture with the colour of a particle, the way that the
+/// result goes over what is behind, and the picture.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Material {
-    /// True when the colour of the particle is added to what is behind it (else the transparency of the picture lets the back show).
-    pub additive: bool,
-    pub scale: [f32; 2],
-    pub rotate: f32,
-    pub translate: [f32; 2],
-    /// The way that the matrix of the coordinates is made: 0 and 1 are the same, 2 turns around the middle of the picture.
-    pub mode: u32,
+    /// The six steps of the mix, with the colours of the material in them.
+    pub stages: Vec<sango_core::model::Stage>,
+    /// The colour that the steps can save.
+    pub buffer_color: [u8; 4],
+    /// The blend and the test of the opacity.
+    pub state: sango_core::model::RenderState,
+    /// The first two rows of the matrix of the coordinates of the picture: (u, v) of the particle to the ones of the
+    /// picture, with the V axis going up.
+    pub matrix: [[f32; 3]; 2],
     /// What happens outside of the picture, on each axis: 0 the edge goes on, 1 nothing, 2 the picture repeats, 3 it repeats turned over.
     pub wrap: [u32; 2],
     /// The picture, as a place in `Effect::pictures()`.
@@ -471,10 +510,18 @@ impl Effect {
         self.text_at(self.emitters[layer] + SET_PATH)
     }
 
-    /// The set of particles of a layer (the place in the file), when it has one.
-    fn set_of(&self, layer: usize) -> Option<usize> {
-        let wanted = self.set_name(layer);
-        self.sets.iter().copied().find(|&set| self.text_at(set + SET_NAME) == wanted)
+    /// The number of sets of particles. A set can have no layer: the particles of another set make it.
+    pub fn group_count(&self) -> usize {
+        self.sets.len()
+    }
+
+    /// The set of particles that a layer makes.
+    pub fn group_of(&self, layer: usize) -> Option<usize> {
+        self.group_named(&self.set_name(layer))
+    }
+
+    fn group_named(&self, name: &str) -> Option<usize> {
+        self.sets.iter().position(|&set| self.text_at(set + SET_NAME) == name)
     }
 
     pub fn emission(&self, layer: usize) -> Emission {
@@ -500,12 +547,22 @@ impl Effect {
 
     /// The kind of the shape of a layer.
     pub fn form_kind(&self, layer: usize) -> Option<FormKind> {
-        FormKind::from_word(self.u32_at(self.form_at(layer)?))
+        self.shape_kind(self.form_at(layer)?)
+    }
+
+    /// The kind of the shape whose values are at a place.
+    pub fn shape_kind(&self, at: usize) -> Option<FormKind> {
+        (at + 0x30 <= self.data.len()).then(|| FormKind::from_word(self.u32_at(at))).flatten()
     }
 
     /// The numbers of the shape: for each field of [`form_fields`], its values (one, two or three numbers; a switch is 0 or 1).
     pub fn form_values(&self, layer: usize) -> Vec<(FormField, [f32; 3])> {
-        let (Some(at), Some(kind)) = (self.form_at(layer), self.form_kind(layer)) else { return Vec::new() };
+        self.form_at(layer).map_or_else(Vec::new, |at| self.shape_values(at))
+    }
+
+    /// The numbers of the shape whose values are at a place.
+    pub fn shape_values(&self, at: usize) -> Vec<(FormField, [f32; 3])> {
+        let Some(kind) = self.shape_kind(at) else { return Vec::new() };
         form_fields(kind)
             .into_iter()
             .map(|field| {
@@ -535,9 +592,9 @@ impl Effect {
         }
     }
 
-    /// The initializers and the updaters of the set of a layer, with their place.
-    fn rules(&self, layer: usize) -> (Vec<usize>, Vec<usize>) {
-        let Some(set) = self.set_of(layer) else { return (Vec::new(), Vec::new()) };
+    /// The places of the initializers and of the updaters of a set.
+    fn group_rules(&self, group: usize) -> (Vec<usize>, Vec<usize>) {
+        let set = self.sets[group];
         let table = |count_at: usize, table_at: usize| -> Vec<usize> {
             let count = self.u32_at(set + count_at) as usize;
             let Some(base) = rel_at(&self.data, set + table_at) else { return Vec::new() };
@@ -556,15 +613,10 @@ impl Effect {
         (0..3).for_each(|k| self.put_f32(at + 4 * k, value[k]));
     }
 
-    /// The updater of a target (the colour, the transparency, the size).
-    fn updater(&self, layer: usize, target: u32) -> Option<usize> {
-        self.rules(layer).1.into_iter().find(|&at| at + 84 <= self.data.len() && self.u32_at(at + OBJECT_TARGET) == target)
-    }
-
     /// How the game draws the particles of a layer.
-    pub fn builder(&self, layer: usize) -> Builder {
-        let Some(set) = self.set_of(layer) else { return Builder::Billboard };
-        match rel_at(&self.data, set + SET_BUILDER).map(|at| self.u32_at(at)) {
+    /// How the particles of a set are drawn.
+    pub fn group_builder(&self, group: usize) -> Builder {
+        match rel_at(&self.data, self.sets[group] + SET_BUILDER).map(|at| self.u32_at(at)) {
             Some(0x4000_0000) => Builder::WorldBillboard,
             Some(0x2000_0000) => Builder::UpBillboard,
             Some(0x1000_0000) => Builder::Plane,
@@ -572,27 +624,81 @@ impl Effect {
         }
     }
 
-    /// The material of a layer: the material that has the name of its set plus `Material`, else the one that starts with the name of its set.
-    pub fn material(&self, layer: usize) -> Option<Material> {
-        let set = self.set_name(layer);
-        let wanted = format!("{set}Material");
-        let at = self.materials.iter().copied().find(|&m| self.text_at(m + NAME) == wanted).or_else(|| self.materials.iter().copied().find(|&m| !set.is_empty() && self.text_at(m + NAME).starts_with(&set)))?;
+    /// The place of the particle in its picture: the picture moves by this much, in halves of its sides.
+    pub fn group_offset(&self, group: usize) -> [f32; 3] {
+        rel_at(&self.data, self.sets[group] + SET_BUILDER).map_or([0.0; 3], |at| self.vector_at(at + 8))
+    }
+
+    /// True when the newest particles of a set are drawn over the older ones.
+    pub fn group_oldest_first(&self, group: usize) -> bool {
+        rel_at(&self.data, self.sets[group] + SET_BUILDER).is_none_or(|at| self.data.get(at + 4).is_none_or(|&b| b != 0))
+    }
+
+    /// The order of a set among the others when they are drawn: its priority, then its place in the model.
+    pub fn group_order(&self, group: usize) -> (u32, u32) {
+        (self.u32_at(self.sets[group] + SET_PRIORITY), self.u32_at(self.sets[group] + SET_SHAPE_INDEX))
+    }
+
+    /// True when a particle that another one makes starts with the speed of that one too.
+    pub fn group_inherits_speed(&self, group: usize) -> bool {
+        self.data.get(self.sets[group] + SET_INHERIT_SPEED).is_some_and(|&b| b != 0)
+    }
+
+    /// The place of the material of a set: the one that has the name of the set.
+    fn material_at(&self, group: usize) -> Option<usize> {
+        let wanted = format!("{}Material", self.group_name(group));
+        self.materials.iter().copied().find(|&m| m + MATERIAL_MIX + 4 <= self.data.len() && self.text_at(m + NAME) == wanted)
+    }
+
+    /// The material of a set of particles.
+    pub fn group_material(&self, group: usize) -> Option<Material> {
+        let at = self.material_at(group)?;
+        let mix = rel_at(&self.data, at + MATERIAL_MIX).filter(|&mix| mix + MIX_BUFFER + 24 <= self.data.len())?;
+        // The commands of the six steps and of the saved colour, as the graphics chip receives them.
+        let words: Vec<u32> = (0..6).flat_map(|step| (0..6).map(move |k| mix + MIX_STEPS + 28 * step + 4 + 4 * k)).chain((0..6).map(|k| mix + MIX_BUFFER + 4 * k)).map(|place| self.u32_at(place)).collect();
+        let (mut stages, buffer_color) = sango_core::model::combiner_of(&words);
+        // The game gives each step one of the colours of the material, not the one of its commands.
+        for (step, stage) in stages.iter_mut().enumerate() {
+            let colour = self.u32_at(mix + MIX_STEPS + 28 * step) as usize;
+            if colour < 6 {
+                stage.constant = self.u32_at(at + MATERIAL_CONSTANTS + 4 * colour).to_le_bytes();
+            }
+        }
         let function = self.u32_at(at + MATERIAL_BLEND);
-        let (source, destination) = ((function >> 16) & 15, (function >> 20) & 15);
-        let coordinates = at + MATERIAL_COORDINATES;
+        let factor = |shift: u32| ((function >> shift) & 15) as u8;
+        let test = self.u32_at(mix + MIX_ALPHA_TEST);
+        let state = sango_core::model::RenderState {
+            known: true,
+            blend: true,
+            color_source: factor(16),
+            color_destination: factor(20),
+            alpha_source: factor(24),
+            alpha_destination: factor(28),
+            alpha_test: (test & 1 != 0).then_some((((test >> 4) & 7) as u8, ((test >> 8) & 0xff) as u8)),
+            depth_write: false,
+            ..Default::default()
+        };
+        // The matrix of the coordinates is stored after their numbers: three rows of four numbers.
+        let matrix = at + MATERIAL_COORDINATES + 40;
+        let row = |k: usize| [self.number_at(matrix + 16 * k), self.number_at(matrix + 16 * k + 4), self.number_at(matrix + 16 * k + 12)];
         let mapper = rel_at(&self.data, at + MATERIAL_MAPPERS);
         let texture = mapper.and_then(|mapper| rel_at(&self.data, mapper + 8));
-        let texture_setting = mapper.map(|mapper| self.u32_at(mapper + 36));
+        let setting = mapper.map(|mapper| self.u32_at(mapper + 36));
+        // The mapper names the picture itself, or a texture that names it.
+        let picture = texture.and_then(|object| {
+            self.pictures.iter().position(|p| p.object == object).or_else(|| {
+                let name = self.text_at(object + REFERENCE_NAME);
+                self.pictures.iter().position(|p| p.name == name)
+            })
+        });
         Some(Material {
-            // The destination factor is "one" for a light that is added.
-            additive: destination == 1 && source != 0,
-            scale: [self.number_at(coordinates + 16), self.number_at(coordinates + 20)],
-            rotate: self.number_at(coordinates + 24),
-            translate: [self.number_at(coordinates + 28), self.number_at(coordinates + 32)],
+            stages,
+            buffer_color,
+            state,
+            matrix: [row(0), row(1)],
             // The setting of the texture unit: the way of the axis S is in the bits 12 to 15, the one of T in the bits 8 to 11.
-            mode: self.u32_at(coordinates + 12),
-            wrap: texture_setting.map_or([2, 2], |w| [(w >> 12) & 15, (w >> 8) & 15]),
-            picture: texture.and_then(|object| self.pictures.iter().position(|p| p.object == object)),
+            wrap: setting.map_or([2, 2], |w| [(w >> 12) & 15, (w >> 8) & 15]),
+            picture,
         })
     }
 
@@ -624,9 +730,9 @@ impl Effect {
         Some(Animation { length, stride, enabled: self.data[enabled_at..enabled_at + enabled_count].iter().map(|&b| b != 0).collect(), data: (0..data_count).map(|k| self.f32_at(data_at + 4 * k)).collect(), kind, duration })
     }
 
-    /// The constant values of the streams of a layer (the parameters of its collection): the stream and its numbers.
-    pub fn parameters(&self, layer: usize) -> Vec<(i32, Vec<f32>)> {
-        let Some(set) = self.set_of(layer) else { return Vec::new() };
+    /// The constant values of the streams of a set: the stream and its numbers.
+    pub fn group_parameters(&self, group: usize) -> Vec<(i32, Vec<f32>)> {
+        let set = self.sets[group];
         let Some(collection) = rel_at(&self.data, set + COLLECTION) else { return Vec::new() };
         let count = self.u32_at(collection + 4) as usize;
         let Some(table) = rel_at(&self.data, collection + 8) else { return Vec::new() };
@@ -652,6 +758,11 @@ impl Effect {
         self.vec3_at(self.emitters[layer] + EMITTER_POSITION)
     }
 
+    /// The scale and the turn (around x, then y, then z, in radians) of the emitter of a layer.
+    pub fn emitter_scale_and_turn(&self, layer: usize) -> ([f32; 3], [f32; 3]) {
+        (self.vec3_at(self.emitters[layer] + EMITTER_SCALE), self.vec3_at(self.emitters[layer] + EMITTER_ROTATION))
+    }
+
     /// A number of a rule, or 0 when the file stops before it.
     fn number_at(&self, at: usize) -> f32 {
         if at + 4 <= self.data.len() {
@@ -665,13 +776,20 @@ impl Effect {
         [self.number_at(at), self.number_at(at + 4), self.number_at(at + 8)]
     }
 
+    #[cfg(test)]
     /// The initializers of a layer, in the order of the file: the rules that give their first value to the streams of a new particle
     /// (the speed, the size, the turn, the colour, the transparency, the life). The types and the fields are the ones of the particle
     /// system of the game.
     pub fn initializers(&self, layer: usize) -> Vec<InitRule> {
-        self.rules(layer)
+        self.group_of(layer).map_or_else(Vec::new, |group| self.group_initializers(group))
+    }
+
+    /// The rules that give a new particle of a set its first values, in their order. The ones that are off are left out.
+    pub fn group_initializers(&self, group: usize) -> Vec<InitRule> {
+        self.group_rules(group)
             .0
             .into_iter()
+            .filter(|&at| self.data[at + 5] != 0)
             .filter_map(|at| {
                 let target = self.u32_at(at + OBJECT_TARGET) as i32;
                 let (v, f) = (|k: usize| self.vector_at(at + 12 + 4 * k), |k: usize| self.number_at(at + 12 + 4 * k));
@@ -696,11 +814,12 @@ impl Effect {
             .collect()
     }
 
-    /// The updaters of a layer, in the order of the file: the rules that change the streams of a particle at each frame.
-    pub fn updaters(&self, layer: usize) -> Vec<UpdRule> {
-        self.rules(layer)
+    /// The rules that change the particles of a set at each frame, in their order. The ones that are off are left out.
+    pub fn group_updaters(&self, group: usize) -> Vec<UpdRule> {
+        self.group_rules(group)
             .1
             .into_iter()
+            .filter(|&at| self.data[at + 5] != 0)
             .filter_map(|at| {
                 let target = self.u32_at(at + OBJECT_TARGET) as i32;
                 let kind = self.u32_at(at + OBJECT_TYPE);
@@ -723,6 +842,18 @@ impl Effect {
                     0x0020_0000 => Updater::NumberKeys { in_time: word(0), out_time: word(1), values: [word(2) as i32, word(3) as i32, word(4) as i32, word(5) as i32, word(6) as i32] },
                     0x0010_0000 => Updater::VectorKeys { in_time: word(0), out_time: word(1), values: [v(2), v(5), v(8), v(11), v(14)] },
                     0x0004_0000 => Updater::TexturePattern { divisions: [word(0).max(1), word(1).max(1)], index: word(2) as i32, animation: self.animation_at(at) },
+                    0x0008_0000 => Updater::TurnToMove { along_speed: word(0) == 0 },
+                    0x0400_0000 => {
+                        // The name of the set, the shape, the moment and the number.
+                        let group = self.group_named(&self.text_at(at + 16));
+                        let timing = rel_at(&self.data, at + 24).filter(|&t| t + 16 <= self.data.len()).map_or(ChildTiming::Birth, |t| match self.u32_at(t) {
+                            0x4000_0000 => ChildTiming::Death,
+                            0x2000_0000 => ChildTiming::LifeParts { start: self.f32_at(t + 4), end: self.f32_at(t + 8), interval: self.u32_at(t + 12) as i32 },
+                            0x1000_0000 => ChildTiming::Frames { start: self.u32_at(t + 4) as i32, end: self.u32_at(t + 8) as i32, interval: self.u32_at(t + 12) as i32 },
+                            _ => ChildTiming::Birth,
+                        });
+                        Updater::Child { group, shape: rel_at(&self.data, at + 20), timing, count: word(3) as i32 }
+                    }
                     other => Updater::Other(other),
                 };
                 Some(UpdRule { target, rule })
@@ -730,14 +861,73 @@ impl Effect {
             .collect()
     }
 
-    /// The colour of the particles of a layer, as it changes with their life.
-    pub fn color(&self, layer: usize) -> Option<ColorCurve> {
-        if let Some(at) = self.updater(layer, TARGET_COLOR) {
-            return match self.u32_at(at + OBJECT_TYPE) {
-                FIXED_VECTOR => {
-                    let value = self.vec3_at(at + 16);
-                    Some(ColorCurve { fixed: true, start: value, middle: value, end: value, in_time: 0.0, out_time: 1.0 })
+    /// The name of a set of particles.
+    pub fn group_name(&self, group: usize) -> String {
+        self.text_at(self.sets[group] + SET_NAME)
+    }
+
+    /// The sets of the particles that the ones of a set make, and the ones that those make, each once.
+    pub fn child_groups(&self, group: usize) -> Vec<usize> {
+        let mut found = Vec::new();
+        let mut to_see = vec![group];
+        while let Some(from) = to_see.pop() {
+            for rule in self.group_updaters(from) {
+                if let Updater::Child { group: Some(child), .. } = rule.rule {
+                    if child != group && !found.contains(&child) {
+                        found.push(child);
+                        to_see.push(child);
+                    }
                 }
+            }
+        }
+        found.sort_unstable();
+        found
+    }
+
+    /// The place of the numbers of the constant value of a stream of a set, and how many they are.
+    fn parameter_at(&self, group: usize, target: u32) -> Option<(usize, usize)> {
+        let collection = rel_at(&self.data, self.sets[group] + COLLECTION)?;
+        let count = self.u32_at(collection + 4) as usize;
+        let table = rel_at(&self.data, collection + 8).filter(|_| count <= 32)?;
+        (0..count).filter_map(|k| rel_at(&self.data, table + 4 * k)).find_map(|attribute| {
+            // A parameter has the type 0x40000000: the stream, the dimension, then the numbers.
+            if self.u32_at(attribute) != 0x4000_0000 || self.u32_at(attribute + 4) != target {
+                return None;
+            }
+            let numbers = self.u32_at(attribute + 12) as usize;
+            let at = rel_at(&self.data, attribute + 16)?;
+            (numbers >= 1 && numbers <= 16 && at + 4 * numbers <= self.data.len()).then_some((at, numbers))
+        })
+    }
+
+    /// The first updater of a set that changes a stream, and true when it follows a curve of the file.
+    fn updater(&self, group: usize, target: u32) -> Option<(usize, bool)> {
+        let at = self.group_rules(group).1.into_iter().find(|&at| at + 84 <= self.data.len() && self.data[at + 5] != 0 && self.u32_at(at + OBJECT_TARGET) == target)?;
+        let kind = self.u32_at(at + OBJECT_TYPE);
+        let curve = matches!(kind, FIXED_VECTOR | FIXED_NUMBER) && self.animation_at(at).is_some();
+        Some((at, curve))
+    }
+
+    /// The first initializer of a kind that gives a stream its first value.
+    fn initializer(&self, group: usize, target: u32, kind: u32) -> Option<usize> {
+        self.group_rules(group).0.into_iter().find(|&at| at + 28 <= self.data.len() && self.data[at + 5] != 0 && self.u32_at(at + OBJECT_TARGET) == target && self.u32_at(at + OBJECT_TYPE) == kind)
+    }
+
+    /// The place of the three numbers that give a stream of a set when no rule changes it: the ones of an initializer, else
+    /// the constant value of the set.
+    fn constant_vector(&self, group: usize, target: u32, kind: u32) -> Option<usize> {
+        self.initializer(group, target, kind).map(|at| at + 12).or_else(|| {
+            let (at, numbers) = self.parameter_at(group, target)?;
+            (numbers >= 3).then_some(at)
+        })
+    }
+
+    /// A stream of three numbers during the life of the particles: the curve of an updater, else the constant value.
+    fn vector_curve(&self, group: usize, target: u32, kind: u32) -> Option<ColorCurve> {
+        let fixed = |value: [f32; 3]| ColorCurve { fixed: true, start: value, middle: value, end: value, in_time: 0.0, out_time: 1.0 };
+        if let Some((at, curve)) = self.updater(group, target) {
+            return match self.u32_at(at + OBJECT_TYPE) {
+                FIXED_VECTOR if !curve => Some(fixed(self.vec3_at(at + 16))),
                 KEYED_VECTOR => {
                     let (slope, offset) = (self.vec3_at(at + 60), self.vec3_at(at + 72));
                     Some(ColorCurve { fixed: false, start: self.vec3_at(at + 24), middle: self.vec3_at(at + 36), end: [offset[0] + slope[0], offset[1] + slope[1], offset[2] + slope[2]], in_time: self.u32_at(at + 16) as f32 / TIME_SCALE, out_time: self.u32_at(at + 20) as f32 / TIME_SCALE })
@@ -745,21 +935,62 @@ impl Effect {
                 _ => None,
             };
         }
-        let initializer = self.rules(layer).0.into_iter().find(|&at| self.u32_at(at + OBJECT_TARGET) == TARGET_COLOR && self.u32_at(at + OBJECT_TYPE) == COLOR_INITIALIZER)?;
-        let value = self.vec3_at(initializer + 12);
-        Some(ColorCurve { fixed: true, start: value, middle: value, end: value, in_time: 0.0, out_time: 1.0 })
+        self.constant_vector(group, target, kind).map(|at| fixed(self.vec3_at(at)))
     }
 
-    /// Writes the colour of the particles of a layer.
-    pub fn set_color(&mut self, layer: usize, color: &ColorCurve) {
-        if let Some(at) = self.updater(layer, TARGET_COLOR) {
+    fn set_vector_curve(&mut self, group: usize, target: u32, kind: u32, curve: &ColorCurve) {
+        if let Some((at, animated)) = self.updater(group, target) {
             match self.u32_at(at + OBJECT_TYPE) {
-                FIXED_VECTOR => self.put_vec3(at + 16, color.middle),
-                KEYED_VECTOR => self.write_vector_curve(at, color.start, color.middle, color.end, color.in_time, color.out_time),
+                FIXED_VECTOR if !animated => self.put_vec3(at + 16, curve.middle),
+                KEYED_VECTOR => self.write_vector_curve(at, curve.start, curve.middle, curve.end, curve.in_time, curve.out_time),
                 _ => {}
             }
-        } else if let Some(initializer) = self.rules(layer).0.into_iter().find(|&at| self.u32_at(at + OBJECT_TARGET) == TARGET_COLOR && self.u32_at(at + OBJECT_TYPE) == COLOR_INITIALIZER) {
-            self.put_vec3(initializer + 12, color.start);
+        } else if let Some(at) = self.constant_vector(group, target, kind) {
+            self.put_vec3(at, curve.middle);
+        }
+    }
+
+    /// The colour of the particles of a set. `None` when it follows a curve of the file.
+    pub fn color(&self, group: usize) -> Option<ColorCurve> {
+        self.vector_curve(group, TARGET_COLOR, COLOR_INITIALIZER)
+    }
+
+    /// Writes the colour of the particles of a set.
+    pub fn set_color(&mut self, group: usize, color: &ColorCurve) {
+        self.set_vector_curve(group, TARGET_COLOR, COLOR_INITIALIZER, color);
+    }
+
+    /// The colours of the material of a set that its picture is mixed with: the number of each one and its red, green and
+    /// blue.
+    pub fn material_colors(&self, group: usize) -> Vec<(usize, [f32; 3])> {
+        let (Some(material), Some(at)) = (self.group_material(group), self.material_at(group)) else { return Vec::new() };
+        let Some(mix) = rel_at(&self.data, at + MATERIAL_MIX) else { return Vec::new() };
+        let mut found: Vec<(usize, [f32; 3])> = Vec::new();
+        for (step, stage) in material.stages.iter().enumerate() {
+            // The number of values that the way of mixing takes.
+            let count = match stage.color_mode {
+                0 => 1,
+                4 | 8 | 9 => 3,
+                _ => 2,
+            };
+            let colour = self.u32_at(mix + MIX_STEPS + 28 * step) as usize;
+            // A value that takes the colour itself, not its opacity alone.
+            let reads = (0..count).any(|k| stage.color_source[k] == 14 && !matches!(stage.color_operand[k], 2 | 3));
+            if reads && colour < 6 && !found.iter().any(|&(c, _)| c == colour) {
+                found.push((colour, [0, 1, 2].map(|k| f32::from(stage.constant[k]) / 255.0)));
+            }
+        }
+        found
+    }
+
+    /// Writes one colour of the material of a set (see `material_colors`). Its opacity stays.
+    pub fn set_material_color(&mut self, group: usize, colour: usize, value: [f32; 3]) {
+        let Some(at) = self.material_at(group).filter(|_| colour < 6) else { return };
+        for (k, part) in value.into_iter().enumerate() {
+            let part = part.clamp(0.0, 1.0);
+            // The colour is kept twice: as bytes, which the game reads, and as numbers.
+            self.data[at + MATERIAL_CONSTANTS + 4 * colour + k] = (part * 255.0).round() as u8;
+            self.put_f32(at + MATERIAL_COLOR_NUMBERS + 16 * colour + 4 * k, part);
         }
     }
 
@@ -781,15 +1012,18 @@ impl Effect {
         self.put_vec3(at + 72, out_offset);
     }
 
-    /// The transparency of the particles of a layer (0 is clear, 1 is solid).
-    pub fn alpha(&self, layer: usize) -> Option<NumberCurve> {
-        let at = self.updater(layer, TARGET_ALPHA)?;
+    /// The place of the number that gives the opacity of a set when no rule changes it.
+    fn constant_alpha(&self, group: usize) -> Option<usize> {
+        self.initializer(group, TARGET_ALPHA, OPACITY_INITIALIZER).map(|at| at + 12).or_else(|| self.parameter_at(group, TARGET_ALPHA).map(|(at, _)| at))
+    }
+
+    /// The transparency of the particles of a set (0 is clear, 1 is solid). `None` when it follows a curve of the file.
+    pub fn alpha(&self, group: usize) -> Option<NumberCurve> {
+        let constant = |value: f32| NumberCurve { fixed: true, start: value, peak: value, end: value, in_time: 0.0, out_time: 1.0 };
         let fixed = |raw: i32| raw as f32 / TIME_SCALE;
+        let Some((at, curve)) = self.updater(group, TARGET_ALPHA) else { return self.constant_alpha(group).map(|at| constant(self.f32_at(at))) };
         match self.u32_at(at + OBJECT_TYPE) {
-            FIXED_NUMBER => {
-                let value = self.f32_at(at + 16);
-                Some(NumberCurve { fixed: true, start: value, peak: value, end: value, in_time: 0.0, out_time: 1.0 })
-            }
+            FIXED_NUMBER if !curve => Some(constant(self.f32_at(at + 16))),
             KEYED_NUMBER => {
                 let raw = |k: usize| self.u32_at(at + 24 + 4 * k) as i32;
                 Some(NumberCurve { fixed: false, start: fixed(raw(0)), peak: fixed(raw(1)), end: fixed(raw(4)) + fixed(raw(3)), in_time: self.u32_at(at + 16) as f32 / TIME_SCALE, out_time: self.u32_at(at + 20) as f32 / TIME_SCALE })
@@ -798,10 +1032,15 @@ impl Effect {
         }
     }
 
-    pub fn set_alpha(&mut self, layer: usize, curve: &NumberCurve) {
-        let Some(at) = self.updater(layer, TARGET_ALPHA) else { return };
+    pub fn set_alpha(&mut self, group: usize, curve: &NumberCurve) {
+        let Some((at, animated)) = self.updater(group, TARGET_ALPHA) else {
+            if let Some(at) = self.constant_alpha(group) {
+                self.put_f32(at, curve.peak);
+            }
+            return;
+        };
         match self.u32_at(at + OBJECT_TYPE) {
-            FIXED_NUMBER => self.put_f32(at + 16, curve.peak),
+            FIXED_NUMBER if !animated => self.put_f32(at + 16, curve.peak),
             KEYED_NUMBER => {
                 let in_time = curve.in_time.clamp(0.0, 1.0);
                 let out_time = curve.out_time.clamp(in_time, 1.0);
@@ -819,58 +1058,62 @@ impl Effect {
         }
     }
 
-    /// The updater that gives the size of the particles: the extra size when the set has one, else the size.
-    fn size_updater(&self, layer: usize) -> Option<usize> {
-        self.updater(layer, TARGET_SIZE_EXTRA).or_else(|| self.updater(layer, TARGET_SIZE))
-    }
-
-    /// The size of the particles of a layer, at the start, in the middle and at the end of their life.
-    pub fn size(&self, layer: usize) -> Option<ColorCurve> {
-        let at = self.size_updater(layer)?;
-        match self.u32_at(at + OBJECT_TYPE) {
-            FIXED_VECTOR => {
-                let value = self.vec3_at(at + 16);
-                Some(ColorCurve { fixed: true, start: value, middle: value, end: value, in_time: 0.0, out_time: 1.0 })
-            }
-            KEYED_VECTOR => {
-                let (slope, offset) = (self.vec3_at(at + 60), self.vec3_at(at + 72));
-                Some(ColorCurve { fixed: false, start: self.vec3_at(at + 24), middle: self.vec3_at(at + 36), end: [offset[0] + slope[0], offset[1] + slope[1], offset[2] + slope[2]], in_time: self.u32_at(at + 16) as f32 / TIME_SCALE, out_time: self.u32_at(at + 20) as f32 / TIME_SCALE })
-            }
-            _ => None,
+    /// The stream that gives the size of the particles: the extra size when a rule of the set gives it, else the size.
+    fn size_target(&self, group: usize) -> u32 {
+        let given = |target: u32| self.updater(group, target).is_some() || self.initializer(group, target, SIZE_INITIALIZER).is_some();
+        if given(TARGET_SIZE_EXTRA) {
+            TARGET_SIZE_EXTRA
+        } else if given(TARGET_SIZE) || self.parameter_at(group, TARGET_SIZE).is_some() {
+            TARGET_SIZE
+        } else {
+            TARGET_SIZE_EXTRA
         }
     }
 
-    pub fn set_size(&mut self, layer: usize, size: &ColorCurve) {
-        let Some(at) = self.size_updater(layer) else { return };
-        match self.u32_at(at + OBJECT_TYPE) {
-            FIXED_VECTOR => self.put_vec3(at + 16, size.middle),
-            KEYED_VECTOR => self.write_vector_curve(at, size.start, size.middle, size.end, size.in_time, size.out_time),
-            _ => {}
+    /// The size of the particles of a set, at the start, in the middle and at the end of their life. `None` when it follows
+    /// a curve of the file.
+    pub fn size(&self, group: usize) -> Option<ColorCurve> {
+        self.vector_curve(group, self.size_target(group), SIZE_INITIALIZER)
+    }
+
+    pub fn set_size(&mut self, group: usize, size: &ColorCurve) {
+        self.set_vector_curve(group, self.size_target(group), SIZE_INITIALIZER, size);
+    }
+
+    /// The life of the particles of a set, in frames: the shortest and the longest. The two are one number when
+    /// `life_is_one_number` is true.
+    pub fn life(&self, group: usize) -> Option<(f32, f32)> {
+        if let Some(at) = self.initializer(group, TARGET_LIFE, LIFE_INITIALIZER) {
+            return Some((self.f32_at(at + 16), self.f32_at(at + 12)));
         }
+        let (at, _) = self.parameter_at(group, TARGET_LIFE)?;
+        let value = self.f32_at(at);
+        Some((value, value))
     }
 
-    /// The life of the particles of a layer, in frames: the shortest and the longest.
-    pub fn life(&self, layer: usize) -> Option<(f32, f32)> {
-        let at = self.rules(layer).0.into_iter().find(|&at| self.u32_at(at + OBJECT_TARGET) == TARGET_LIFE && self.u32_at(at + OBJECT_TYPE) == LIFE_INITIALIZER)?;
-        Some((self.f32_at(at + 16), self.f32_at(at + 12)))
+    /// True when all the particles of a set live the same number of frames, given by the set.
+    pub fn life_is_one_number(&self, group: usize) -> bool {
+        self.initializer(group, TARGET_LIFE, LIFE_INITIALIZER).is_none()
     }
 
-    pub fn set_life(&mut self, layer: usize, shortest: f32, longest: f32) {
-        let Some(at) = self.rules(layer).0.into_iter().find(|&at| self.u32_at(at + OBJECT_TARGET) == TARGET_LIFE && self.u32_at(at + OBJECT_TYPE) == LIFE_INITIALIZER) else { return };
+    pub fn set_life(&mut self, group: usize, shortest: f32, longest: f32) {
         let (shortest, longest) = (shortest.max(0.0), longest.max(shortest.max(0.0)));
-        self.put_f32(at + 12, longest);
-        self.put_f32(at + 16, shortest);
+        if let Some(at) = self.initializer(group, TARGET_LIFE, LIFE_INITIALIZER) {
+            self.put_f32(at + 12, longest);
+            self.put_f32(at + 16, shortest);
+        } else if let Some((at, _)) = self.parameter_at(group, TARGET_LIFE) {
+            self.put_f32(at, longest);
+        }
     }
 
-    /// The most particles that the set of a layer can have alive at once.
-    pub fn capacity(&self, layer: usize) -> Option<i32> {
-        let set = self.set_of(layer)?;
-        let collection = rel_at(&self.data, set + COLLECTION)?;
+    /// The most particles that a set can have alive at once.
+    pub fn capacity(&self, group: usize) -> Option<i32> {
+        let collection = rel_at(&self.data, self.sets[group] + COLLECTION)?;
         Some(self.u32_at(collection) as i32)
     }
 
-    pub fn set_capacity(&mut self, layer: usize, capacity: i32) {
-        if let Some(collection) = self.set_of(layer).and_then(|set| rel_at(&self.data, set + COLLECTION)) {
+    pub fn set_capacity(&mut self, group: usize, capacity: i32) {
+        if let Some(collection) = rel_at(&self.data, self.sets[group] + COLLECTION) {
             self.put_u32(collection, capacity.max(1) as u32);
         }
     }
@@ -960,17 +1203,68 @@ mod test {
         value[0] = 0.5;
         effect.set_form_value(0, &field, value);
         assert_eq!(effect.form_values(0)[0].1[0], 0.5);
-        if let Some(mut color) = effect.color(0) {
+        let group = effect.group_of(0).unwrap();
+        if let Some(mut color) = effect.color(group) {
             color.start = [1.0, 0.0, 0.0];
             color.middle = [0.0, 1.0, 0.0];
             color.end = [0.0, 0.0, 1.0];
-            effect.set_color(0, &color);
-            let again = effect.color(0).unwrap();
+            effect.set_color(group, &color);
+            let again = effect.color(group).unwrap();
             if !color.fixed {
                 assert!((again.start[0] - 1.0).abs() < 1e-4 && (again.end[2] - 1.0).abs() < 1e-3, "{again:?}");
             }
         }
         assert_eq!(effect.bytes().len(), bytes.len(), "the size of the file does not change");
         assert_eq!(Effect::parse(effect.bytes()).unwrap().emission(0), emission);
+    }
+
+    /// With the dump of the game: every set of particles gives its colour, opacity, size and life, unless a curve of the
+    /// file gives them, and a new value is read back.
+    #[test]
+    fn the_values_of_every_set_are_changed_and_read_again() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = sango_core::Dump::open(&root).unwrap();
+        let garc = sango_core::Garc::open(&dump.archive(31)).unwrap();
+        // The sets, then how many give each value.
+        let (mut sets, mut found) = (0usize, [0usize; 4]);
+        let mut colours = 0usize;
+        for id in 0..garc.file_count() {
+            let Some(Ok(mut effect)) = garc.first_file_decompressed(id).map(|bytes| Effect::parse(&bytes)) else { continue };
+            for group in 0..effect.group_count() {
+                sets += 1;
+                if let Some(mut curve) = effect.color(group) {
+                    found[0] += 1;
+                    (curve.start, curve.middle, curve.end) = ([0.25, 0.5, 0.75], [0.25, 0.5, 0.75], [0.25, 0.5, 0.75]);
+                    effect.set_color(group, &curve);
+                    let again = effect.color(group).unwrap();
+                    assert!((0..3).all(|k| (again.middle[k] - curve.middle[k]).abs() < 1e-3), "colour of the set {group} of {id}: {again:?}");
+                }
+                if let Some(mut curve) = effect.alpha(group) {
+                    found[1] += 1;
+                    (curve.start, curve.peak, curve.end) = (0.5, 0.5, 0.5);
+                    effect.set_alpha(group, &curve);
+                    assert!((effect.alpha(group).unwrap().peak - 0.5).abs() < 1e-3, "opacity of the set {group} of {id}");
+                }
+                if let Some(mut curve) = effect.size(group) {
+                    found[2] += 1;
+                    (curve.start, curve.middle, curve.end) = ([3.0; 3], [3.0; 3], [3.0; 3]);
+                    effect.set_size(group, &curve);
+                    assert!((effect.size(group).unwrap().middle[0] - 3.0).abs() < 1e-3, "size of the set {group} of {id}");
+                }
+                if effect.life(group).is_some() {
+                    found[3] += 1;
+                    effect.set_life(group, 12.0, 12.0);
+                    assert_eq!(effect.life(group), Some((12.0, 12.0)), "life of the set {group} of {id}");
+                }
+                for (colour, _) in effect.material_colors(group) {
+                    colours += 1;
+                    effect.set_material_color(group, colour, [1.0, 0.0, 0.2]);
+                    let again = effect.material_colors(group).into_iter().find(|c| c.0 == colour).unwrap().1;
+                    assert_eq!(again.map(|v| (v * 255.0).round() as u8), [255, 0, 51]);
+                }
+            }
+        }
+        assert!(found[3] == sets && found.iter().all(|&n| n * 10 > sets * 9), "{sets} sets, {found:?}");
+        assert!(colours > sets / 3);
     }
 }

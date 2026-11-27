@@ -516,7 +516,7 @@ fn depth_passes(function: u8, new: f32, old: f32) -> bool {
 
 /// The colour and the opacity of a pixel when a new colour is drawn over the old one, with the factors of the material.
 /// The opacity of a pixel tells how much of it is covered. The colour that is given and returned is not multiplied by it.
-fn blend(state: &crate::model::RenderState, source: [f32; 3], source_alpha: f32, behind: [f32; 3], behind_alpha: f32) -> ([f32; 3], f32) {
+pub fn blend(state: &crate::model::RenderState, source: [f32; 3], source_alpha: f32, behind: [f32; 3], behind_alpha: f32) -> ([f32; 3], f32) {
     let factor = |code: u8, channel: usize| -> f32 {
         match code {
             0 => 0.0,
@@ -554,7 +554,6 @@ fn blend(state: &crate::model::RenderState, source: [f32; 3], source_alpha: f32,
 /// The colour and the opacity of a pixel (from 0 to 1) that a material gives at a texture position, with the steps of
 /// the mix that the file gives. `light` is the light of the surface, from 0 to 1.
 pub fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 3], uv: [f32; 2], light: f32, primary: [f32; 4]) -> [f32; 4] {
-    use crate::model::Stage;
     // The three pictures, at this place. A unit with no picture gives white.
     let mut pictures = [[1.0f32; 4]; 3];
     for ((unit, picture), texture) in material.units.iter().zip(pictures.iter_mut()).zip(textures) {
@@ -563,10 +562,19 @@ pub fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 
             *picture = sample_wrapped(texture, u, v, unit.wrap).map(|c| c as f32 / 255.0);
         }
     }
+    // The materials that the light does not touch keep an opacity that a step would set to one (see `combine_values`).
+    combine_values(&material.stages, material.buffer_color, &pictures, light, primary, material.unlit)
+}
+
+/// The steps of a mix on the values of a pixel: the colours of the three pictures at that place, the light of the surface
+/// and the colour of the vertex. With `keep_opacity`, a step that only sets the opacity from its own colour keeps the
+/// opacity of the steps before.
+pub fn combine_values(stages: &[crate::model::Stage], buffer_color: [u8; 4], pictures: &[[f32; 4]; 3], light: f32, primary: [f32; 4], keep_opacity: bool) -> [f32; 4] {
+    use crate::model::Stage;
     let to_float = |bytes: [u8; 4]| bytes.map(|c| c as f32 / 255.0);
     let mut previous = [1.0f32; 4];
-    let mut buffer = to_float(material.buffer_color);
-    for stage in material.stages.iter() {
+    let mut buffer = to_float(buffer_color);
+    for stage in stages.iter() {
         let constant = to_float(stage.constant);
         let source = |code: u8, previous: [f32; 4], buffer: [f32; 4]| -> [f32; 4] {
             match code {
@@ -631,7 +639,7 @@ pub fn combine(material: &crate::model::Material, textures: &[Option<&Texture>; 
         };
         // A step that sets the opacity from its own colour only (mode 0, source 14) gives full opacity: for the materials that
         // the light does not touch (flames, gas) the opacity that the steps before computed is kept.
-        if material.unlit && stage.alpha_mode == 0 && stage.alpha_source[0] == 14 && stage.alpha_operand[0] == 0 {
+        if keep_opacity && stage.alpha_mode == 0 && stage.alpha_source[0] == 14 && stage.alpha_operand[0] == 0 {
             alpha = previous[3];
         }
         let (rgb_scale, alpha_scale) = ((1 << stage.color_scale) as f32, (1 << stage.alpha_scale) as f32);

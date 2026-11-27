@@ -404,8 +404,16 @@ impl EffectPage {
         emission_card(ui, effect, layer);
         ui.add_space(8.0);
         shape_card(ui, effect, layer);
-        ui.add_space(8.0);
-        particles_card(ui, effect, layer);
+        if let Some(group) = effect.group_of(layer) {
+            ui.add_space(8.0);
+            particles_card(ui, effect, group, "Particles", "What the particles of the layer look like during their life.");
+            // The particles that these ones make have their own look.
+            for child in effect.child_groups(group) {
+                ui.add_space(8.0);
+                let title = format!("Child particles: {}", effect.group_name(child));
+                particles_card(ui, effect, child, &title, "The particles of this layer make these ones.");
+            }
+        }
     }
 }
 
@@ -596,21 +604,24 @@ fn color_row(ui: &mut egui::Ui, label: &str, value: &mut [f32; 3]) {
     });
 }
 
-fn particles_card(ui: &mut egui::Ui, effect: &mut Effect, layer: usize) {
-    let mut color_curve = effect.color(layer);
-    let mut alpha_curve = effect.alpha(layer);
-    let mut size = effect.size(layer);
-    let mut life = effect.life(layer);
-    let mut capacity = effect.capacity(layer);
+fn particles_card(ui: &mut egui::Ui, effect: &mut Effect, group: usize, title: &str, hint: &str) {
+    let mut color_curve = effect.color(group);
+    let mut alpha_curve = effect.alpha(group);
+    let mut size = effect.size(group);
+    let mut life = effect.life(group);
+    let mut capacity = effect.capacity(group);
+    let one_life = effect.life_is_one_number(group);
+    let mut mixed = effect.material_colors(group);
+    let m0 = mixed.clone();
     let (c0, a0, s0, l0, k0) = (color_curve.clone(), alpha_curve.clone(), size.clone(), life, capacity);
     widget::card(ui, |ui| {
-        ui.label(widget::title("Particles"));
-        ui.label(widget::hint("What the particles of the layer look like during their life."));
+        ui.label(widget::title(title));
+        ui.label(widget::hint(hint));
         ui.add_space(4.0);
         life_strip(ui, color_curve.as_ref(), alpha_curve.as_ref());
         ui.label(widget::hint("Colour and transparency from the birth (left) to the end (right) of a particle."));
         ui.add_space(6.0);
-        egui::Grid::new(("effect_particles", layer)).num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
+        egui::Grid::new(("effect_particles", group)).num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
             if let Some(curve) = color_curve.as_mut() {
                 if curve.fixed {
                     color_row(ui, "Colour", &mut curve.middle);
@@ -635,7 +646,17 @@ fn particles_card(ui: &mut egui::Ui, effect: &mut Effect, layer: usize) {
                 }
             } else {
                 ui.label("Colour");
-                ui.label(widget::hint("The colour of this layer comes from its picture: no number to change."));
+                ui.label(widget::hint("The colour follows a curve of the file: no number to change."));
+                ui.end_row();
+            }
+            for (place, (_, value)) in mixed.iter_mut().enumerate() {
+                let label = if place == 0 { "Picture colour".to_string() } else { format!("Picture colour {}", place + 1) };
+                color_row(ui, &label, value);
+                ui.end_row();
+            }
+            if !m0.is_empty() {
+                ui.label("");
+                ui.label(widget::hint("The picture mixes this colour with the colour of the particles."));
                 ui.end_row();
             }
             if let Some(curve) = alpha_curve.as_mut() {
@@ -690,9 +711,14 @@ fn particles_card(ui: &mut egui::Ui, effect: &mut Effect, layer: usize) {
             if let Some((shortest, longest)) = life.as_mut() {
                 ui.label("Life of a particle");
                 ui.horizontal(|ui| {
-                    number(ui, shortest, 0.5, 0.0, 100_000.0);
-                    ui.label(widget::hint("to"));
-                    number(ui, longest, 0.5, 0.0, 100_000.0);
+                    if one_life {
+                        number(ui, longest, 0.5, 0.0, 100_000.0);
+                        *shortest = *longest;
+                    } else {
+                        number(ui, shortest, 0.5, 0.0, 100_000.0);
+                        ui.label(widget::hint("to"));
+                        number(ui, longest, 0.5, 0.0, 100_000.0);
+                    }
                     ui.label(widget::hint("frames"));
                 });
                 ui.end_row();
@@ -706,27 +732,32 @@ fn particles_card(ui: &mut egui::Ui, effect: &mut Effect, layer: usize) {
     });
     if color_curve != c0 {
         if let Some(curve) = &color_curve {
-            effect.set_color(layer, curve);
+            effect.set_color(group, curve);
         }
     }
     if alpha_curve != a0 {
         if let Some(curve) = &alpha_curve {
-            effect.set_alpha(layer, curve);
+            effect.set_alpha(group, curve);
         }
     }
     if size != s0 {
         if let Some(curve) = &size {
-            effect.set_size(layer, curve);
+            effect.set_size(group, curve);
         }
     }
     if life != l0 {
         if let Some((shortest, longest)) = life {
-            effect.set_life(layer, shortest, longest);
+            effect.set_life(group, shortest, longest);
         }
     }
     if capacity != k0 {
         if let Some(count) = capacity {
-            effect.set_capacity(layer, count);
+            effect.set_capacity(group, count);
+        }
+    }
+    for (&(colour, value), &(_, old)) in mixed.iter().zip(&m0) {
+        if value != old {
+            effect.set_material_color(group, colour, value);
         }
     }
 }
@@ -832,6 +863,42 @@ mod test {
         assert!(!page.dirty());
         assert_ne!(page.effect.as_ref().unwrap().emission(0), emission);
         let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    /// With the dump of the game: the page shows an effect with child particles and material colours, and does not change
+    /// the file by itself. Only the keyboard is used to reach a number of the cards.
+    #[test]
+    fn the_cards_of_the_child_particles_do_not_change_the_file() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let mut session = Session { dump: Some(Dump::open(&root).unwrap()), focus_page: true, ..Session::default() };
+        let mut page = EffectPage::default();
+        let ctx = egui::Context::default();
+        let mut frame = |page: &mut EffectPage, input: egui::RawInput| {
+            let _ = ctx.run(input, |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| page.ui(ui, &mut session));
+                });
+            });
+        };
+        frame(&mut page, Default::default());
+        // The thunder 337 makes child particles, and its materials have colours.
+        page.file = 337;
+        page.effect = None;
+        page.load(None);
+        let effect = page.effect.as_ref().expect("the effect is open");
+        assert!((0..effect.layer_count()).any(|layer| !effect.child_groups(effect.group_of(layer).unwrap()).is_empty()));
+        for layer in 0..effect.layer_count() {
+            page.layer = layer;
+            for _ in 0..3 {
+                frame(&mut page, Default::default());
+            }
+            // The Tab key goes through the controls of the page.
+            for _ in 0..60 {
+                let tab = egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers: Default::default() };
+                frame(&mut page, egui::RawInput { events: vec![tab], ..Default::default() });
+            }
+            assert!(!page.dirty(), "the page changed the file by itself (layer {layer})");
+        }
     }
 }
 
