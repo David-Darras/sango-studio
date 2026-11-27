@@ -193,9 +193,10 @@ pub fn prepare_with(source: &Source, model_name: &str, scale_factor: f64, flip_p
     let mut infos = Vec::new();
     for material in &source.materials {
         let mut blend = material.blend;
-        // Flames and glows are colour on black: they add themselves to the scene.
+        // Flames and glows are colour on black: they add themselves to the scene. The files of Studio say how their materials
+        // blend, so their names are not read.
         let lower = material.name.to_lowercase();
-        let additive = ["fire", "flame", "glow", "aura"].iter().any(|w| lower.contains(w));
+        let additive = !source.game_units && ["fire", "flame", "glow", "aura"].iter().any(|w| lower.contains(w));
         blend = blend || additive;
         let image = match material.image.and_then(|i| source.images.get(i)) {
             Some(image) => {

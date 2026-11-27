@@ -8,6 +8,7 @@ use image::ImageEncoder;
 use sango_core::model::{Material, Model, Texture};
 use sango_core::motion::{Motion, MotionPack};
 use sango_core::posing::{bone_values, rest_worlds, Affine, BoneValues};
+use sango_core::render::{is_cut, is_mixed, Surface};
 use sango_modelport::gltf::{GAME_UNITS_NODE, GENERATOR, SCALE_NODE_SUFFIX};
 use std::collections::HashMap;
 
@@ -188,6 +189,181 @@ fn animations(model: &Model, clips: &[Clip], above: &[Option<usize>], buffer: &m
     out
 }
 
+/// How some meshes look in the file: one material of glTF.
+struct Look {
+    name: String,
+    /// The picture, with the key that tells two pictures apart.
+    picture: Option<(String, Texture)>,
+    /// The place in the picture of a texture position of a mesh: `scale * (position - translation)`.
+    scale: [f32; 2],
+    translation: [f32; 2],
+    wrap: [u8; 2],
+    /// The way glTF treats the opacity: "OPAQUE", "MASK" (a pixel is drawn or not) or "BLEND".
+    mode: &'static str,
+    unlit: bool,
+}
+
+impl Look {
+    /// True when the file says that the light does not touch the material. This is only said of a material that lets what is
+    /// behind it show: Blender does not draw an opaque material of this kind well behind a transparent one.
+    fn shows_as_it_is(&self) -> bool {
+        self.unlit && self.mode != "OPAQUE"
+    }
+}
+
+/// The largest side of a picture that the export makes.
+const LARGEST_SIDE: f32 = 512.0;
+
+/// The looks of the meshes at the places `drawn`, and the look of each of these meshes.
+///
+/// A material that shows one picture keeps it, with the opacity that the viewer gives it. A material that mixes several
+/// pictures (or an iris, that the eye under it cuts) gets a new picture that holds the result, over the texture positions that
+/// its meshes use.
+fn looks(model: &Model, textures: &HashMap<String, Texture>, drawn: &[usize]) -> Result<(Vec<Look>, Vec<usize>), String> {
+    // The meshes that share a look: the same material, over the same eye.
+    let mut groups: Vec<((usize, Option<String>), Vec<usize>)> = Vec::new();
+    let mut group_of = Vec::with_capacity(drawn.len());
+    for &place in drawn {
+        let mesh = &model.meshes[place];
+        let surface = Surface::new(model, textures, mesh).ok_or("A mesh has no material.")?;
+        let key = (mesh.material, surface.eye_picture().map(str::to_string));
+        let group = groups.iter().position(|(k, _)| *k == key).unwrap_or_else(|| {
+            groups.push((key, Vec::new()));
+            groups.len() - 1
+        });
+        groups[group].1.push(place);
+        group_of.push(group);
+    }
+    let mut out: Vec<Look> = Vec::with_capacity(groups.len());
+    for ((material, eye), places) in &groups {
+        let material = &model.materials[*material];
+        let surface = Surface::new(model, textures, &model.meshes[places[0]]).ok_or("A mesh has no material.")?;
+        let combined = surface.is_combined();
+        // A name that no other look has.
+        let mut name = material.name.clone();
+        let mut number = 1;
+        while out.iter().any(|look| look.name == name) {
+            number += 1;
+            name = format!("{} {number}", material.name);
+        }
+        let mut look = Look { name, picture: None, scale: material.texture_scale, translation: material.texture_translation, wrap: material.texture_wrap, mode: "OPAQUE", unlit: material.unlit };
+        if !combined && eye.is_none() {
+            if let Some(texture) = textures.get(&material.texture) {
+                let mut picture = texture.clone();
+                for pixel in picture.rgba.chunks_exact_mut(4) {
+                    let cut = is_cut(Some(material), [pixel[0], pixel[1], pixel[2], pixel[3]]);
+                    pixel[3] = if cut { 0 } else { 255 };
+                    if cut {
+                        look.mode = "MASK";
+                    }
+                }
+                look.picture = Some((format!("{} {}", texture.name, material.transparent), picture));
+            }
+        } else {
+            bake(model, textures, material, &surface, places, &mut look);
+        }
+        out.push(look);
+    }
+    Ok((out, group_of))
+}
+
+/// Makes the picture of a look: what the surface shows over the texture positions that the meshes use.
+fn bake(model: &Model, textures: &HashMap<String, Texture>, material: &Material, surface: &Surface, places: &[usize], look: &mut Look) {
+    let vertices = || places.iter().flat_map(|&place| &model.meshes[place].vertices);
+    let low: [f32; 2] = std::array::from_fn(|k| vertices().map(|v| v.uv[k]).fold(f32::MAX, f32::min));
+    let high: [f32; 2] = std::array::from_fn(|k| vertices().map(|v| v.uv[k]).fold(f32::MIN, f32::max));
+    let extent: [f32; 2] = std::array::from_fn(|k| (high[k] - low[k]).max(1.0 / 256.0));
+    // As many pixels as the finest of the pictures has over the same positions, in a side that is a power of two.
+    let used = || std::iter::once((&material.texture, material.texture_scale)).chain(material.units.iter().map(|u| (&u.texture, u.scale)));
+    let sides: [usize; 2] = std::array::from_fn(|k| {
+        let finest = used().filter_map(|(name, scale)| textures.get(name).map(|t| [t.width, t.height][k] as f32 * scale[k].abs() * extent[k])).fold(8.0f32, f32::max);
+        (finest.min(LARGEST_SIDE).round() as usize).next_power_of_two()
+    });
+    // The way the colour goes over what is behind, when glTF has no such way: the colour adds itself, or it multiplies.
+    let state = &material.state;
+    let factors = (state.color_source, state.color_destination);
+    let blends = surface.is_combined() && state.blend;
+    let additive = blends && factors.1 == 1;
+    let multiply = blends && (factors == (4, 0) || factors == (0, 2));
+    let shown = |uv: [f32; 2], primary: [f32; 4]| -> [u8; 4] {
+        let mut color = surface.at(uv, primary);
+        if additive {
+            // Black adds nothing, so the light of a colour is its opacity.
+            let light = color[0].max(color[1]).max(color[2]);
+            color = if light > 0.0 { [color[0] / light, color[1] / light, color[2] / light, color[3] * light] } else { [0.0; 4] };
+        } else if multiply {
+            // White changes nothing, so the darkness of a colour is the opacity of a black over what is behind.
+            let light = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+            color = [0.0, 0.0, 0.0, if color[3] > 0.0 { 1.0 - light } else { 0.0 }];
+        }
+        let mut color = color.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        // A place that is not drawn keeps the colour of the picture: a program that does not read the opacity then shows the
+        // skin around an eye, not the colour that the mix gives there.
+        if color[3] == 0 && !additive && !multiply {
+            if let Some(plain) = surface.picture_color(uv) {
+                color[..3].copy_from_slice(&plain[..3]);
+            }
+        }
+        color
+    };
+    // The colour of the vertices, that the steps of the mix may use: the mean one everywhere, then the colour of each place
+    // inside the triangles when the vertices do not all have the same one.
+    let count = vertices().count().max(1) as f32;
+    let mean: [f32; 4] = std::array::from_fn(|k| vertices().map(|v| f32::from(v.color[k])).sum::<f32>() / count / 255.0);
+    let first = vertices().next().map_or([255; 4], |v| v.color);
+    let uses_vertices = surface.is_combined() && material.stages.iter().any(|s| s.color_source.contains(&0) || s.alpha_source.contains(&0));
+    let [width, height] = sides;
+    let place = |x: usize, y: usize| [low[0] + (x as f32 + 0.5) / width as f32 * extent[0], low[1] + (y as f32 + 0.5) / height as f32 * extent[1]];
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for y in 0..height {
+        for x in 0..width {
+            rgba.extend(shown(place(x, y), mean));
+        }
+    }
+    if uses_vertices && vertices().any(|v| v.color != first) {
+        for mesh in places.iter().map(|&at| &model.meshes[at]) {
+            for triangle in &mesh.triangles {
+                let Some(corners) = triangle.iter().map(|&k| mesh.vertices.get(k as usize)).collect::<Option<Vec<_>>>() else { continue };
+                // The corners in the pixels of the picture.
+                let at: [[f32; 2]; 3] = std::array::from_fn(|c| [(corners[c].uv[0] - low[0]) / extent[0] * width as f32, (corners[c].uv[1] - low[1]) / extent[1] * height as f32]);
+                let area = (at[1][0] - at[0][0]) * (at[2][1] - at[0][1]) - (at[2][0] - at[0][0]) * (at[1][1] - at[0][1]);
+                if area.abs() < 1e-6 {
+                    continue;
+                }
+                let range = |axis: usize, limit: usize| {
+                    let from = at.iter().map(|p| p[axis]).fold(f32::MAX, f32::min).floor().max(0.0) as usize;
+                    let to = at.iter().map(|p| p[axis]).fold(f32::MIN, f32::max).ceil().max(0.0) as usize;
+                    from..to.min(limit)
+                };
+                for y in range(1, height) {
+                    for x in range(0, width) {
+                        let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+                        let first = ((at[1][0] - px) * (at[2][1] - py) - (at[2][0] - px) * (at[1][1] - py)) / area;
+                        let second = ((at[2][0] - px) * (at[0][1] - py) - (at[0][0] - px) * (at[2][1] - py)) / area;
+                        let weights = [first, second, 1.0 - first - second];
+                        if weights.iter().any(|&w| w < -0.01) {
+                            continue;
+                        }
+                        let primary = std::array::from_fn(|k| (0..3).map(|c| weights[c] * f32::from(corners[c].color[k])).sum::<f32>() / 255.0);
+                        rgba[(y * width + x) * 4..][..4].copy_from_slice(&shown(place(x, y), primary));
+                    }
+                }
+            }
+        }
+    }
+    let see_through = rgba.chunks_exact(4).any(|p| p[3] < 255);
+    look.mode = match (see_through, additive || multiply || is_mixed(material)) {
+        (false, _) => "OPAQUE",
+        (true, true) => "BLEND",
+        (true, false) => "MASK",
+    };
+    // The new picture covers the texture positions from `low` to `low + extent`.
+    look.scale = [1.0 / extent[0], 1.0 / extent[1]];
+    look.translation = low;
+    look.wrap = [0, 0];
+    look.picture = Some((format!("baked {}", look.name), Texture { name: look.name.clone(), width, height, rgba }));
+}
+
 /// A model as a .glb file: `textures` are the pictures that the materials use (by name), `clips` the motions.
 pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -> Result<Vec<u8>, String> {
     let mut buffer = Buffer::default();
@@ -240,21 +416,21 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
     let inverse_view = buffer.view(&bytes_of_f32(inverse.into_iter()), None);
     let inverse_accessor = buffer.accessor(inverse_view, 5126, model.bones.len(), "MAT4", "");
 
-    // The pictures that the materials use, in the order of the materials.
+    // The materials: what the viewer shows on each mesh.
+    let drawn: Vec<usize> = (0..model.meshes.len()).filter(|&i| !model.meshes[i].triangles.is_empty() && !model.meshes[i].vertices.is_empty()).collect();
+    let (looks, look_of) = looks(model, textures, &drawn)?;
     let mut image_of: HashMap<String, usize> = HashMap::new();
     let (mut images, mut gltf_textures, mut samplers) = (Vec::new(), Vec::new(), Vec::new());
     let mut materials = Vec::new();
-    for material in &model.materials {
-        let unit = &material.units[0];
-        let name = if textures.contains_key(&material.texture) { material.texture.clone() } else { unit.texture.clone() };
+    for look in &looks {
         let mut pbr = String::from("\"pbrMetallicRoughness\":{\"metallicFactor\":0,\"roughnessFactor\":1");
-        if let Some(texture) = textures.get(&name) {
-            let image = match image_of.get(&name) {
+        if let Some((key, picture)) = &look.picture {
+            let image = match image_of.get(key) {
                 Some(&i) => i,
                 None => {
-                    let view = buffer.view(&png(texture)?, None);
-                    images.push(format!("{{\"name\":{},\"bufferView\":{view},\"mimeType\":\"image/png\"}}", json_text(&name)));
-                    image_of.insert(name.clone(), images.len() - 1);
+                    let view = buffer.view(&png(picture)?, None);
+                    images.push(format!("{{\"name\":{},\"bufferView\":{view},\"mimeType\":\"image/png\"}}", json_text(&picture.name)));
+                    image_of.insert(key.clone(), images.len() - 1);
                     images.len() - 1
                 }
             };
@@ -263,27 +439,24 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
                 3 => 33648,
                 _ => 10497,
             };
-            samplers.push(format!("{{\"wrapS\":{},\"wrapT\":{},\"magFilter\":9729,\"minFilter\":9729}}", wrap(unit.wrap[0]), wrap(unit.wrap[1])));
+            samplers.push(format!("{{\"wrapS\":{},\"wrapT\":{},\"magFilter\":9729,\"minFilter\":9729}}", wrap(look.wrap[0]), wrap(look.wrap[1])));
             gltf_textures.push(format!("{{\"source\":{image},\"sampler\":{}}}", samplers.len() - 1));
             pbr.push_str(&format!(",\"baseColorTexture\":{{\"index\":{}}}", gltf_textures.len() - 1));
         }
         pbr.push('}');
-        let blend = material.state.known && material.state.blend && (material.state.color_source, material.state.color_destination) != (1, 0);
-        let mode = if blend { "BLEND" } else { "OPAQUE" };
-        materials.push(format!("{{\"name\":{},{pbr},\"alphaMode\":\"{mode}\",\"doubleSided\":true}}", json_text(&material.name)));
+        let cutoff = if look.mode == "MASK" { ",\"alphaCutoff\":0.5" } else { "" };
+        // A material that the light of the game does not touch shows its colours as they are.
+        let unlit = if look.shows_as_it_is() { ",\"extensions\":{\"KHR_materials_unlit\":{}}" } else { "" };
+        materials.push(format!("{{\"name\":{},{pbr},\"alphaMode\":\"{}\"{cutoff},\"doubleSided\":true{unlit}}}", json_text(&look.name), look.mode));
     }
 
     // The meshes.
     let mut primitives = Vec::new();
-    for mesh in &model.meshes {
-        if mesh.triangles.is_empty() || mesh.vertices.is_empty() {
-            continue;
-        }
-        let material: &Material = model.materials.get(mesh.material).ok_or("A mesh has no material.")?;
-        let unit = &material.units[0];
+    for (&place, &material) in drawn.iter().zip(&look_of) {
+        let (mesh, look) = (&model.meshes[place], &looks[material]);
         let positions = bytes_of_f32(mesh.vertices.iter().flat_map(|v| v.position));
         let normals = bytes_of_f32(mesh.vertices.iter().flat_map(|v| v.normal));
-        let uvs = bytes_of_f32(mesh.vertices.iter().flat_map(|v| [unit.scale[0] * (v.uv[0] - unit.translation[0]), unit.scale[1] * (v.uv[1] - unit.translation[1])]));
+        let uvs = bytes_of_f32(mesh.vertices.iter().flat_map(|v| [look.scale[0] * (v.uv[0] - look.translation[0]), look.scale[1] * (v.uv[1] - look.translation[1])]));
         let mut joints = Vec::new();
         let mut weights = Vec::new();
         for v in &mesh.vertices {
@@ -312,8 +485,7 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
         let view = buffer.view(&indices, Some(34963));
         let index = buffer.accessor(view, 5125, mesh.triangles.len() * 3, "SCALAR", "");
         primitives.push(format!(
-            "{{\"attributes\":{{\"POSITION\":{position},\"NORMAL\":{normal},\"TEXCOORD_0\":{uv},\"JOINTS_0\":{joint},\"WEIGHTS_0\":{weight}}},\"indices\":{index},\"material\":{}}}",
-            mesh.material
+            "{{\"attributes\":{{\"POSITION\":{position},\"NORMAL\":{normal},\"TEXCOORD_0\":{uv},\"JOINTS_0\":{joint},\"WEIGHTS_0\":{weight}}},\"indices\":{index},\"material\":{material}}}"
         ));
     }
     if primitives.is_empty() {
@@ -334,6 +506,9 @@ pub fn glb(model: &Model, textures: &HashMap<String, Texture>, clips: &[Clip]) -
         join(&buffer.views),
         buffer.bytes.len()
     );
+    if looks.iter().any(Look::shows_as_it_is) {
+        json.push_str(",\"extensionsUsed\":[\"KHR_materials_unlit\"]");
+    }
     if !animation_list.is_empty() {
         json.push_str(&format!(",\"animations\":[{}]", join(&animation_list)));
     }
@@ -368,7 +543,7 @@ mod test {
         let vertex = |x: f32, y: f32| Vertex { position: [x, y, 0.0], normal: [0.0, 0.0, 1.0], uv: [x, y], weights: [1.0, 0.0, 0.0, 0.0], ..Vertex::default() };
         let mesh = Mesh { material: 0, vertices: vec![vertex(0.0, 0.0), vertex(1.0, 0.0), vertex(0.0, 1.0)], triangles: vec![[0, 1, 2]] };
         let bone = sango_core::model::Bone { name: "root".into(), parent: None, scale: [1.0; 3], rotation: [0.0; 3], translation: [0.0; 3] };
-        let material = Material { name: "m".into(), texture: "t".into(), units: [Unit { texture: "t".into(), scale: [1.0, 1.0], translation: [0.0, 0.0], wrap: [2, 2] }, Unit::default(), Unit::default()], ..Material::default() };
+        let material = Material { name: "m".into(), texture: "t".into(), texture_scale: [1.0, 1.0], texture_wrap: [2, 2], units: [Unit { texture: "t".into(), scale: [1.0, 1.0], translation: [0.0, 0.0], wrap: [2, 2] }, Unit::default(), Unit::default()], ..Material::default() };
         let texture = Texture { name: "t".into(), width: 2, height: 2, rgba: vec![255; 16] };
         (Model { bones: vec![bone], materials: vec![material], meshes: vec![mesh] }, HashMap::from([("t".to_string(), texture)]))
     }
@@ -556,6 +731,68 @@ mod test {
                 })
                 .collect()
         }
+    }
+
+    #[test]
+    fn a_plain_picture_keeps_its_name_and_shows_what_the_viewer_cuts() {
+        let (model, mut textures) = small_model();
+        // Black with no opacity is cut by the viewer. A colour with no opacity is drawn.
+        textures.get_mut("t").unwrap().rgba = vec![0, 0, 0, 0, 200, 10, 10, 0, 9, 9, 9, 255, 255, 255, 255, 255];
+        let source = sango_modelport::gltf::read_bytes(&glb(&model, &textures, &[]).unwrap(), None).unwrap();
+        assert_eq!(source.images[0].name, "t");
+        let opacity: Vec<u8> = source.images[0].rgba.chunks(4).map(|p| p[3]).collect();
+        assert_eq!(opacity, [0, 255, 255, 255]);
+        assert!(source.materials[0].blend, "the material cuts pixels");
+        // Without a pixel to cut, the material is opaque.
+        textures.get_mut("t").unwrap().rgba[..4].copy_from_slice(&[50, 0, 0, 0]);
+        let source = sango_modelport::gltf::read_bytes(&glb(&model, &textures, &[]).unwrap(), None).unwrap();
+        assert!(!source.materials[0].blend && source.images[0].rgba.chunks(4).all(|p| p[3] == 255));
+    }
+
+    #[test]
+    fn a_material_that_mixes_gets_the_picture_of_the_result() {
+        use sango_core::model::{RenderState, Stage};
+        let (mut model, textures) = small_model();
+        // The white picture times a red of the step, blended, on a material that the light does not touch.
+        let step = Stage { color_source: [3, 14, 15], color_mode: 1, alpha_source: [3, 14, 15], alpha_mode: 1, constant: [200, 0, 0, 128], ..Stage::default() };
+        let material = &mut model.materials[0];
+        material.stages = vec![step];
+        material.unlit = true;
+        material.state = RenderState { known: true, blend: true, color_source: 6, color_destination: 7, ..RenderState::default() };
+        // The texture positions go from 1 to 3: the new picture covers them, and the export gives positions from 0 to 1.
+        for vertex in &mut model.meshes[0].vertices {
+            vertex.uv = [1.0 + 2.0 * vertex.uv[0], 1.0 + 2.0 * vertex.uv[1]];
+        }
+        let file = glb(&model, &textures, &[]).unwrap();
+        let source = sango_modelport::gltf::read_bytes(&file, None).unwrap();
+        let picture = &source.images[0];
+        assert_eq!((picture.name.as_str(), &picture.rgba[..4]), ("m", [200, 0, 0, 128].as_slice()));
+        assert!(picture.width.is_power_of_two() && picture.width >= 4);
+        assert_eq!(source.primitives[0].uvs, vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]]);
+        let length = u32::from_le_bytes(file[12..16].try_into().unwrap()) as usize;
+        let json = std::str::from_utf8(&file[20..20 + length]).unwrap();
+        assert!(json.contains("\"alphaMode\":\"BLEND\"") && json.contains("\"extensionsUsed\":[\"KHR_materials_unlit\"]"), "{json}");
+    }
+
+    #[test]
+    fn a_material_that_multiplies_darkens_with_a_black_picture() {
+        use sango_core::model::{RenderState, Stage};
+        let (mut model, textures) = small_model();
+        // A grey of a quarter, multiplied with what is behind.
+        let step = Stage { color_source: [14, 15, 15], alpha_source: [3, 15, 15], constant: [64, 64, 64, 255], ..Stage::default() };
+        let material = &mut model.materials[0];
+        material.stages = vec![step];
+        material.state = RenderState { known: true, blend: true, color_source: 4, color_destination: 0, ..RenderState::default() };
+        let source = sango_modelport::gltf::read_bytes(&glb(&model, &textures, &[]).unwrap(), None).unwrap();
+        assert_eq!(&source.images[0].rgba[..4], [0, 0, 0, 191].as_slice());
+        // The new colour takes the place of the old one: every drawn pixel is opaque.
+        model.materials[0].state.color_source = 1;
+        model.materials[0].unlit = true;
+        model.materials[0].stages[0].alpha_source = [14, 15, 15];
+        model.materials[0].stages[0].constant = [64, 64, 64, 40];
+        let source = sango_modelport::gltf::read_bytes(&glb(&model, &textures, &[]).unwrap(), None).unwrap();
+        assert_eq!(&source.images[0].rgba[..4], [64, 64, 64, 255].as_slice());
+        assert!(!source.materials[0].blend);
     }
 
     #[test]

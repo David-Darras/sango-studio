@@ -257,15 +257,8 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                         let Some(material) = material else { continue };
                         let primary: [f32; 4] = std::array::from_fn(|k| (w0 * mesh.vertices[corners[0]].color[k] as f32 + w1 * mesh.vertices[corners[1]].color[k] as f32 + w2 * mesh.vertices[corners[2]].color[k] as f32) / 255.0);
                         let mut color = combine(material, &pictures, [uv(0), uv(1)], light, primary);
-                        if let Some((eye_material, eye_texture, opening)) = &eye_under {
-                            // The mesh of an iris is bigger than the opening of the eye: the picture of the iris is
-                            // kept only where the picture of the eye is not the colour of the skin.
-                            let (eye_u, eye_v) = texture_place(eye_material, [uv(0), uv(1)]);
-                            let column = (wrap(eye_u, eye_material.texture_wrap[0]) * eye_texture.width as f32).min(eye_texture.width as f32 - 1.0) as usize;
-                            let row = (wrap(eye_v, eye_material.texture_wrap[1]) * eye_texture.height as f32).min(eye_texture.height as f32 - 1.0) as usize;
-                            if !opening[row * eye_texture.width + column] {
-                                color[3] = 0.0;
-                            }
+                        if eye_under.as_ref().is_some_and(|eye| outside_eye(eye, [uv(0), uv(1)])) {
+                            color[3] = 0.0;
                         }
                         // The test of the opacity of the material, else a pixel that is nearly clear is not drawn.
                         match state.alpha_test {
@@ -295,31 +288,15 @@ fn draw(model: &Model, textures: &HashMap<String, Texture>, camera: &Camera, fra
                         (Some(texture), Some(material)) => {
                             let (u, v) = texture_place(material, [uv(0), uv(1)]);
                             let mut color = sample_wrapped(texture, u, v, material.texture_wrap);
-                            if let Some((eye_material, eye_texture, opening)) = &eye_under {
-                                // The mesh of an iris is bigger than the opening of the eye: the picture of the iris is
-                                // kept only where the picture of the eye is not the colour of the skin.
-                                let (eye_u, eye_v) = texture_place(eye_material, [uv(0), uv(1)]);
-                                let column = (wrap(eye_u, eye_material.texture_wrap[0]) * eye_texture.width as f32).min(eye_texture.width as f32 - 1.0) as usize;
-                                let row = (wrap(eye_v, eye_material.texture_wrap[1]) * eye_texture.height as f32).min(eye_texture.height as f32 - 1.0) as usize;
-                                if !opening[row * eye_texture.width + column] {
-                                    color[3] = 0;
-                                }
+                            if eye_under.as_ref().is_some_and(|eye| outside_eye(eye, [uv(0), uv(1)])) {
+                                color[3] = 0;
                             }
                             color
                         }
                         (Some(texture), None) => sample_wrapped(texture, uv(0), uv(1), [2, 2]),
                         (None, _) => [170, 170, 170, 255],
                     };
-                    // A transparent material (the iris of the eyes) is cut where its picture has no
-                    // opacity: the mesh behind it (the white of the eye) shows there. For the other
-                    // materials the fourth channel is not always an opacity: the pictures mark the
-                    // places that the model does not fill (the shape of a tail, of an ear, of a wing)
-                    // with black and no opacity, and only that mark cuts.
-                    let cut = match material {
-                        Some(material) if material.transparent => color[3] < 128,
-                        _ => color[3] < 128 && color[0] < 12 && color[1] < 12 && color[2] < 12,
-                    };
-                    if cut {
+                    if is_cut(material, color) {
                         continue;
                     }
                     if state.depth_write {
@@ -423,13 +400,103 @@ fn outline(pixels: &mut [u8], depth: &[f32], width: usize, height: usize, radius
 /// True for a material that the game draws with several steps and the opacity of its pictures: the iris of the eyes,
 /// the flames, the gas. The ones that the light does not touch (the file gives them no reflection) and the ones that
 /// the file marks as transparent.
-fn is_mixed(material: &crate::model::Material) -> bool {
+pub fn is_mixed(material: &crate::model::Material) -> bool {
     let state = &material.state;
     if state.known {
         // The game gives the way to draw the material: it is mixed when the new colour is blended with the old one.
         return state.blend && (state.color_source, state.color_destination) != (1, 0);
     }
     material.transparent || (material.unlit && !material.stages.is_empty())
+}
+
+/// The eye that an iris lies on: its material, its picture and the places of the picture where the eye is open.
+type Eye<'a> = (&'a crate::model::Material, &'a Texture, std::rc::Rc<Vec<bool>>);
+
+/// True where the iris is not seen: the mesh of an iris is bigger than the opening of the eye, and the picture of the iris is
+/// kept only where the picture of the eye is not the colour of the skin.
+fn outside_eye((material, texture, opening): &Eye, uv: [f32; 2]) -> bool {
+    let (u, v) = texture_place(material, uv);
+    let column = (wrap(u, material.texture_wrap[0]) * texture.width as f32).min(texture.width as f32 - 1.0) as usize;
+    let row = (wrap(v, material.texture_wrap[1]) * texture.height as f32).min(texture.height as f32 - 1.0) as usize;
+    !opening[row * texture.width + column]
+}
+
+/// True for a pixel of a plain picture that is not drawn. A transparent material (the iris of the eyes) is cut where its
+/// picture has no opacity: the mesh behind it (the white of the eye) shows there. For the other materials the fourth channel
+/// is not always an opacity: the pictures mark the places that the model does not fill (the shape of a tail, of an ear, of a
+/// wing) with black and no opacity, and only that mark cuts.
+pub fn is_cut(material: Option<&crate::model::Material>, color: [u8; 4]) -> bool {
+    match material {
+        Some(material) if material.transparent => color[3] < 128,
+        _ => color[3] < 128 && color[0] < 12 && color[1] < 12 && color[2] < 12,
+    }
+}
+
+/// What the viewer shows on a mesh at a texture position when the light does not dim it. The export of a model makes the
+/// pictures of its materials from it.
+pub struct Surface<'a> {
+    material: &'a crate::model::Material,
+    texture: Option<&'a Texture>,
+    pictures: [Option<&'a Texture>; 3],
+    eye: Option<Eye<'a>>,
+}
+
+impl<'a> Surface<'a> {
+    /// The surface of a mesh of a model. `None` when the mesh has no material.
+    pub fn new(model: &'a Model, textures: &'a HashMap<String, Texture>, mesh: &crate::model::Mesh) -> Option<Surface<'a>> {
+        let material = model.materials.get(mesh.material)?;
+        let eye = if material.transparent { eye_under(model, textures, mesh) } else { None };
+        Some(Surface { material, texture: textures.get(&material.texture), pictures: std::array::from_fn(|k| textures.get(&material.units[k].texture)), eye })
+    }
+
+    /// True when the colour comes from the steps that mix the pictures of the material, and not from one picture.
+    pub fn is_combined(&self) -> bool {
+        is_mixed(self.material) || (self.material.unlit && !self.material.stages.is_empty())
+    }
+
+    /// The name of the picture of the eye that cuts this mesh (an iris), when it has one.
+    pub fn eye_picture(&self) -> Option<&'a str> {
+        self.eye.as_ref().map(|(_, texture, _)| texture.name.as_str())
+    }
+
+    /// The colour of the picture of the material alone at a texture position of the mesh, when the material has one.
+    pub fn picture_color(&self, uv: [f32; 2]) -> Option<[u8; 4]> {
+        let (u, v) = texture_place(self.material, uv);
+        self.texture.map(|texture| sample_wrapped(texture, u, v, self.material.texture_wrap))
+    }
+
+    /// The colour and the opacity (0 to 1) at a texture position of the mesh, for a vertex of the colour `primary`. An
+    /// opacity of 0 means that nothing is drawn.
+    pub fn at(&self, uv: [f32; 2], primary: [f32; 4]) -> [f32; 4] {
+        let hidden = self.eye.as_ref().is_some_and(|eye| outside_eye(eye, uv));
+        if !self.is_combined() {
+            let mut color = self.texture.map_or([170, 170, 170, 255], |texture| {
+                let (u, v) = texture_place(self.material, uv);
+                sample_wrapped(texture, u, v, self.material.texture_wrap)
+            });
+            if hidden {
+                color[3] = 0;
+            }
+            let opacity = if hidden || is_cut(Some(self.material), color) { 0.0 } else { 1.0 };
+            return [f32::from(color[0]) / 255.0, f32::from(color[1]) / 255.0, f32::from(color[2]) / 255.0, opacity];
+        }
+        let mut color = combine(self.material, &self.pictures, uv, 1.0, primary);
+        if hidden {
+            color[3] = 0.0;
+        }
+        let state = &self.material.state;
+        let drawn = match state.alpha_test {
+            Some((function, reference)) => depth_passes(function, (color[3] * 255.0).round(), f32::from(reference)),
+            None => color[3] >= 0.02,
+        };
+        if !drawn {
+            color[3] = 0.0;
+        } else if state.known && !is_mixed(self.material) {
+            // The new colour takes the place of the old one: the pixel is opaque whatever the opacity.
+            color[3] = 1.0;
+        }
+        color
+    }
 }
 
 /// The result of a comparison of the graphics chip (0 never, 1 always, 2 equal, 3 not equal, 4 less, 5 less or equal,

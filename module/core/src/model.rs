@@ -276,7 +276,7 @@ impl<'a> File<'a> {
     }
 }
 
-use crate::pica::registers;
+use crate::pica::{fixed_attributes, registers};
 
 /// What an attribute of a vertex is, from its place among the attributes and its format.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -779,6 +779,12 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
         let permutation = vertex_registers.get(&0x2bb).map_or(0, |(v, _)| *v as u64) | (vertex_registers.get(&0x2bc).map_or(0, |(v, _)| *v as u64) << 32);
         let names: Vec<u32> = (0..slots.len()).map(|k| ((permutation >> (4 * ((order >> (4 * k)) & 0xf))) & 0xf) as u32).collect();
         let kinds = fields(&names);
+        // The fixed attributes (the bits 16 to 27 of the formats): one value for all the vertices of the mesh.
+        let values = fixed_attributes(&file.words(file.u32(at + 8)? as usize, file.u32(at + 12)? as usize)?);
+        let fixed: Vec<(Field, [f32; 4])> = (0..12)
+            .filter(|&attribute| high >> (16 + attribute) & 1 != 0)
+            .filter_map(|attribute| Some((fields(&[((permutation >> (4 * attribute)) & 0xf) as u32])[0], values[attribute]?)))
+            .collect();
         for part in 0..parts.clamp(1, 16) {
             let header = content + file.u32(at + 16)? as usize + 0x34 * part;
             let bone_slots = (file.u16(header + 2)? as usize).min(20);
@@ -806,7 +812,7 @@ pub fn parse_model(data: &[u8]) -> Result<Model, String> {
                 if let Some(&found) = place.get(&vertex) {
                     return Ok(found);
                 }
-                let read = read_vertex(&file, buffer + vertex as usize * stride, &slots, &kinds, &palette)?;
+                let read = read_vertex(&file, buffer + vertex as usize * stride, &slots, &kinds, &fixed, &palette)?;
                 mesh.vertices.push(read);
                 place.insert(vertex, mesh.vertices.len() as u32 - 1);
                 Ok(mesh.vertices.len() as u32 - 1)
@@ -910,11 +916,24 @@ fn read_stages(registers: &HashMap<u16, (u32, usize)>) -> (Vec<Stage>, [u8; 4]) 
     (stages, rgba(value(0xfd).unwrap_or(0xffff_ffff)))
 }
 
-/// Reads one vertex. `palette` gives the skeleton place of each bone number of the part.
-fn read_vertex(file: &File, start: usize, slots: &[Format], kinds: &[Field], palette: &[u16]) -> Result<Vertex, String> {
+/// Reads one vertex: the attributes of the buffer, then the values of the fixed attributes. `palette` gives the skeleton place
+/// of each bone number of the part.
+fn read_vertex(file: &File, start: usize, slots: &[Format], kinds: &[Field], fixed: &[(Field, [f32; 4])], palette: &[u16]) -> Result<Vertex, String> {
     let mut vertex = Vertex { color: [255; 4], weights: [0.0; 4], ..Vertex::default() };
     let mut at = file.raw + start;
     let mut raw_bones = [0u16; 4];
+    for &(kind, values) in fixed {
+        match kind {
+            Field::Normal => vertex.normal = [values[0], values[1], values[2]],
+            Field::Uv => vertex.uv = [values[0], values[1]],
+            // A fixed colour is a fraction (0 to 1).
+            Field::Color => vertex.color = values.map(|v| (v * 255.0).round().clamp(0.0, 255.0) as u8),
+            Field::BoneIndex => raw_bones = values.map(|v| v as u16),
+            // The weights are fractions, and there are three of them: the fourth number only fills the place.
+            Field::BoneWeight => vertex.weights = [values[0], values[1], values[2], 0.0],
+            Field::Position | Field::Tangent | Field::Other => {}
+        }
+    }
     for (format, kind) in slots.iter().zip(kinds) {
         let mut values = [0f32; 4];
         for (component, value) in values.iter_mut().enumerate().take(format.count.min(4)) {
@@ -937,8 +956,8 @@ fn read_vertex(file: &File, start: usize, slots: &[Format], kinds: &[Field], pal
             Field::BoneWeight => vertex.weights = [values[0] / 100.0, values[1] / 100.0, values[2] / 100.0, values[3] / 100.0],
         }
     }
-    let has_index = kinds.contains(&Field::BoneIndex);
-    let has_weight = kinds.contains(&Field::BoneWeight);
+    let has = |field: Field| kinds.contains(&field) || fixed.iter().any(|&(kind, _)| kind == field);
+    let (has_index, has_weight) = (has(Field::BoneIndex), has(Field::BoneWeight));
     match (has_index, has_weight) {
         // The bones are the bones of the part, in order, and the vertex gives their weights.
         (false, true) => raw_bones = [0, 1, 2, 3],
@@ -1502,6 +1521,35 @@ mod test {
         let flame = textures.iter().find(|t| t.name.ends_with("FireCoreA1")).expect("the flame of Charizard");
         let mean = flame.rgba.chunks(4).map(|p| u64::from(p[0])).sum::<u64>() / (flame.width * flame.height) as u64;
         assert!((60..200).contains(&mean), "the mean light of the flame is {mean}");
+    }
+
+    /// With the dump of the game: every vertex has a normal and weights that make 1, also with fixed attributes (Mega Pinsir has
+    /// fixed normals).
+    #[test]
+    fn the_fixed_attributes_of_the_dump_are_read() {
+        let Ok(root) = std::env::var("SANGO_DUMP") else { return };
+        let dump = crate::Dump::open(&root).unwrap();
+        let garc = crate::Garc::open(&dump.archive(8)).unwrap();
+        let list = garc.first_file(0).unwrap();
+        let (mut vertices, mut see_through) = (0, 0);
+        for species in 1..=721usize {
+            let entry = &list[(species - 1) * 4..species * 4];
+            let first = u16::from_le_bytes([entry[0], entry[1]]) as usize;
+            for slot in 0..entry[2] as usize {
+                let bytes = crate::lz::decompress(garc.first_file((first + slot) * 8 + 3).unwrap()).unwrap();
+                let part = crate::Bundle::parse(bytes).unwrap().resource(0).unwrap().to_vec();
+                let Ok(model) = parse_model(&part) else { continue };
+                for v in model.meshes.iter().flat_map(|m| &m.vertices) {
+                    let length = v.normal.iter().map(|n| n * n).sum::<f32>().sqrt();
+                    assert!((length - 1.0).abs() < 0.05, "species {species} slot {slot}: a normal of length {length}");
+                    let total: f32 = v.weights.iter().sum();
+                    assert!((total - 1.0).abs() < 0.03, "species {species} slot {slot}: weights {:?}", v.weights);
+                    see_through += usize::from(v.color[3] < 250);
+                    vertices += 1;
+                }
+            }
+        }
+        assert!(vertices > 1_000_000 && see_through > 0, "{vertices} vertices");
     }
 
     #[test]
